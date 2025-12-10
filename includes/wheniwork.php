@@ -113,4 +113,40 @@ class Wheniwork
 
         return $response;
     }
+
+    // Inside the Wheniwork class...
+
+    /**
+     * Executes an authenticated request to the When I Work API using the stored session token.
+     * * @param string $endpoint The API method (e.g., '/times')
+     * @param array $params Query parameters or POST body data.
+     * @param string $method HTTP method (GET, POST, etc.)
+     * @return object|WP_Error
+     */
+    public static function request($endpoint, $params = [], $method = self::METHOD_GET)
+    {
+        // 1. Retrieve the stored Session Token (W-Token)
+        $token = get_option('wiw_session_token');
+
+        if (empty($token)) {
+            return new WP_Error('wiw_token_missing', 'The When I Work session token is missing. Please log in on the settings page.');
+        }
+
+        // 2. Set the W-Token header for the authenticated request
+        $headers = [
+            'W-Token' => $token
+        ];
+
+        // 3. Create a temporary instance and make the request
+        $api_instance = new static();
+        
+        // Note: For Timesheet data, we usually use GET.
+        $response = $api_instance->makeRequest($endpoint, $method, $params, $headers);
+
+        return $response;
+    }
+
+    // You will need to add the `use` statement below 
+    // to include the get_option function inside this file.
+    // ...
 }
