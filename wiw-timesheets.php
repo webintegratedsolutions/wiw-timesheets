@@ -26,20 +26,20 @@ require_once WIW_PLUGIN_PATH . 'includes/wheniwork.php';
 class WIW_Timesheet_Manager {
 
     public function __construct() {
-        // 1. Add Admin Menus and Settings
-        add_action( 'admin_menu', array( $this, 'add_admin_menus' ) );
-        add_action( 'admin_init', array( $this, 'register_settings' ) );
+    // 1. Add Admin Menus and Settings
+    add_action( 'admin_menu', array( $this, 'add_admin_menus' ) );
+    add_action( 'admin_init', array( $this, 'register_settings' ) );
 
-        // 2. Add Front-end UI (Client Area) via Shortcode
-        add_shortcode( 'wiw_timesheets_client', array( $this, 'render_client_ui' ) );
+    // 2. Add Front-end UI (Client Area) via Shortcode (Still registered, but logic is deferred)
+    add_shortcode( 'wiw_timesheets_client', array( $this, 'render_client_ui' ) );
 
-        // 3. Handle AJAX requests for viewing/adjusting/approving (Crucial for interaction)
-        add_action( 'wp_ajax_wiw_fetch_timesheets', array( $this, 'handle_fetch_timesheets' ) );
-        add_action( 'wp_ajax_wiw_approve_timesheet', array( $this, 'handle_approve_timesheet' ) );
-        // NOTE: The 'nopriv' hook is generally NOT used for secure client areas.
+    // 3. Handle AJAX requests for viewing/adjusting/approving (Crucial for interaction)
+    // REMOVED: add_action( 'wp_ajax_wiw_fetch_timesheets', array( $this, 'handle_fetch_timesheets' ) );
+    add_action( 'wp_ajax_wiw_approve_timesheet', array( $this, 'handle_approve_timesheet' ) );
+    // NOTE: The 'nopriv' hook is generally NOT used for secure client areas.
 
-        // 4. Handle Login Request via POST (when admin clicks "Log In" button)
-        add_action( 'admin_post_wiw_login_handler', array( $this, 'handle_wiw_login' ) );
+    // 4. Handle Login Request via POST (when admin clicks "Log In" button)
+    add_action( 'admin_post_wiw_login_handler', array( $this, 'handle_wiw_login' ) );
     }
 
     /**
@@ -91,8 +91,11 @@ public function admin_timesheets_page() {
             $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
             $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
             $included_positions = isset($timesheets_data->positions) ? $timesheets_data->positions : [];
+            $included_sites = isset($timesheets_data->sites) ? $timesheets_data->sites : []; // <-- NEW: Get Sites
+            
             $user_map = array_column($included_users, null, 'id');
             $position_map = array_column($included_positions, null, 'id');
+            $site_map = array_column($included_sites, null, 'id'); // <-- NEW: Create Site Map
             
             // 1. Sort the records
             $times = $this->sort_timesheet_data( $times, $user_map );
@@ -123,7 +126,7 @@ public function admin_timesheets_page() {
                         <th width="10%">Date</th>
                         <th width="10%">Employee Name</th>
                         <th width="10%">Position</th>
-                        <th width="10%">Clock In</th>
+                        <th width="10%">Location</th> <th width="10%">Clock In</th>
                         <th width="10%">Clock Out</th>
                         <th width="8%">Hrs</th>
                         <th width="8%">Status</th>
@@ -138,7 +141,7 @@ public function admin_timesheets_page() {
                         // --- EMPLOYEE HEADER ROW ---
                         ?>
                         <tr class="wiw-employee-header">
-                            <td colspan="9" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                            <td colspan="10" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
                                 👤 Employee: <?php echo esc_html($employee_name); ?>
                             </td>
                         </tr>
@@ -150,7 +153,7 @@ public function admin_timesheets_page() {
                             // --- PAY PERIOD TOTAL ROW ---
                             ?>
                             <tr class="wiw-period-total">
-                                <td colspan="6" style="background-color: #f0f0ff; font-weight: bold;">
+                                <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
                                     📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                 </td>
                                 <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo number_format($period_data['total_hours'], 2); ?></td>
@@ -164,14 +167,18 @@ public function admin_timesheets_page() {
                                 $time_id = $time_entry->id ?? 'N/A';
                                 $user_id = $time_entry->user_id ?? 0;
                                 $position_id = $time_entry->position_id ?? 0;
-                                $position_obj = $position_map[$position_id] ?? null;
+                                $location_id = $time_entry->location_id ?? 0; // <-- Get Location ID
 
+                                $position_obj = $position_map[$position_id] ?? null;
+                                $site_obj = $site_map[$location_id] ?? null; // <-- Get Site Object
+                                
                                 $position_name = ($position_obj && isset($position_obj->name)) ? esc_html($position_obj->name) : 'N/A';
+                                $location_name = ($site_obj && isset($site_obj->name)) ? esc_html($site_obj->name) : 'N/A'; // <-- Get Site Name
                                 
                                 $start_time_utc = $time_entry->start_time ?? ''; 
                                 $end_time_utc = $time_entry->end_time ?? '';
 
-                                // --- Date and Time Processing ---
+                                // --- Date and Time Processing (Unchanged) ---
                                 $display_date = 'N/A';
                                 $display_start_time = 'N/A';
                                 $display_end_time = 'Active (N/A)';
@@ -221,7 +228,7 @@ public function admin_timesheets_page() {
                                     <td <?php echo $date_cell_style; ?>><?php echo esc_html($display_date); ?></td>
                                     <td><?php echo $employee_name; ?></td>
                                     <td><?php echo $position_name; ?></td>
-                                    <td><?php echo esc_html($display_start_time); ?></td>
+                                    <td><?php echo $location_name; ?></td> <td><?php echo esc_html($display_start_time); ?></td>
                                     <td><?php echo esc_html($display_end_time); ?></td>
                                     <td><?php echo esc_html($duration); ?></td>
                                     <td><?php echo esc_html($status); ?></td>
@@ -233,7 +240,7 @@ public function admin_timesheets_page() {
                                 </tr>
                                 
                                 <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
-                                    <td colspan="9">
+                                    <td colspan="10">
                                         <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
                                             <strong>Raw API Data:</strong>
                                             <pre style="font-size: 11px;"><?php print_r($time_entry); ?></pre>
@@ -283,6 +290,10 @@ public function admin_timesheets_page() {
                                 <td>Job role/title retrieved from **`positions`** data.</td>
                             </tr>
                             <tr>
+                                <th scope="row">Location</th>
+                                <td>Site name retrieved from **`sites`** data using `location_id`.</td>
+                            </tr>
+                            <tr>
                                 <th scope="row">Clock In / Out</th>
                                 <td>Start/End **Time** only, converted to 12-hour format in **local timezone**. Clock Out shows **"Active (N/A)"** if the shift is open.</td>
                             </tr>
@@ -309,40 +320,35 @@ public function admin_timesheets_page() {
     <?php
 }
 
+// Add this function to the WIW_Timesheet_Manager class in wiw-timesheets.php
+
 /**
- * Sorts timesheet data first by Employee Name (A-Z) and then by Clock In Time (Oldest to Newest).
- *
- * @param array $times The raw times array.
- * @param array $user_map Map of user IDs to user objects.
- * @return array The sorted times array.
+ * Sorts timesheet data first by employee name, then by start time.
+ * @param array $times The array of raw time entries.
+ * @param array $user_map A map of user IDs to user objects for name lookup.
+ * @return array The sorted array of time entries.
  */
 private function sort_timesheet_data( $times, $user_map ) {
-    usort( $times, function( $a, $b ) use ( $user_map ) {
-        $a_user_id = $a->user_id ?? 0;
-        $b_user_id = $b->user_id ?? 0;
-
-        $a_user = $user_map[$a_user_id] ?? (object)['first_name' => 'ZZZ', 'last_name' => 'Unknown'];
-        $b_user = $user_map[$b_user_id] ?? (object)['first_name' => 'ZZZ', 'last_name' => 'Unknown'];
-
-        $a_name = ($a_user->first_name ?? '') . ($a_user->last_name ?? '');
-        $b_name = ($b_user->first_name ?? '') . ($b_user->last_name ?? '');
-
-        // 1. Sort by Employee Name (A-Z)
-        $name_comparison = strcasecmp( $a_name, $b_name );
+    usort($times, function($a, $b) use ($user_map) {
+        $user_a_id = $a->user_id ?? 0;
+        $user_b_id = $b->user_id ?? 0;
         
-        if ( $name_comparison !== 0 ) {
-            return $name_comparison;
+        // Safety check: Get full name or a fallback string
+        $name_a = ($user_map[$user_a_id]->first_name ?? '') . ' ' . ($user_map[$user_a_id]->last_name ?? 'Unknown');
+        $name_b = ($user_map[$user_b_id]->first_name ?? '') . ' ' . ($user_map[$user_b_id]->last_name ?? 'Unknown');
+        
+        // 1. Primary Sort: Employee Name (case-insensitive)
+        $name_compare = strcasecmp($name_a, $name_b);
+
+        if ($name_compare !== 0) {
+            return $name_compare;
         }
 
-        // 2. If names are the same, sort by Clock In Time (Oldest to Newest)
-        $a_time = strtotime( $a->start_time ?? '' );
-        $b_time = strtotime( $b->start_time ?? '' );
-
-        if ( $a_time === $b_time ) {
-            return 0;
-        }
-
-        return ($a_time < $b_time) ? -1 : 1;
+        // 2. Secondary Sort: Start Time (chronological)
+        $time_a = $a->start_time ?? '';
+        $time_b = $b->start_time ?? '';
+        
+        return strtotime($time_a) - strtotime($time_b);
     });
 
     return $times;
@@ -539,13 +545,13 @@ private function fetch_timesheets_data($filters = []) {
     $endpoint = 'times'; 
     
     $default_filters = [
-        // UPDATE: Add 'positions' to the include list
-        'include' => 'users,shifts,positions', 
+        // MUST INCLUDE 'sites' HERE
+        'include' => 'users,shifts,positions,sites', 
         
         // This keeps the start date for the last 30 days
         'start' => date('Y-m-d', strtotime('-30 days')),
         
-        // **UPDATE:** Set end date to TOMORROW to ensure today's records are included.
+        // Set end date to TOMORROW to ensure today's records are included.
         'end'   => date('Y-m-d', strtotime('+1 day')),
     ];
 
