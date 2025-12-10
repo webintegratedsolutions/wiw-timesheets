@@ -66,6 +66,89 @@ class WIW_Timesheet_Manager {
     }
 
 /**
+ * Renders the main Timesheets management page (Admin Area).
+ */
+public function admin_timesheets_page() {
+    ?>
+    <div class="wrap">
+        <h1>🗓️ When I Work Timesheet Dashboard</h1>
+        
+        <?php 
+        $timesheets_data = $this->fetch_timesheets_data();
+        
+        if ( is_wp_error( $timesheets_data ) ) {
+            // Display Token Missing or API Error
+            $error_message = $timesheets_data->get_error_message();
+            ?>
+            <div class="notice notice-error">
+                <p><strong>❌ Timesheet Fetch Error:</strong> <?php echo esc_html($error_message); ?></p>
+                <?php if ($timesheets_data->get_error_code() === 'wiw_token_missing') : ?>
+                    <p>Please go to the <a href="<?php echo esc_url(admin_url('admin.php?page=wiw-timesheets-settings')); ?>">Settings Page</a> to log in and save your session token.</p>
+                <?php endif; ?>
+            </div>
+            <?php
+        } else {
+            // Success! Display a table structure for the timesheets.
+            ?>
+            <div class="notice notice-success"><p>✅ Timesheet data fetched successfully!</p></div>
+            
+            <h2>Latest Timesheets</h2>
+            <table class="wp-list-table widefat fixed striped">
+                <thead>
+                    <tr>
+                        <th width="15%">User ID</th>
+                        <th width="25%">Clock In</th>
+                        <th width="25%">Clock Out</th>
+                        <th width="15%">Duration</th>
+                        <th width="20%">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php 
+                    // When I Work returns times in the 'times' property of the response object
+                    $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
+
+                    if (empty($times)) : ?>
+                        <tr><td colspan="5">No timesheet records found in the API response.</td></tr>
+                    <?php else : 
+                        // Display the first 10 records as a sample
+                        foreach (array_slice($times, 0, 10) as $time_entry) : 
+                            // Example of accessing data (structure must match WIW API response)
+                            $user_id = $time_entry->user_id ?? 'N/A';
+                            $start_time = $time_entry->start_time ?? 'N/A';
+                            $end_time = $time_entry->end_time ?? 'N/A';
+                            $duration = $time_entry->duration ?? 'N/A';
+                            
+                            // Placeholder for status logic
+                            $status = 'Pending';
+                            if (isset($time_entry->approved) && $time_entry->approved) {
+                                $status = 'Approved';
+                            }
+
+                            // Simple date formatting for display
+                            $display_start = ($start_time !== 'N/A') ? date('Y-m-d H:i', strtotime($start_time)) : 'N/A';
+                            $display_end   = ($end_time !== 'N/A') ? date('Y-m-d H:i', strtotime($end_time)) : 'N/A';
+                        ?>
+                            <tr>
+                                <td><?php echo esc_html($user_id); ?></td>
+                                <td><?php echo esc_html($display_start); ?></td>
+                                <td><?php echo esc_html($display_end); ?></td>
+                                <td><?php echo esc_html($duration); ?></td>
+                                <td><?php echo esc_html($status); ?></td>
+                            </tr>
+                        <?php endforeach;
+                    endif;
+                    ?>
+                </tbody>
+            </table>
+            <?php
+        }
+        ?>
+    </div>
+    <?php
+}
+
+/**
  * Register the settings fields and sections.
  */
 public function register_settings() {
@@ -249,21 +332,32 @@ public function admin_settings_page() {
     <?php
 }
 
+// Inside WIW_Timesheet_Manager class...
+
 /**
- * Renders the main Timesheets management page (Admin Area).
+ * Fetches timesheet data from the When I Work API.
+ * * @param array $filters Optional filters (e.g., date ranges).
+ * @return object|WP_Error The API response object or a WP_Error object.
  */
-public function admin_timesheets_page() {
-    // This is where the main timesheet viewing/approving UI will eventually go.
-    ?>
-    <div class="wrap">
-        <h1>🗓️ When I Work Timesheet Dashboard</h1>
+private function fetch_timesheets_data($filters = []) {
+    // The endpoint for timesheet data is typically '/times' or similar in v2 of the API.
+    $endpoint = 'times'; 
+    
+    // We can add default filters here (e.g., date range for the last week)
+    $default_filters = [
+        // Example: Filter for times that haven't been approved yet
+        // 'approved' => 0, 
         
-        <div id="wiw-admin-timesheet-area">
-            <p>Welcome to the Timesheet Dashboard. This is where you will be able to fetch, view, and manage employee timesheets.</p>
-            <p>We will build out the data fetching and display in a later step.</p>
-        </div>
-    </div>
-    <?php
+        // Example: Timesheet period (You'll need to confirm the exact date format for WIW)
+        // 'start' => date('Y-m-d', strtotime('-7 days')),
+        // 'end'   => date('Y-m-d'),
+    ];
+
+    $params = array_merge($default_filters, $filters);
+
+    $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
+
+    return $result;
 }
 
 }
