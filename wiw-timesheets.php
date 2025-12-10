@@ -78,7 +78,6 @@ public function admin_timesheets_page() {
         
         if ( is_wp_error( $timesheets_data ) ) {
             $error_message = $timesheets_data->get_error_message();
-            // ... (Error handling remains the same)
             ?>
             <div class="notice notice-error">
                 <p><strong>❌ Timesheet Fetch Error:</strong> <?php echo esc_html($error_message); ?></p>
@@ -88,32 +87,35 @@ public function admin_timesheets_page() {
             </div>
             <?php
         } else {
-            // Extract data arrays
+            // Extract and map data
             $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
             $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
             $included_positions = isset($timesheets_data->positions) ? $timesheets_data->positions : [];
-            
-            // Create Maps for easy lookup: ID => Object
             $user_map = array_column($included_users, null, 'id');
             $position_map = array_column($included_positions, null, 'id');
             
-            // --- NEW: Apply Sorting ---
+            // 1. Sort the records
             $times = $this->sort_timesheet_data( $times, $user_map );
-            // --- END NEW: Apply Sorting ---
+
+            // 2. Group the records by employee and week (pay period)
+            $grouped_timesheets = $this->group_timesheet_by_pay_period( $times, $user_map );
             
             // --- Timezone Setup ---
             $wp_timezone_string = get_option('timezone_string');
-            if (empty($wp_timezone_string)) {
-                $wp_timezone_string = 'UTC';
-            }
+            if (empty($wp_timezone_string)) { $wp_timezone_string = 'UTC'; }
             $wp_timezone = new DateTimeZone($wp_timezone_string); 
             $time_format = get_option('time_format') ?: 'g:i A'; 
             // --- End Timezone Setup ---
             
             ?>
-            <div class="notice notice-success"><p>✅ Timesheet data fetched successfully! (Includes <?php echo count($included_positions); ?> Positions)</p></div>
+            <div class="notice notice-success"><p>✅ Timesheet data fetched successfully!</p></div>
             
-            <h2>Latest Timesheets (Last 30 Days)</h2>
+            <h2>Latest Timesheets (Grouped by Employee and Pay Period)</h2>
+
+            <?php if (empty($grouped_timesheets)) : ?>
+                <p>No timesheet records found within the filtered period.</p>
+            <?php else : ?>
+
             <table class="wp-list-table widefat fixed striped">
                 <thead>
                     <tr>
@@ -130,96 +132,122 @@ public function admin_timesheets_page() {
                 </thead>
                 <tbody>
                     <?php 
-                    if (empty($times)) : ?>
-                        <tr><td colspan="9">No timesheet records found.</td></tr>
-                    <?php else : 
-                        foreach (array_slice($times, 0, 20) as $index => $time_entry) : 
-                            
-                            $time_id = $time_entry->id ?? 'N/A';
-                            $user_id = $time_entry->user_id ?? 0;
-                            $position_id = $time_entry->position_id ?? 0;
-                            
-                            $user = $user_map[$user_id] ?? null;
-                            $position_obj = $position_map[$position_id] ?? null;
-
-                            $employee_name = ($user && isset($user->first_name)) ? esc_html($user->first_name . ' ' . $user->last_name) : 'Unknown User';
-                            $position_name = ($position_obj && isset($position_obj->name)) ? esc_html($position_obj->name) : 'N/A';
-                            
-                            $start_time_utc = $time_entry->start_time ?? ''; 
-                            $end_time_utc = $time_entry->end_time ?? '';
-
-                            // --- Date and Time Processing ---
-                            $display_date = 'N/A';
-                            $display_start_time = 'N/A';
-                            $display_end_time = 'Active (N/A)';
-                            $date_match = true;
-
-                            try {
-                                if (!empty($start_time_utc)) {
-                                    $dt_start_utc = new DateTime($start_time_utc, new DateTimeZone('UTC'));
-                                    $dt_start_utc->setTimezone($wp_timezone);
-                                    
-                                    $display_date = $dt_start_utc->format('Y-m-d');
-                                    $display_start_time = $dt_start_utc->format($time_format);
-                                }
-
-                                if (!empty($end_time_utc)) {
-                                    $dt_end_utc = new DateTime($end_time_utc, new DateTimeZone('UTC'));
-                                    $dt_end_utc->setTimezone($wp_timezone);
-                                    
-                                    $display_end_time = $dt_end_utc->format($time_format);
-                                    
-                                    if ($display_date !== $dt_end_utc->format('Y-m-d')) {
-                                        $date_match = false;
-                                    }
-                                }
-                            } catch (Exception $e) {
-                                $display_start_time = 'Error';
-                                $display_end_time = 'Error';
-                                $display_date = 'Error';
-                            }
-                            // --- End Date and Time Processing ---
-                            
-                            $duration = round(($time_entry->length ?? 0), 2);
-                            if ($duration == 0 && isset($time_entry->duration)) {
-                                 $duration = round(($time_entry->duration / 3600), 2);
-                            }
-                            
-                            $status = (isset($time_entry->approved) && $time_entry->approved) ? 'Approved' : 'Pending';
-
-                            $row_id = 'wiw-raw-' . $index;
-                            
-                            $date_cell_style = ($date_match || $display_end_time === 'Active (N/A)') ? '' : 'style="background-color: #ffe0e0;" title="Clock out date does not match clock in date."';
+                    $global_row_index = 0;
+                    foreach ($grouped_timesheets as $employee_name => $periods) : 
+                        
+                        // --- EMPLOYEE HEADER ROW ---
                         ?>
-                            <tr>
-                                <td><?php echo esc_html($time_id); ?></td>
-                                <td <?php echo $date_cell_style; ?>><?php echo esc_html($display_date); ?></td>
-                                <td><?php echo $employee_name; ?></td>
-                                <td><?php echo $position_name; ?></td>
-                                <td><?php echo esc_html($display_start_time); ?></td>
-                                <td><?php echo esc_html($display_end_time); ?></td>
-                                <td><?php echo esc_html($duration); ?></td>
-                                <td><?php echo esc_html($status); ?></td>
-                                <td>
-                                    <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
-                                        View Data
-                                    </button>
-                                </td>
-                            </tr>
+                        <tr class="wiw-employee-header">
+                            <td colspan="9" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                                👤 Employee: <?php echo esc_html($employee_name); ?>
+                            </td>
+                        </tr>
+                        <?php
+
+                        foreach ($periods as $period_start_date => $period_data) : 
+                            $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
                             
-                            <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
-                                <td colspan="9">
-                                    <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
-                                        <strong>Raw API Data:</strong>
-                                        <pre style="font-size: 11px;"><?php print_r($time_entry); ?></pre>
-                                    </div>
+                            // --- PAY PERIOD TOTAL ROW ---
+                            ?>
+                            <tr class="wiw-period-total">
+                                <td colspan="6" style="background-color: #f0f0ff; font-weight: bold;">
+                                    📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                 </td>
+                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo number_format($period_data['total_hours'], 2); ?></td>
+                                <td colspan="2" style="background-color: #f0f0ff;"></td>
                             </tr>
-                        <?php endforeach;
-                    endif;
+                            <?php
+
+                            // --- DAILY RECORD ROWS ---
+                            foreach ($period_data['records'] as $time_entry) : 
+                                
+                                $time_id = $time_entry->id ?? 'N/A';
+                                $user_id = $time_entry->user_id ?? 0;
+                                $position_id = $time_entry->position_id ?? 0;
+                                $position_obj = $position_map[$position_id] ?? null;
+
+                                $position_name = ($position_obj && isset($position_obj->name)) ? esc_html($position_obj->name) : 'N/A';
+                                
+                                $start_time_utc = $time_entry->start_time ?? ''; 
+                                $end_time_utc = $time_entry->end_time ?? '';
+
+                                // --- Date and Time Processing ---
+                                $display_date = 'N/A';
+                                $display_start_time = 'N/A';
+                                $display_end_time = 'Active (N/A)';
+                                $date_match = true;
+
+                                try {
+                                    if (!empty($start_time_utc)) {
+                                        $dt_start_utc = new DateTime($start_time_utc, new DateTimeZone('UTC'));
+                                        $dt_start_utc->setTimezone($wp_timezone);
+                                        
+                                        $display_date = $dt_start_utc->format('Y-m-d');
+                                        $display_start_time = $dt_start_utc->format($time_format);
+                                    }
+
+                                    if (!empty($end_time_utc)) {
+                                        $dt_end_utc = new DateTime($end_time_utc, new DateTimeZone('UTC'));
+                                        $dt_end_utc->setTimezone($wp_timezone);
+                                        
+                                        $display_end_time = $dt_end_utc->format($time_format);
+                                        
+                                        if ($display_date !== $dt_end_utc->format('Y-m-d')) {
+                                            $date_match = false;
+                                        }
+                                    }
+                                } catch (Exception $e) {
+                                    $display_start_time = 'Error';
+                                    $display_end_time = 'Error';
+                                    $display_date = 'Error';
+                                }
+                                // --- End Date and Time Processing ---
+                                
+                                $duration = round(($time_entry->length ?? 0), 2);
+                                if ($duration == 0 && isset($time_entry->duration)) {
+                                     $duration = round(($time_entry->duration / 3600), 2);
+                                }
+                                
+                                $status = (isset($time_entry->approved) && $time_entry->approved) ? 'Approved' : 'Pending';
+
+                                $row_id = 'wiw-raw-' . $global_row_index++;
+                                
+                                $date_cell_style = ($date_match || $display_end_time === 'Active (N/A)') ? '' : 'style="background-color: #ffe0e0;" title="Clock out date does not match clock in date."';
+
+                                // --- Daily Record Row Display ---
+                                ?>
+                                <tr class="wiw-daily-record">
+                                    <td><?php echo esc_html($time_id); ?></td>
+                                    <td <?php echo $date_cell_style; ?>><?php echo esc_html($display_date); ?></td>
+                                    <td><?php echo $employee_name; ?></td>
+                                    <td><?php echo $position_name; ?></td>
+                                    <td><?php echo esc_html($display_start_time); ?></td>
+                                    <td><?php echo esc_html($display_end_time); ?></td>
+                                    <td><?php echo esc_html($duration); ?></td>
+                                    <td><?php echo esc_html($status); ?></td>
+                                    <td>
+                                        <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
+                                            View Data
+                                        </button>
+                                    </td>
+                                </tr>
+                                
+                                <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
+                                    <td colspan="9">
+                                        <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
+                                            <strong>Raw API Data:</strong>
+                                            <pre style="font-size: 11px;"><?php print_r($time_entry); ?></pre>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php 
+                            endforeach; // End daily records loop
+                        endforeach; // End weekly periods loop
+                    endforeach; // End employee loop
                     ?>
                 </tbody>
             </table>
+            <?php endif; // End check for empty grouped_timesheets ?>
             
             <script type="text/javascript">
                 jQuery(document).ready(function($) {
@@ -231,50 +259,51 @@ public function admin_timesheets_page() {
             </script>
 
             <hr/>
-
-            <h2>Data Reference Legend</h2>
-            <table class="form-table">
-                <tbody>
-                    <tr>
-                        <th scope="row">Record ID</th>
-                        <td>The unique identifier assigned to this clock-in/clock-out entry.</td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Date</th>
-                        <td>The date of the Clock In time, adjusted to the local timezone. This field is highlighted if the Clock Out date is different (i.e., an overnight shift).</td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Employee Name</th>
-                        <td>The employee's full name.</td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Position</th>
-                        <td>The job or role associated with the shift (e.g., ECA, RECE).</td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Clock In</th>
-                        <td>The **time** the employee started the shift, converted to the local timezone and displayed in 12-hour format (e.g., 8:14 am).</td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Clock Out</th>
-                        <td>The **time** the employee ended the shift, converted to the local timezone and displayed in 12-hour format. Displays **"Active (N/A)"** if the shift is currently open.</td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Hrs</th>
-                        <td>The calculated duration of the shift in hours (e.g., 8.00 hours).</td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Status</th>
-                        <td>The timesheet approval status (**Pending** or **Approved**).</td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Actions</th>
-                        <td>The interactive column (View Data button).</td>
-                    </tr>
-                </tbody>
-            </table>
+            <details style="border: 1px solid #ccc; background: #fff; padding: 10px; margin-top: 20px;">
+                <summary style="cursor: pointer; font-weight: bold; padding: 5px; background: #e0e0e0; margin: -10px;">
+                    💡 Click to Expand: Data Reference Legend (Condensed)
+                </summary>
+                <div style="padding-top: 15px;">
+                    <table class="form-table" style="margin-top: 0;">
+                        <tbody>
+                            <tr>
+                                <th scope="row">Record ID</th>
+                                <td>**Unique identifier** for the timesheet entry (used for API actions).</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Date</th>
+                                <td>Clock In Date (local timezone). Highlighted **red** if Clock Out occurs on a different day (overnight shift).</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Employee Name</th>
+                                <td>Name retrieved from **`users`** data.</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Position</th>
+                                <td>Job role/title retrieved from **`positions`** data.</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Clock In / Out</th>
+                                <td>Start/End **Time** only, converted to 12-hour format in **local timezone**. Clock Out shows **"Active (N/A)"** if the shift is open.</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Hrs</th>
+                                <td>Calculated **duration** of the shift in hours.</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Status</th>
+                                <td>Approval status: **Pending** or **Approved**.</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Actions</th>
+                                <td>Interactive options (currently **View Data**).</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </details>
             <?php
-        }
+        } // End 'else' block for successful data fetch
         ?>
     </div>
     <?php
@@ -525,6 +554,87 @@ private function fetch_timesheets_data($filters = []) {
     $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
 
     return $result;
+}
+
+/**
+ * Groups timesheet records into weekly pay periods (Monday to Friday) 
+ * for each employee and calculates the weekly totals.
+ *
+ * @param array $times The raw, sorted times array.
+ * @param array $user_map Map of user IDs to user objects.
+ * @return array The structured timesheet data.
+ */
+private function group_timesheet_by_pay_period( $times, $user_map ) {
+    $grouped_data = [];
+
+    // Define the local WordPress timezone for date calculations
+    $wp_timezone_string = get_option('timezone_string');
+    if (empty($wp_timezone_string)) {
+        $wp_timezone_string = 'UTC';
+    }
+    $wp_timezone = new DateTimeZone($wp_timezone_string); 
+
+    foreach ( $times as $time_entry ) {
+        $user_id = $time_entry->user_id ?? 0;
+        $user = $user_map[$user_id] ?? null;
+        
+        // Skip records we cannot link to a user
+        if ( !$user ) continue;
+
+        $employee_name = ($user->first_name ?? '') . ' ' . ($user->last_name ?? 'Unknown');
+        $start_time_utc = $time_entry->start_time ?? '';
+        
+        // Calculate duration in hours
+        $duration = round(($time_entry->length ?? 0), 2);
+        if ($duration == 0 && isset($time_entry->duration)) {
+             $duration = round(($time_entry->duration / 3600), 2);
+        }
+
+        // --- Determine Pay Period Start Date (Monday) ---
+        $pay_period_start = 'N/A';
+        try {
+            if (!empty($start_time_utc)) {
+                $dt_start_utc = new DateTime($start_time_utc, new DateTimeZone('UTC'));
+                $dt_start_utc->setTimezone($wp_timezone);
+                
+                // Determine the day of the week (1=Mon, 5=Fri, 7=Sun)
+                $day_of_week = (int)$dt_start_utc->format('N');
+                
+                // Adjust to the previous Monday (the start of the pay week)
+                // If it's Saturday (6) or Sunday (7), we treat it as part of the *previous* pay period week (Mon-Fri).
+                if ($day_of_week === 6 || $day_of_week === 7) {
+                    // Go back to the previous Monday (current date - 1 day to hit Sunday, then 'monday previous week')
+                    $dt_start_utc->modify('last Monday'); 
+                } else {
+                    // Go back to the start of the week (Monday)
+                    $dt_start_utc->modify('this Monday');
+                }
+
+                // Format the start date as YYYY-MM-DD for the group key
+                $pay_period_start = $dt_start_utc->format('Y-m-d');
+            }
+        } catch (Exception $e) {
+            continue; // Skip records with unparsable dates
+        }
+        // --- End Pay Period Calculation ---
+
+        // Initialize structures if they don't exist
+        if ( !isset($grouped_data[$employee_name]) ) {
+            $grouped_data[$employee_name] = [];
+        }
+        if ( !isset($grouped_data[$employee_name][$pay_period_start]) ) {
+            $grouped_data[$employee_name][$pay_period_start] = [
+                'total_hours' => 0.0,
+                'records' => []
+            ];
+        }
+
+        // Aggregate total hours and add the record
+        $grouped_data[$employee_name][$pay_period_start]['total_hours'] += $duration;
+        $grouped_data[$employee_name][$pay_period_start]['records'][] = $time_entry;
+    }
+
+    return $grouped_data;
 }
 
 }
