@@ -77,14 +77,19 @@ public function admin_timesheets_page() {
         $timesheets_data = $this->fetch_timesheets_data();
         
         if ( is_wp_error( $timesheets_data ) ) {
-            // ... (keep existing error handling code) ...
             $error_message = $timesheets_data->get_error_message();
-            echo '<div class="notice notice-error"><p><strong>❌ Timesheet Fetch Error:</strong> ' . esc_html($error_message) . '</p></div>';
+            ?>
+            <div class="notice notice-error">
+                <p><strong>❌ Timesheet Fetch Error:</strong> <?php echo esc_html($error_message); ?></p>
+                <?php if ($timesheets_data->get_error_code() === 'wiw_token_missing') : ?>
+                    <p>Please go to the <a href="<?php echo esc_url(admin_url('admin.php?page=wiw-timesheets-settings')); ?>">Settings Page</a> to log in and save your session token.</p>
+                <?php endif; ?>
+            </div>
+            <?php
         } else {
             // Extract data arrays
             $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
             $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
-            // $included_shifts is often less reliable for position names on raw time entries, but we keep it just in case
             $included_positions = isset($timesheets_data->positions) ? $timesheets_data->positions : [];
             
             // Create Maps for easy lookup: ID => Object
@@ -98,35 +103,38 @@ public function admin_timesheets_page() {
             <table class="wp-list-table widefat fixed striped">
                 <thead>
                     <tr>
-                        <th width="15%">Employee Name</th>
-                        <th width="15%">Position</th> <th width="20%">Clock In</th>
-                        <th width="20%">Clock Out</th>
-                        <th width="15%">Duration (Hrs)</th>
-                        <th width="15%">Status</th>
+                        <th width="5%">Record ID</th>
+                        <th width="12%">Employee Name</th>
+                        <th width="12%">Position</th>
+                        <th width="15%">Clock In</th>
+                        <th width="15%">Clock Out</th>
+                        <th width="10%">Hrs</th>
+                        <th width="10%">Status</th>
+                        <th width="10%">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php 
                     if (empty($times)) : ?>
-                        <tr><td colspan="6">No timesheet records found in the API response within the last 30 days.</td></tr>
+                        <tr><td colspan="8">No timesheet records found.</td></tr>
                     <?php else : 
-                        foreach (array_slice($times, 0, 10) as $time_entry) : 
+                        // Display the first 20 records as a sample
+                        foreach (array_slice($times, 0, 20) as $index => $time_entry) : 
+                            
+                            $time_id = $time_entry->id ?? 'N/A';
                             $user_id = $time_entry->user_id ?? 0;
-                            // Time entries usually have a direct position_id
                             $position_id = $time_entry->position_id ?? 0;
                             
-                            // Retrieve included data
                             $user = $user_map[$user_id] ?? null;
                             $position_obj = $position_map[$position_id] ?? null;
 
                             $employee_name = ($user && isset($user->first_name)) ? esc_html($user->first_name . ' ' . $user->last_name) : 'Unknown User';
-                            
-                            // Get the position name from the position object
                             $position_name = ($position_obj && isset($position_obj->name)) ? esc_html($position_obj->name) : 'N/A';
                             
                             $start_time = $time_entry->start_time ?? 'N/A';
-                            $end_time = $time_entry->end_time ?? 'N/A';
-                            $duration = round(($time_entry->length ?? 0), 2); // 'length' is often the hours field in raw times, or we calc from start/end
+                            $end_time = $time_entry->end_time ?? '';
+                            
+                            $duration = round(($time_entry->length ?? 0), 2);
                             if ($duration == 0 && isset($time_entry->duration)) {
                                  $duration = round(($time_entry->duration / 3600), 2);
                             }
@@ -134,23 +142,89 @@ public function admin_timesheets_page() {
                             $status = (isset($time_entry->approved) && $time_entry->approved) ? 'Approved' : 'Pending';
 
                             $display_start = ($start_time !== 'N/A') ? date('Y-m-d H:i', strtotime($start_time)) : 'N/A';
-                            $display_end   = ($end_time !== 'N/A') ? date('Y-m-d H:i', strtotime($end_time)) : 'N/A';
+                            $display_end   = ($end_time !== '') ? date('Y-m-d H:i', strtotime($end_time)) : 'Active (N/A)';
+                            
+                            $row_id = 'wiw-raw-' . $index;
                         ?>
                             <tr>
+                                <td><?php echo esc_html($time_id); ?></td>
                                 <td><?php echo $employee_name; ?></td>
                                 <td><?php echo $position_name; ?></td>
                                 <td><?php echo esc_html($display_start); ?></td>
                                 <td><?php echo esc_html($display_end); ?></td>
                                 <td><?php echo esc_html($duration); ?></td>
                                 <td><?php echo esc_html($status); ?></td>
+                                <td>
+                                    <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
+                                        View Data
+                                    </button>
+                                </td>
+                            </tr>
+                            
+                            <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
+                                <td colspan="8">
+                                    <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
+                                        <strong>Raw API Data:</strong>
+                                        <pre style="font-size: 11px;"><?php print_r($time_entry); ?></pre>
+                                    </div>
+                                </td>
                             </tr>
                         <?php endforeach;
                     endif;
                     ?>
                 </tbody>
             </table>
+            
+            <script type="text/javascript">
+                jQuery(document).ready(function($) {
+                    $('.action-toggle-raw').on('click', function() {
+                        var targetId = $(this).data('target');
+                        $('#' + targetId).toggle();
+                    });
+                });
+            </script>
+
+            <hr/>
+
+            <h2>Data Reference Legend</h2>
+            <table class="form-table">
+                <tbody>
+                    <tr>
+                        <th scope="row">Record ID</th>
+                        <td>The **unique identifier** (Primary Key) assigned by the When I Work API to this specific clock-in/clock-out entry. This ID is necessary for API actions (e.g., Approve, Edit).</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Employee Name</th>
+                        <td>The employee's full name, derived from the **`users`** data included in the API response, matched via the `user_id`.</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Position</th>
+                        <td>The job or role associated with the shift (e.g., ECA, RECE), derived from the **`positions`** data included in the API response, matched via the `position_id`.</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Clock In</th>
+                        <td>The **date and time** the employee started the shift (`start_time` from the API).</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Clock Out</th>
+                        <td>The **date and time** the employee ended the shift (`end_time` from the API). Displays **"Active (N/A)"** if the shift is currently open (no clock-out time recorded).</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Hrs</th>
+                        <td>The calculated **duration** of the shift in hours (e.g., 8.00 hours). This value is derived from the API's `duration` field (in seconds) or `length` field (in hours).</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Status</th>
+                        <td>Indicates the timesheet approval status. **Pending** means it is awaiting review. **Approved** means it has been reviewed and accepted (`approved` field is true).</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Actions</th>
+                        <td>The interactive column used to perform functions on the timesheet. Currently contains the **"View Data"** button to display the complete raw API response for the row.</td>
+                    </tr>
+                </tbody>
+            </table>
             <?php
-        }
+        } // Closing curly brace for the initial 'else' (success case)
         ?>
     </div>
     <?php
