@@ -77,60 +77,68 @@ public function admin_timesheets_page() {
         $timesheets_data = $this->fetch_timesheets_data();
         
         if ( is_wp_error( $timesheets_data ) ) {
-            // Display Token Missing or API Error
+            // ... (keep existing error handling code) ...
             $error_message = $timesheets_data->get_error_message();
-            ?>
-            <div class="notice notice-error">
-                <p><strong>❌ Timesheet Fetch Error:</strong> <?php echo esc_html($error_message); ?></p>
-                <?php if ($timesheets_data->get_error_code() === 'wiw_token_missing') : ?>
-                    <p>Please go to the <a href="<?php echo esc_url(admin_url('admin.php?page=wiw-timesheets-settings')); ?>">Settings Page</a> to log in and save your session token.</p>
-                <?php endif; ?>
-            </div>
-            <?php
+            echo '<div class="notice notice-error"><p><strong>❌ Timesheet Fetch Error:</strong> ' . esc_html($error_message) . '</p></div>';
         } else {
-            // Success! Display a table structure for the timesheets.
-            ?>
-            <div class="notice notice-success"><p>✅ Timesheet data fetched successfully!</p></div>
+            // Extract data arrays
+            $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
+            $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
+            // $included_shifts is often less reliable for position names on raw time entries, but we keep it just in case
+            $included_positions = isset($timesheets_data->positions) ? $timesheets_data->positions : [];
             
-            <h2>Latest Timesheets</h2>
+            // Create Maps for easy lookup: ID => Object
+            $user_map = array_column($included_users, null, 'id');
+            $position_map = array_column($included_positions, null, 'id');
+            
+            ?>
+            <div class="notice notice-success"><p>✅ Timesheet data fetched successfully! (Includes <?php echo count($included_positions); ?> Positions)</p></div>
+            
+            <h2>Latest Timesheets (Last 30 Days)</h2>
             <table class="wp-list-table widefat fixed striped">
                 <thead>
                     <tr>
-                        <th width="15%">User ID</th>
-                        <th width="25%">Clock In</th>
-                        <th width="25%">Clock Out</th>
-                        <th width="15%">Duration</th>
-                        <th width="20%">Status</th>
+                        <th width="15%">Employee Name</th>
+                        <th width="15%">Position</th> <th width="20%">Clock In</th>
+                        <th width="20%">Clock Out</th>
+                        <th width="15%">Duration (Hrs)</th>
+                        <th width="15%">Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php 
-                    // When I Work returns times in the 'times' property of the response object
-                    $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
-
                     if (empty($times)) : ?>
-                        <tr><td colspan="5">No timesheet records found in the API response.</td></tr>
+                        <tr><td colspan="6">No timesheet records found in the API response within the last 30 days.</td></tr>
                     <?php else : 
-                        // Display the first 10 records as a sample
                         foreach (array_slice($times, 0, 10) as $time_entry) : 
-                            // Example of accessing data (structure must match WIW API response)
-                            $user_id = $time_entry->user_id ?? 'N/A';
+                            $user_id = $time_entry->user_id ?? 0;
+                            // Time entries usually have a direct position_id
+                            $position_id = $time_entry->position_id ?? 0;
+                            
+                            // Retrieve included data
+                            $user = $user_map[$user_id] ?? null;
+                            $position_obj = $position_map[$position_id] ?? null;
+
+                            $employee_name = ($user && isset($user->first_name)) ? esc_html($user->first_name . ' ' . $user->last_name) : 'Unknown User';
+                            
+                            // Get the position name from the position object
+                            $position_name = ($position_obj && isset($position_obj->name)) ? esc_html($position_obj->name) : 'N/A';
+                            
                             $start_time = $time_entry->start_time ?? 'N/A';
                             $end_time = $time_entry->end_time ?? 'N/A';
-                            $duration = $time_entry->duration ?? 'N/A';
-                            
-                            // Placeholder for status logic
-                            $status = 'Pending';
-                            if (isset($time_entry->approved) && $time_entry->approved) {
-                                $status = 'Approved';
+                            $duration = round(($time_entry->length ?? 0), 2); // 'length' is often the hours field in raw times, or we calc from start/end
+                            if ($duration == 0 && isset($time_entry->duration)) {
+                                 $duration = round(($time_entry->duration / 3600), 2);
                             }
+                            
+                            $status = (isset($time_entry->approved) && $time_entry->approved) ? 'Approved' : 'Pending';
 
-                            // Simple date formatting for display
                             $display_start = ($start_time !== 'N/A') ? date('Y-m-d H:i', strtotime($start_time)) : 'N/A';
                             $display_end   = ($end_time !== 'N/A') ? date('Y-m-d H:i', strtotime($end_time)) : 'N/A';
                         ?>
                             <tr>
-                                <td><?php echo esc_html($user_id); ?></td>
+                                <td><?php echo $employee_name; ?></td>
+                                <td><?php echo $position_name; ?></td>
                                 <td><?php echo esc_html($display_start); ?></td>
                                 <td><?php echo esc_html($display_end); ?></td>
                                 <td><?php echo esc_html($duration); ?></td>
@@ -269,8 +277,6 @@ public function settings_section_callback() {
     echo '<p>Enter your When I Work API credentials below.</p>';
 }
 
-// Inside WIW_Timesheet_Manager class...
-
 /**
  * Renders the main settings page HTML.
  */
@@ -332,25 +338,20 @@ public function admin_settings_page() {
     <?php
 }
 
-// Inside WIW_Timesheet_Manager class...
-
 /**
  * Fetches timesheet data from the When I Work API.
  * * @param array $filters Optional filters (e.g., date ranges).
  * @return object|WP_Error The API response object or a WP_Error object.
  */
 private function fetch_timesheets_data($filters = []) {
-    // The endpoint for timesheet data is typically '/times' or similar in v2 of the API.
     $endpoint = 'times'; 
     
-    // We can add default filters here (e.g., date range for the last week)
     $default_filters = [
-        // Example: Filter for times that haven't been approved yet
-        // 'approved' => 0, 
+        // UPDATE: Add 'positions' to the include list
+        'include' => 'users,shifts,positions', 
         
-        // Example: Timesheet period (You'll need to confirm the exact date format for WIW)
-        // 'start' => date('Y-m-d', strtotime('-7 days')),
-        // 'end'   => date('Y-m-d'),
+        'start' => date('Y-m-d', strtotime('-30 days')),
+        'end'   => date('Y-m-d'),
     ];
 
     $params = array_merge($default_filters, $filters);
