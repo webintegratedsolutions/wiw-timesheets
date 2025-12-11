@@ -56,6 +56,16 @@ class WIW_Timesheet_Manager {
             6                        // Position
         );
 
+        // Submenu page for Shifts
+        add_submenu_page(
+            'wiw-timesheets',
+            'WIW Shifts',
+            'Shifts',
+            'manage_options',
+            'wiw-shifts', // Unique slug for this page
+            array( $this, 'admin_shifts_page' ) // Function that renders this page
+        );
+
         // Submenu page for Employees
         add_submenu_page(
             'wiw-timesheets',
@@ -68,7 +78,7 @@ class WIW_Timesheet_Manager {
 
         // Submenu page for Locations
         add_submenu_page(
-            'wiw-timesheets',
+        'wiw-timesheets',
         'WIW Locations',
         'Locations',
         'manage_options',
@@ -450,7 +460,7 @@ public function handle_wiw_login() {
     $password = get_option( 'wiw_login_password' );
 
     // 3. Perform the Login API Call, passing API Key as first argument (as required by the new function)
-    $login_result = Wheniwork::login( $api_key, $email, $password ); // <-- ARGUMENTS UPDATED
+    $login_result = WIW_API_Client::login( $api_key, $email, $password ); // <-- ARGUMENTS UPDATED
 
     $redirect_url = admin_url( 'admin.php?page=wiw-timesheets-settings' ); 
 
@@ -587,7 +597,32 @@ private function fetch_timesheets_data($filters = []) {
 
     $params = array_merge($default_filters, $filters);
 
-    $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
+    $result = WIW_API_Client::request($endpoint, $params, WIW_API_Client::METHOD_GET);
+
+    return $result;
+}
+
+/**
+ * Fetches shift data from the When I Work API.
+ * Uses the /shifts endpoint to get scheduled shifts.
+ * @param array $filters Optional filters (e.g., date ranges).
+ * @return object|WP_Error The API response object or a WP_Error object.
+ */
+private function fetch_shifts_data($filters = []) {
+    $endpoint = 'shifts'; 
+    
+    $default_filters = [
+        // CRITICAL: Only include users and sites
+        'include' => 'users,sites', 
+        
+        // Default time frame: past 30 days of shifts
+        'start' => date('Y-m-d', strtotime('-30 days')),
+        'end'   => date('Y-m-d', strtotime('+1 day')),
+    ];
+
+    $params = array_merge($default_filters, $filters);
+
+    $result = WIW_API_Client::request($endpoint, $params, WIW_API_Client::METHOD_GET);
 
     return $result;
 }
@@ -606,7 +641,7 @@ private function fetch_employees_data() {
         'employment_status' => 1 // Typically '1' means active employee
     ];
 
-    $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
+    $result = WIW_API_Client::request($endpoint, $params, WIW_API_Client::METHOD_GET);
 
     return $result;
 }
@@ -621,12 +656,233 @@ private function fetch_locations_data() {
     // No specific parameters are usually needed for the list of sites
     $params = []; 
 
-    $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
+    $result = WIW_API_Client::request($endpoint, $params, WIW_API_Client::METHOD_GET);
 
     return $result;
 }
 
-// In WIW_Timesheet_Manager class...
+/**
+ * Renders the Shifts management page (Admin Area).
+ */
+public function admin_shifts_page() {
+    ?>
+    <div class="wrap">
+        <h1>📅 When I Work Shifts Dashboard</h1>
+        
+        <?php 
+        $shifts_data = $this->fetch_shifts_data();
+        
+        if ( is_wp_error( $shifts_data ) ) {
+            $error_message = $shifts_data->get_error_message();
+            ?>
+            <div class="notice notice-error">
+                <p><strong>❌ Shift Fetch Error:</strong> <?php echo esc_html($error_message); ?></p>
+                <?php if ($shifts_data->get_error_code() === 'wiw_token_missing') : ?>
+                    <p>Please go to the <a href="<?php echo esc_url(admin_url('admin.php?page=wiw-timesheets-settings')); ?>">Settings Page</a> to log in and save your session token.</p>
+                <?php endif; ?>
+            </div>
+            <?php
+        } else {
+            // Extract and map data
+            $shifts = isset($shifts_data->shifts) ? $shifts_data->shifts : [];
+            $included_users = isset($shifts_data->users) ? $shifts_data->users : [];
+            $included_sites = isset($shifts_data->sites) ? $shifts_data->sites : []; 
+            
+            $user_map = array_column($included_users, null, 'id');
+            $site_map = array_column($included_sites, null, 'id'); 
+            
+            $site_map[0] = (object) ['name' => 'No Assigned Location']; 
+            
+            // 1. Sort the records 
+            $shifts = $this->sort_timesheet_data( $shifts, $user_map );
+
+            // 2. Group the records by employee and week (pay period) 
+            // NOTE: The grouping function will use the *newly calculated* duration stored in the record.
+            $grouped_shifts = $this->group_timesheet_by_pay_period( $shifts, $user_map );
+            
+            // --- Timezone Setup ---
+            $wp_timezone_string = get_option('timezone_string');
+            if (empty($wp_timezone_string)) { $wp_timezone_string = 'UTC'; }
+            $wp_timezone = new DateTimeZone($wp_timezone_string); 
+            $time_format = get_option('time_format') ?: 'g:i A'; 
+            // --- End Timezone Setup ---
+            
+            ?>
+            <div class="notice notice-success"><p>✅ Shift data fetched successfully!</p></div>
+            
+            <h2>Latest Shifts (Grouped by Employee and Pay Period)</h2>
+
+            <?php if (empty($grouped_shifts)) : ?>
+                <p>No shift records found within the filtered period.</p>
+            <?php else : ?>
+
+            <table class="wp-list-table widefat fixed striped">
+                <thead>
+                    <tr>
+                        <th width="5%">Shift ID</th>
+                        <th width="10%">Date</th>
+                        <th width="15%">Employee Name</th>
+                        <th width="15%">Location</th>
+                        <th width="10%">Start Time</th>
+                        <th width="10%">End Time</th>
+                        <th width="8%">Breaks (Min)</th> 
+                        <th width="8%">Hrs Scheduled</th>
+                        <th width="9%">View Data</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php 
+                    $global_row_index = 0;
+                    foreach ($grouped_shifts as $employee_name => $periods) : 
+                        
+                        // --- EMPLOYEE HEADER ROW ---
+                        ?>
+                        <tr class="wiw-employee-header">
+                            <td colspan="9" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                                👤 Employee: <?php echo esc_html($employee_name); ?>
+                            </td>
+                        </tr>
+                        <?php
+
+                        foreach ($periods as $period_start_date => $period_data) : 
+                            $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
+                            
+                            // --- PAY PERIOD TOTAL ROW ---
+                            ?>
+                            <tr class="wiw-period-total">
+                                <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
+                                    📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
+                                </td>
+                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo number_format($period_data['total_hours'], 2); ?></td>
+                                <td colspan="1" style="background-color: #f0f0ff;"></td>
+                            </tr>
+                            <?php
+
+                            // --- DAILY RECORD ROWS ---
+                            foreach ($period_data['records'] as $shift_entry) : 
+                                
+                                $shift_id = $shift_entry->id ?? 'N/A';
+                                $site_lookup_id = $shift_entry->site_id ?? 0; 
+
+                                $site_obj = $site_map[$site_lookup_id] ?? null; 
+                                $location_name = ($site_obj && isset($site_obj->name)) ? esc_html($site_obj->name) : 'No Assigned Location'; 
+                                
+                                $start_time_utc = $shift_entry->start_time ?? ''; 
+                                $end_time_utc = $shift_entry->end_time ?? '';
+                                $break_minutes = $shift_entry->break ?? 0; 
+                                
+                                // --- Date and Time Processing ---
+                                $display_date = 'N/A';
+                                $display_start_time = 'N/A';
+                                $display_end_time = 'N/A';
+                                $date_match = true;
+                                $dt_start = null;
+                                $dt_end = null;
+                                $duration = 0.0; // Initialize duration for scope
+
+                                try {
+                                    if (!empty($start_time_utc)) {
+                                        $dt_start = new DateTime($start_time_utc, new DateTimeZone('UTC'));
+                                        $dt_start->setTimezone($wp_timezone);
+                                        
+                                        $display_date = $dt_start->format('Y-m-d');
+                                        $display_start_time = $dt_start->format($time_format);
+                                    }
+
+                                    if (!empty($end_time_utc)) {
+                                        $dt_end = new DateTime($end_time_utc, new DateTimeZone('UTC'));
+                                        $dt_end->setTimezone($wp_timezone);
+                                        
+                                        $display_end_time = $dt_end->format($time_format);
+                                        
+                                        if ($display_date !== $dt_end->format('Y-m-d')) {
+                                            $date_match = false;
+                                        }
+                                    }
+                                    
+                                    // --- NEW DURATION CALCULATION ---
+                                    if ($dt_start && $dt_end) {
+                                        // Calculate the difference (DateInterval object)
+                                        $interval = $dt_start->diff($dt_end);
+                                        
+                                        // Convert interval to total seconds
+                                        // The DateTime::diff accounts for days, hours, minutes, seconds.
+                                        $total_seconds = $interval->days * 86400 + $interval->h * 3600 + $interval->i * 60 + $interval->s;
+                                        
+                                        // Subtract break time (break is in minutes, convert to seconds)
+                                        $total_seconds -= ($break_minutes * 60);
+                                        
+                                        // Convert total seconds to hours (rounded to 2 decimal places)
+                                        $duration = round($total_seconds / 3600, 2);
+                                        
+                                        // Ensure duration is not negative (e.g., if break is longer than shift)
+                                        if ($duration < 0) {
+                                            $duration = 0.0;
+                                        }
+                                    }
+                                    // --- END NEW DURATION CALCULATION ---
+
+                                } catch (Exception $e) {
+                                    // If any date parsing fails, duration remains 0.0
+                                    $display_start_time = 'Error';
+                                    $display_end_time = 'Error';
+                                    $display_date = 'Error';
+                                }
+                                // --- End Date and Time Processing ---
+                                
+                                $row_id = 'wiw-shift-raw-' . $global_row_index++;
+                                
+                                $date_cell_style = ($date_match) ? '' : 'style="background-color: #ffe0e0;" title="Shift ends on a different day."';
+
+                                // --- Daily Record Row Display ---
+                                ?>
+                                <tr class="wiw-daily-record">
+                                    <td><?php echo esc_html($shift_id); ?></td>
+                                    <td <?php echo $date_cell_style; ?>><?php echo esc_html($display_date); ?></td>
+                                    <td><?php echo $employee_name; ?></td>
+                                    <td><?php echo $location_name; ?></td> 
+                                    <td><?php echo esc_html($display_start_time); ?></td>
+                                    <td><?php echo esc_html($display_end_time); ?></td>
+                                    <td><?php echo esc_html($break_minutes); ?></td> 
+                                    <td><?php echo esc_html($duration); ?></td> <td>
+                                        <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
+                                            View Data
+                                        </button>
+                                    </td>
+                                </tr>
+                                
+                                <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
+                                    <td colspan="9">
+                                        <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
+                                            <strong>Raw API Data:</strong>
+                                            <pre style="font-size: 11px;"><?php print_r($shift_entry); ?></pre>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php 
+                            endforeach; // End daily records loop
+                        endforeach; // End weekly periods loop
+                    endforeach; // End employee loop
+                    ?>
+                </tbody>
+            </table>
+            <?php endif; // End check for empty grouped_shifts ?>
+            
+            <script type="text/javascript">
+                jQuery(document).ready(function($) {
+                    $('.action-toggle-raw').on('click', function() {
+                        var targetId = $(this).data('target');
+                        $('#' + targetId).toggle();
+                    });
+                });
+            </script>
+            
+            <?php
+        } // End 'else' block for successful data fetch
+        ?>
+    </div>
+    <?php
+}
 
 /**
  * Renders the Employees management page (Admin Area).

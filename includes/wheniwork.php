@@ -4,12 +4,13 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-/**
- * Client library for the When I Work scheduling and attendance platform.
- * Adapted to use WordPress HTTP API (wp_remote_request) instead of CURL.
- */
-class Wheniwork
-{
+// In includes/wheniwork.php
+if ( ! class_exists( 'WIW_API_Client' ) ) {
+    /**
+     * Client library for the When I Work scheduling and attendance platform.
+     */
+    class WIW_API_Client {
+
     const VERSION = '0.1';
     
     // HTTP Methods
@@ -108,7 +109,7 @@ class Wheniwork
         ];
 
         // Use a temporary instance to make the request
-        $login_instance = new static();
+        $login_instance = new static(); // Now refers to WIW_API_Client
         $response = $login_instance->makeRequest("login", self::METHOD_POST, $params, $headers);
 
         return $response;
@@ -138,7 +139,7 @@ class Wheniwork
         ];
 
         // 3. Create a temporary instance and make the request
-        $api_instance = new static();
+        $api_instance = new static(); // Now refers to WIW_API_Client
         
         // Note: For Timesheet data, we usually use GET.
         $response = $api_instance->makeRequest($endpoint, $method, $params, $headers);
@@ -149,4 +150,5 @@ class Wheniwork
     // You will need to add the `use` statement below 
     // to include the get_option function inside this file.
     // ...
+}
 }
