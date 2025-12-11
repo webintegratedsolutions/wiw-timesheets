@@ -55,6 +55,18 @@ class WIW_Timesheet_Manager {
             'dashicons-clock',       // Icon
             6                        // Position
         );
+
+        // Submenu page for Locations
+        add_submenu_page(
+            'wiw-timesheets',
+        'WIW Locations',
+        'Locations',
+        'manage_options',
+        'wiw-locations', // Unique slug for this page
+        array( $this, 'admin_locations_page' ) // Function that renders this page
+        );
+
+        // Settings Submenu
         add_submenu_page(
             'wiw-timesheets',
             'WIW Settings',
@@ -91,11 +103,14 @@ public function admin_timesheets_page() {
             $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
             $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
             $included_positions = isset($timesheets_data->positions) ? $timesheets_data->positions : [];
-            $included_sites = isset($timesheets_data->sites) ? $timesheets_data->sites : []; // <-- NEW: Get Sites
+            $included_sites = isset($timesheets_data->sites) ? $timesheets_data->sites : []; 
             
             $user_map = array_column($included_users, null, 'id');
             $position_map = array_column($included_positions, null, 'id');
-            $site_map = array_column($included_sites, null, 'id'); // <-- NEW: Create Site Map
+            $site_map = array_column($included_sites, null, 'id'); 
+            
+            // FIX: Add a default entry to the site map for ID 0 (for unassigned shifts)
+            $site_map[0] = (object) ['name' => 'No Assigned Location']; 
             
             // 1. Sort the records
             $times = $this->sort_timesheet_data( $times, $user_map );
@@ -126,7 +141,8 @@ public function admin_timesheets_page() {
                         <th width="10%">Date</th>
                         <th width="10%">Employee Name</th>
                         <th width="10%">Position</th>
-                        <th width="10%">Location</th> <th width="10%">Clock In</th>
+                        <th width="10%">Location</th> 
+                        <th width="10%">Clock In</th>
                         <th width="10%">Clock Out</th>
                         <th width="8%">Hrs</th>
                         <th width="8%">Status</th>
@@ -167,18 +183,22 @@ public function admin_timesheets_page() {
                                 $time_id = $time_entry->id ?? 'N/A';
                                 $user_id = $time_entry->user_id ?? 0;
                                 $position_id = $time_entry->position_id ?? 0;
-                                $location_id = $time_entry->location_id ?? 0; // <-- Get Location ID
+                                
+                                // **FIXED LINE:** Use site_id for the lookup key
+                                $site_lookup_id = $time_entry->site_id ?? 0; 
 
                                 $position_obj = $position_map[$position_id] ?? null;
-                                $site_obj = $site_map[$location_id] ?? null; // <-- Get Site Object
+                                // Use the corrected lookup ID
+                                $site_obj = $site_map[$site_lookup_id] ?? null; 
                                 
                                 $position_name = ($position_obj && isset($position_obj->name)) ? esc_html($position_obj->name) : 'N/A';
-                                $location_name = ($site_obj && isset($site_obj->name)) ? esc_html($site_obj->name) : 'N/A'; // <-- Get Site Name
+                                // Display "No Assigned Location" if lookup fails or ID is 0
+                                $location_name = ($site_obj && isset($site_obj->name)) ? esc_html($site_obj->name) : 'N/A'; 
                                 
                                 $start_time_utc = $time_entry->start_time ?? ''; 
                                 $end_time_utc = $time_entry->end_time ?? '';
 
-                                // --- Date and Time Processing (Unchanged) ---
+                                // --- Date and Time Processing ---
                                 $display_date = 'N/A';
                                 $display_start_time = 'N/A';
                                 $display_end_time = 'Active (N/A)';
@@ -240,7 +260,7 @@ public function admin_timesheets_page() {
                                 </tr>
                                 
                                 <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
-                                    <td colspan="10">
+                                    <td colspan="10"> 
                                         <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
                                             <strong>Raw API Data:</strong>
                                             <pre style="font-size: 11px;"><?php print_r($time_entry); ?></pre>
@@ -291,7 +311,7 @@ public function admin_timesheets_page() {
                             </tr>
                             <tr>
                                 <th scope="row">Location</th>
-                                <td>Site name retrieved from **`sites`** data using `location_id`.</td>
+                                <td>Site name retrieved from **`sites`** data using `site_id`.</td>
                             </tr>
                             <tr>
                                 <th scope="row">Clock In / Out</th>
@@ -560,6 +580,127 @@ private function fetch_timesheets_data($filters = []) {
     $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
 
     return $result;
+}
+
+/**
+ * Fetches site/location data from the When I Work API.
+ * Uses the /sites endpoint (https://apidocs.wheniwork.com/external/index.html#tag/Sites).
+ * @return object|WP_Error The API response object or a WP_Error object.
+ */
+private function fetch_locations_data() {
+    $endpoint = 'sites'; 
+    // No specific parameters are usually needed for the list of sites
+    $params = []; 
+
+    $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
+
+    return $result;
+}
+
+/**
+ * Renders the Locations management page (Admin Area).
+ */
+public function admin_locations_page() {
+    ?>
+    <div class="wrap">
+        <h1>📍 When I Work Locations</h1>
+        <p>This page displays all site records retrieved from the When I Work API.</p>
+        
+        <?php 
+        $locations_data = $this->fetch_locations_data();
+        
+        if ( is_wp_error( $locations_data ) ) {
+            $error_message = $locations_data->get_error_message();
+            ?>
+            <div class="notice notice-error">
+                <p><strong>❌ Location Fetch Error:</strong> <?php echo esc_html($error_message); ?></p>
+                <?php if ($locations_data->get_error_code() === 'wiw_token_missing') : ?>
+                    <p>Please go to the <a href="<?php echo esc_url(admin_url('admin.php?page=wiw-timesheets-settings')); ?>">Settings Page</a> to log in and save your session token.</p>
+                <?php endif; ?>
+            </div>
+            <?php
+        } else {
+            $sites = isset($locations_data->sites) ? $locations_data->sites : [];
+            
+            if (empty($sites)) : ?>
+                <div class="notice notice-warning"><p>No location records found.</p></div>
+            <?php else : ?>
+
+            <div class="notice notice-success"><p>✅ Successfully fetched <?php echo count($sites); ?> locations.</p></div>
+            
+            <table class="wp-list-table widefat fixed striped">
+                <thead>
+                    <tr>
+                        <th width="10%">ID</th>
+                        <th width="30%">Name</th>
+                        <th width="40%">Address</th>
+                        <th width="20%">View Data</th> </tr>
+                </thead>
+                <tbody>
+                    <?php 
+                    $location_row_index = 0;
+                    foreach ($sites as $site) : 
+                        $site_id = $site->id ?? 'N/A';
+                        $site_name = $site->name ?? 'N/A';
+                        
+                        // Concatenate address components for display
+                        $site_address = trim(
+                            ($site->address ?? '') . 
+                            (!empty($site->address) && !empty($site->city) ? ', ' : '') .
+                            ($site->city ?? '') .
+                            (!empty($site->city) && !empty($site->zip_code) ? ' ' : '') .
+                            ($site->zip_code ?? '')
+                        );
+                        
+                        // Fallback for address if it's still empty
+                        if (empty($site_address)) {
+                            $site_address = 'Address Not Provided';
+                        }
+                        
+                        $row_id = 'wiw-location-raw-' . $location_row_index++;
+                    ?>
+                        <tr class="wiw-location-record">
+                            <td><?php echo esc_html($site_id); ?></td>
+                            <td style="font-weight: bold;"><?php echo esc_html($site_name); ?></td>
+                            <td><?php echo esc_html($site_address); ?></td>
+                            <td>
+                                <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
+                                    View Data
+                                </button>
+                            </td>
+                        </tr>
+                        
+                        <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
+                            <td colspan="4">
+                                <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
+                                    <strong>Raw API Data:</strong>
+                                    <pre style="font-size: 11px;"><?php print_r($site); ?></pre>
+                                </div>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            
+            <script type="text/javascript">
+                jQuery(document).ready(function($) {
+                    // Check if the timesheets page script hasn't already defined this
+                    if (typeof window.wiwToggleRawListeners === 'undefined') {
+                        $('.action-toggle-raw').on('click', function() {
+                            var targetId = $(this).data('target');
+                            $('#' + targetId).toggle();
+                        });
+                        // Set a flag so we don't redefine the listener if it's already included on another page (though both pages now include it)
+                        window.wiwToggleRawListeners = true; 
+                    }
+                });
+            </script>
+            
+            <?php endif; // End check for empty sites
+        } // End 'else' block for successful data fetch
+        ?>
+    </div>
+    <?php
 }
 
 /**
