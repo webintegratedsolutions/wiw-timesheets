@@ -123,15 +123,20 @@ public function admin_timesheets_page() {
             $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
             $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
             $included_positions = isset($timesheets_data->positions) ? $timesheets_data->positions : [];
-            $included_sites = isset($timesheets_data->sites) ? $timesheets_data->sites : []; 
-            
             $user_map = array_column($included_users, null, 'id');
             $position_map = array_column($included_positions, null, 'id');
-            $site_map = array_column($included_sites, null, 'id'); 
             
-            // FIX: Add a default entry to the site map for ID 0 (for unassigned shifts)
-            $site_map[0] = (object) ['name' => 'No Assigned Location']; 
-            
+            // --- NEW PREPROCESSING STEP ---
+            // Calculate and inject the actual duration into each timesheet object 
+            // before grouping/sorting to ensure correct totals.
+            foreach ($times as &$time_entry) {
+                $calculated_duration = $this->calculate_timesheet_duration_in_hours($time_entry);
+                $time_entry->calculated_duration = $calculated_duration;
+            }
+            unset($time_entry); // Clean up reference
+            // --- END PREPROCESSING ---
+
+
             // 1. Sort the records
             $times = $this->sort_timesheet_data( $times, $user_map );
 
@@ -161,7 +166,6 @@ public function admin_timesheets_page() {
                         <th width="10%">Date</th>
                         <th width="10%">Employee Name</th>
                         <th width="10%">Position</th>
-                        <th width="10%">Location</th> 
                         <th width="10%">Clock In</th>
                         <th width="10%">Clock Out</th>
                         <th width="8%">Hrs</th>
@@ -177,7 +181,7 @@ public function admin_timesheets_page() {
                         // --- EMPLOYEE HEADER ROW ---
                         ?>
                         <tr class="wiw-employee-header">
-                            <td colspan="10" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                            <td colspan="9" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
                                 👤 Employee: <?php echo esc_html($employee_name); ?>
                             </td>
                         </tr>
@@ -189,7 +193,7 @@ public function admin_timesheets_page() {
                             // --- PAY PERIOD TOTAL ROW ---
                             ?>
                             <tr class="wiw-period-total">
-                                <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
+                                <td colspan="6" style="background-color: #f0f0ff; font-weight: bold;">
                                     📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                 </td>
                                 <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo number_format($period_data['total_hours'], 2); ?></td>
@@ -203,17 +207,9 @@ public function admin_timesheets_page() {
                                 $time_id = $time_entry->id ?? 'N/A';
                                 $user_id = $time_entry->user_id ?? 0;
                                 $position_id = $time_entry->position_id ?? 0;
-                                
-                                // **FIXED LINE:** Use site_id for the lookup key
-                                $site_lookup_id = $time_entry->site_id ?? 0; 
-
                                 $position_obj = $position_map[$position_id] ?? null;
-                                // Use the corrected lookup ID
-                                $site_obj = $site_map[$site_lookup_id] ?? null; 
-                                
+
                                 $position_name = ($position_obj && isset($position_obj->name)) ? esc_html($position_obj->name) : 'N/A';
-                                // Display "No Assigned Location" if lookup fails or ID is 0
-                                $location_name = ($site_obj && isset($site_obj->name)) ? esc_html($site_obj->name) : 'N/A'; 
                                 
                                 $start_time_utc = $time_entry->start_time ?? ''; 
                                 $end_time_utc = $time_entry->end_time ?? '';
@@ -250,10 +246,8 @@ public function admin_timesheets_page() {
                                 }
                                 // --- End Date and Time Processing ---
                                 
-                                $duration = round(($time_entry->length ?? 0), 2);
-                                if ($duration == 0 && isset($time_entry->duration)) {
-                                     $duration = round(($time_entry->duration / 3600), 2);
-                                }
+                                // *** UPDATE: Use the pre-calculated duration ***
+                                $duration = $time_entry->calculated_duration ?? 0.0;
                                 
                                 $status = (isset($time_entry->approved) && $time_entry->approved) ? 'Approved' : 'Pending';
 
@@ -268,7 +262,7 @@ public function admin_timesheets_page() {
                                     <td <?php echo $date_cell_style; ?>><?php echo esc_html($display_date); ?></td>
                                     <td><?php echo $employee_name; ?></td>
                                     <td><?php echo $position_name; ?></td>
-                                    <td><?php echo $location_name; ?></td> <td><?php echo esc_html($display_start_time); ?></td>
+                                    <td><?php echo esc_html($display_start_time); ?></td>
                                     <td><?php echo esc_html($display_end_time); ?></td>
                                     <td><?php echo esc_html($duration); ?></td>
                                     <td><?php echo esc_html($status); ?></td>
@@ -280,7 +274,7 @@ public function admin_timesheets_page() {
                                 </tr>
                                 
                                 <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
-                                    <td colspan="10"> 
+                                    <td colspan="9">
                                         <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
                                             <strong>Raw API Data:</strong>
                                             <pre style="font-size: 11px;"><?php print_r($time_entry); ?></pre>
@@ -330,10 +324,6 @@ public function admin_timesheets_page() {
                                 <td>Job role/title retrieved from **`positions`** data.</td>
                             </tr>
                             <tr>
-                                <th scope="row">Location</th>
-                                <td>Site name retrieved from **`sites`** data using `site_id`.</td>
-                            </tr>
-                            <tr>
                                 <th scope="row">Clock In / Out</th>
                                 <td>Start/End **Time** only, converted to 12-hour format in **local timezone**. Clock Out shows **"Active (N/A)"** if the shift is open.</td>
                             </tr>
@@ -359,8 +349,6 @@ public function admin_timesheets_page() {
     </div>
     <?php
 }
-
-// Add this function to the WIW_Timesheet_Manager class in wiw-timesheets.php
 
 /**
  * Sorts timesheet data first by employee name, then by start time.
@@ -392,6 +380,65 @@ private function sort_timesheet_data( $times, $user_map ) {
     });
 
     return $times;
+}
+
+/**
+ * Calculates the duration of a shift in hours (Start Time to End Time minus Break).
+ * * @param object $shift_entry The raw shift object.
+ * @return float Calculated duration in hours.
+ */
+private function calculate_shift_duration_in_hours($shift_entry) {
+    $start_time_utc = $shift_entry->start_time ?? ''; 
+    $end_time_utc = $shift_entry->end_time ?? '';
+    $break_minutes = $shift_entry->break ?? 0; 
+    
+    $duration = 0.0;
+
+    try {
+        if (!empty($start_time_utc) && !empty($end_time_utc)) {
+            // Use UTC for parsing the raw API data
+            $dt_start = new DateTime($start_time_utc, new DateTimeZone('UTC'));
+            $dt_end = new DateTime($end_time_utc, new DateTimeZone('UTC'));
+            
+            $interval = $dt_start->diff($dt_end);
+            
+            // Convert interval to total seconds
+            $total_seconds = $interval->days * 86400 + $interval->h * 3600 + $interval->i * 60 + $interval->s;
+            
+            // Subtract break time (break is in minutes, convert to seconds)
+            $total_seconds -= ($break_minutes * 60);
+            
+            // Convert total seconds to hours (rounded to 2 decimal places)
+            $duration = round($total_seconds / 3600, 2);
+            
+            if ($duration < 0) {
+                $duration = 0.0;
+            }
+        }
+    } catch (Exception $e) {
+        // Log error if necessary, duration remains 0.0
+    }
+    
+    return $duration;
+}
+
+/**
+ * Calculates the duration of a timesheet entry in hours.
+ * Uses 'length' (hours) or 'duration' (seconds) from the API.
+ * @param object $time_entry The raw timesheet object.
+ * @return float Calculated duration in hours.
+ */
+private function calculate_timesheet_duration_in_hours($time_entry) {
+    // Try to use 'length' (already in hours)
+    $duration = round(($time_entry->length ?? 0), 2);
+
+    // If 'length' is 0, try to use 'duration' (in seconds)
+    if ($duration == 0 && isset($time_entry->duration)) {
+         $duration = round(($time_entry->duration / 3600), 2);
+    }
+    
+    // Ensure duration is not negative (though unlikely for timesheets)
+    return max(0.0, $duration);
 }
 
 /**
@@ -693,11 +740,22 @@ public function admin_shifts_page() {
             
             $site_map[0] = (object) ['name' => 'No Assigned Location']; 
             
+            // --- NEW PREPROCESSING STEP ---
+            // Calculate and inject the scheduled duration into each shift object BEFORE grouping/sorting.
+            foreach ($shifts as &$shift_entry) {
+                $calculated_duration = $this->calculate_shift_duration_in_hours($shift_entry);
+                
+                // *** FIX: Use 'calculated_duration' to match the grouping function ***
+                $shift_entry->calculated_duration = $calculated_duration;
+            }
+            unset($shift_entry); // Clean up reference
+            // --- END PREPROCESSING ---
+
+
             // 1. Sort the records 
             $shifts = $this->sort_timesheet_data( $shifts, $user_map );
 
             // 2. Group the records by employee and week (pay period) 
-            // NOTE: The grouping function will use the *newly calculated* duration stored in the record.
             $grouped_shifts = $this->group_timesheet_by_pay_period( $shifts, $user_map );
             
             // --- Timezone Setup ---
@@ -776,59 +834,35 @@ public function admin_shifts_page() {
                                 $display_start_time = 'N/A';
                                 $display_end_time = 'N/A';
                                 $date_match = true;
-                                $dt_start = null;
-                                $dt_end = null;
-                                $duration = 0.0; // Initialize duration for scope
 
                                 try {
                                     if (!empty($start_time_utc)) {
-                                        $dt_start = new DateTime($start_time_utc, new DateTimeZone('UTC'));
-                                        $dt_start->setTimezone($wp_timezone);
+                                        $dt_start_utc = new DateTime($start_time_utc, new DateTimeZone('UTC'));
+                                        $dt_start_utc->setTimezone($wp_timezone);
                                         
-                                        $display_date = $dt_start->format('Y-m-d');
-                                        $display_start_time = $dt_start->format($time_format);
+                                        $display_date = $dt_start_utc->format('Y-m-d');
+                                        $display_start_time = $dt_start_utc->format($time_format);
                                     }
 
                                     if (!empty($end_time_utc)) {
-                                        $dt_end = new DateTime($end_time_utc, new DateTimeZone('UTC'));
-                                        $dt_end->setTimezone($wp_timezone);
+                                        $dt_end_utc = new DateTime($end_time_utc, new DateTimeZone('UTC'));
+                                        $dt_end_utc->setTimezone($wp_timezone);
                                         
-                                        $display_end_time = $dt_end->format($time_format);
+                                        $display_end_time = $dt_end_utc->format($time_format);
                                         
-                                        if ($display_date !== $dt_end->format('Y-m-d')) {
+                                        if ($display_date !== $dt_end_utc->format('Y-m-d')) {
                                             $date_match = false;
                                         }
                                     }
-                                    
-                                    // --- NEW DURATION CALCULATION ---
-                                    if ($dt_start && $dt_end) {
-                                        // Calculate the difference (DateInterval object)
-                                        $interval = $dt_start->diff($dt_end);
-                                        
-                                        // Convert interval to total seconds
-                                        // The DateTime::diff accounts for days, hours, minutes, seconds.
-                                        $total_seconds = $interval->days * 86400 + $interval->h * 3600 + $interval->i * 60 + $interval->s;
-                                        
-                                        // Subtract break time (break is in minutes, convert to seconds)
-                                        $total_seconds -= ($break_minutes * 60);
-                                        
-                                        // Convert total seconds to hours (rounded to 2 decimal places)
-                                        $duration = round($total_seconds / 3600, 2);
-                                        
-                                        // Ensure duration is not negative (e.g., if break is longer than shift)
-                                        if ($duration < 0) {
-                                            $duration = 0.0;
-                                        }
-                                    }
-                                    // --- END NEW DURATION CALCULATION ---
-
                                 } catch (Exception $e) {
-                                    // If any date parsing fails, duration remains 0.0
                                     $display_start_time = 'Error';
                                     $display_end_time = 'Error';
                                     $display_date = 'Error';
                                 }
                                 // --- End Date and Time Processing ---
+                                
+                                // *** FIX: Retrieve duration from the correct pre-calculated property ***
+                                $duration = $shift_entry->calculated_duration ?? 0.0;
                                 
                                 $row_id = 'wiw-shift-raw-' . $global_row_index++;
                                 
@@ -844,7 +878,8 @@ public function admin_shifts_page() {
                                     <td><?php echo esc_html($display_start_time); ?></td>
                                     <td><?php echo esc_html($display_end_time); ?></td>
                                     <td><?php echo esc_html($break_minutes); ?></td> 
-                                    <td><?php echo esc_html($duration); ?></td> <td>
+                                    <td><?php echo esc_html($duration); ?></td>
+                                    <td>
                                         <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
                                             View Data
                                         </button>
@@ -1133,11 +1168,8 @@ private function group_timesheet_by_pay_period( $times, $user_map ) {
         $employee_name = ($user->first_name ?? '') . ' ' . ($user->last_name ?? 'Unknown');
         $start_time_utc = $time_entry->start_time ?? '';
         
-        // Calculate duration in hours
-        $duration = round(($time_entry->length ?? 0), 2);
-        if ($duration == 0 && isset($time_entry->duration)) {
-             $duration = round(($time_entry->duration / 3600), 2);
-        }
+        // --- NEW: Retrieve pre-calculated duration ---
+        $duration = $time_entry->calculated_duration ?? 0.0;
 
         // --- Determine Pay Period Start Date (Monday) ---
         $pay_period_start = 'N/A';
@@ -1152,7 +1184,7 @@ private function group_timesheet_by_pay_period( $times, $user_map ) {
                 // Adjust to the previous Monday (the start of the pay week)
                 // If it's Saturday (6) or Sunday (7), we treat it as part of the *previous* pay period week (Mon-Fri).
                 if ($day_of_week === 6 || $day_of_week === 7) {
-                    // Go back to the previous Monday (current date - 1 day to hit Sunday, then 'monday previous week')
+                    // Go back to the previous Monday (current date - 1 day to hit Sunday, then 'last Monday')
                     $dt_start_utc->modify('last Monday'); 
                 } else {
                     // Go back to the start of the week (Monday)
