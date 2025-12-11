@@ -122,18 +122,51 @@ public function admin_timesheets_page() {
             // Extract and map data
             $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
             $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
-            $included_positions = isset($timesheets_data->positions) ? $timesheets_data->positions : [];
-            $user_map = array_column($included_users, null, 'id');
-            $position_map = array_column($included_positions, null, 'id');
+            $included_shifts = isset($timesheets_data->shifts) ? $timesheets_data->shifts : [];
             
-            // --- NEW PREPROCESSING STEP ---
-            // Calculate and inject the actual duration into each timesheet object 
-            // before grouping/sorting to ensure correct totals.
-            foreach ($times as &$time_entry) {
-                $calculated_duration = $this->calculate_timesheet_duration_in_hours($time_entry);
-                $time_entry->calculated_duration = $calculated_duration;
+            $user_map = array_column($included_users, null, 'id');
+            $shift_map = array_column($included_shifts, null, 'id');
+            
+            // --- Timezone Setup ---
+            $wp_timezone_string = get_option('timezone_string');
+            if (empty($wp_timezone_string)) { $wp_timezone_string = 'UTC'; }
+            $wp_timezone = new DateTimeZone($wp_timezone_string); 
+            $time_format = get_option('time_format') ?: 'g:i A'; 
+            // --- End Timezone Setup ---
+
+
+            // --- PREPROCESSING STEP: Calculate durations and scheduled times ---
+            if ( method_exists($this, 'calculate_shift_duration_in_hours') ) {
+                foreach ($times as &$time_entry) {
+                    // 1. Calculate Clocked Duration (for aggregation/display)
+                    $clocked_duration = $this->calculate_timesheet_duration_in_hours($time_entry);
+                    $time_entry->calculated_duration = $clocked_duration; // Used for pay period total aggregation
+                    
+                    // 2. Map Scheduled Shift Data
+                    $shift_id = $time_entry->shift_id ?? null;
+                    $scheduled_shift_obj = $shift_map[$shift_id] ?? null;
+
+                    // 3. Calculate Scheduled Duration and set display times
+                    if ($scheduled_shift_obj) {
+                        // Use the dedicated shift duration calculator helper
+                        $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours($scheduled_shift_obj); // Used for pay period total aggregation
+                        
+                        // Store scheduled times for display
+                        $dt_sched_start = new DateTime($scheduled_shift_obj->start_time, new DateTimeZone('UTC'));
+                        $dt_sched_end = new DateTime($scheduled_shift_obj->end_time, new DateTimeZone('UTC'));
+                        $dt_sched_start->setTimezone($wp_timezone);
+                        $dt_sched_end->setTimezone($wp_timezone);
+                        
+                        $time_entry->scheduled_shift_display = 
+                            $dt_sched_start->format($time_format) . ' - ' . $dt_sched_end->format($time_format);
+
+                    } else {
+                        $time_entry->scheduled_duration = 0.0;
+                        $time_entry->scheduled_shift_display = 'N/A';
+                    }
+                }
+                unset($time_entry); // Clean up reference
             }
-            unset($time_entry); // Clean up reference
             // --- END PREPROCESSING ---
 
 
@@ -142,13 +175,6 @@ public function admin_timesheets_page() {
 
             // 2. Group the records by employee and week (pay period)
             $grouped_timesheets = $this->group_timesheet_by_pay_period( $times, $user_map );
-            
-            // --- Timezone Setup ---
-            $wp_timezone_string = get_option('timezone_string');
-            if (empty($wp_timezone_string)) { $wp_timezone_string = 'UTC'; }
-            $wp_timezone = new DateTimeZone($wp_timezone_string); 
-            $time_format = get_option('time_format') ?: 'g:i A'; 
-            // --- End Timezone Setup ---
             
             ?>
             <div class="notice notice-success"><p>✅ Timesheet data fetched successfully!</p></div>
@@ -164,13 +190,13 @@ public function admin_timesheets_page() {
                     <tr>
                         <th width="5%">Record ID</th>
                         <th width="10%">Date</th>
-                        <th width="10%">Employee Name</th>
-                        <th width="10%">Position</th>
+                        <th width="15%">Employee Name</th>
+                        <th width="15%">Scheduled Shift</th>
                         <th width="10%">Clock In</th>
                         <th width="10%">Clock Out</th>
-                        <th width="8%">Hrs</th>
+                        <th width="10%">Hrs Clocked/Scheduled</th>
                         <th width="8%">Status</th>
-                        <th width="8%">Actions</th>
+                        <th width="7%">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -190,13 +216,18 @@ public function admin_timesheets_page() {
                         foreach ($periods as $period_start_date => $period_data) : 
                             $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
                             
+                            // *** NEW: Get both total hour types ***
+                            $total_clocked = number_format($period_data['total_clocked_hours'] ?? 0.0, 2);
+                            $total_scheduled = number_format($period_data['total_scheduled_hours'] ?? 0.0, 2);
+                            $combined_total = "{$total_clocked} / {$total_scheduled}";
+
                             // --- PAY PERIOD TOTAL ROW ---
                             ?>
                             <tr class="wiw-period-total">
                                 <td colspan="6" style="background-color: #f0f0ff; font-weight: bold;">
                                     📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                 </td>
-                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo number_format($period_data['total_hours'], 2); ?></td>
+                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $combined_total; ?></td>
                                 <td colspan="2" style="background-color: #f0f0ff;"></td>
                             </tr>
                             <?php
@@ -205,11 +236,7 @@ public function admin_timesheets_page() {
                             foreach ($period_data['records'] as $time_entry) : 
                                 
                                 $time_id = $time_entry->id ?? 'N/A';
-                                $user_id = $time_entry->user_id ?? 0;
-                                $position_id = $time_entry->position_id ?? 0;
-                                $position_obj = $position_map[$position_id] ?? null;
-
-                                $position_name = ($position_obj && isset($position_obj->name)) ? esc_html($position_obj->name) : 'N/A';
+                                $scheduled_shift_display = $time_entry->scheduled_shift_display ?? 'N/A';
                                 
                                 $start_time_utc = $time_entry->start_time ?? ''; 
                                 $end_time_utc = $time_entry->end_time ?? '';
@@ -246,8 +273,10 @@ public function admin_timesheets_page() {
                                 }
                                 // --- End Date and Time Processing ---
                                 
-                                // *** UPDATE: Use the pre-calculated duration ***
-                                $duration = $time_entry->calculated_duration ?? 0.0;
+                                // Combined Duration Display
+                                $clocked_duration = number_format($time_entry->calculated_duration ?? 0.0, 2);
+                                $scheduled_duration = number_format($time_entry->scheduled_duration ?? 0.0, 2);
+                                $combined_duration = "{$clocked_duration} / {$scheduled_duration}";
                                 
                                 $status = (isset($time_entry->approved) && $time_entry->approved) ? 'Approved' : 'Pending';
 
@@ -261,10 +290,10 @@ public function admin_timesheets_page() {
                                     <td><?php echo esc_html($time_id); ?></td>
                                     <td <?php echo $date_cell_style; ?>><?php echo esc_html($display_date); ?></td>
                                     <td><?php echo $employee_name; ?></td>
-                                    <td><?php echo $position_name; ?></td>
+                                    <td><?php echo esc_html($scheduled_shift_display); ?></td>
                                     <td><?php echo esc_html($display_start_time); ?></td>
                                     <td><?php echo esc_html($display_end_time); ?></td>
-                                    <td><?php echo esc_html($duration); ?></td>
+                                    <td><?php echo esc_html($combined_duration); ?></td>
                                     <td><?php echo esc_html($status); ?></td>
                                     <td>
                                         <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
@@ -320,16 +349,16 @@ public function admin_timesheets_page() {
                                 <td>Name retrieved from **`users`** data.</td>
                             </tr>
                             <tr>
-                                <th scope="row">Position</th>
-                                <td>Job role/title retrieved from **`positions`** data.</td>
+                                <th scope="row">Scheduled Shift</th>
+                                <td>**Scheduled Start - End Time** (local timezone) retrieved from the corresponding shift record. Shows N/A if no shift is linked.</td>
                             </tr>
                             <tr>
                                 <th scope="row">Clock In / Out</th>
-                                <td>Start/End **Time** only, converted to 12-hour format in **local timezone**. Clock Out shows **"Active (N/A)"** if the shift is open.</td>
+                                <td>**Actual Clock In/Out Time** (local timezone). Clock Out shows **"Active (N/A)"** if the shift is open.</td>
                             </tr>
                             <tr>
-                                <th scope="row">Hrs</th>
-                                <td>Calculated **duration** of the shift in hours.</td>
+                                <th scope="row">Hrs Clocked/Scheduled</th>
+                                <td>**Clocked Hours** (left of /) and **Scheduled Hours** (right of /). Pay period totals aggregate both sets of hours.</td>
                             </tr>
                             <tr>
                                 <th scope="row">Status</th>
@@ -625,21 +654,21 @@ public function admin_settings_page() {
 
 /**
  * Fetches timesheet data from the When I Work API.
- * * @param array $filters Optional filters (e.g., date ranges).
+ * Uses the /times endpoint.
+ * @param array $filters Optional filters (e.g., date ranges).
  * @return object|WP_Error The API response object or a WP_Error object.
  */
 private function fetch_timesheets_data($filters = []) {
     $endpoint = 'times'; 
     
     $default_filters = [
-        // MUST INCLUDE 'sites' HERE
-        'include' => 'users,shifts,positions,sites', 
+        // CRITICAL: Remove 'positions', Add 'shifts'
+        'include' => 'users,shifts', 
         
-        // This keeps the start date for the last 30 days
+        // Default time frame: last 30 days
         'start' => date('Y-m-d', strtotime('-30 days')),
-        
-        // Set end date to TOMORROW to ensure today's records are included.
         'end'   => date('Y-m-d', strtotime('+1 day')),
+        'approved' => 0 // Show pending by default
     ];
 
     $params = array_merge($default_filters, $filters);
@@ -1168,8 +1197,10 @@ private function group_timesheet_by_pay_period( $times, $user_map ) {
         $employee_name = ($user->first_name ?? '') . ' ' . ($user->last_name ?? 'Unknown');
         $start_time_utc = $time_entry->start_time ?? '';
         
-        // --- NEW: Retrieve pre-calculated duration ---
-        $duration = $time_entry->calculated_duration ?? 0.0;
+        // --- Aggregation Values ---
+        // These properties were calculated in admin_timesheets_page() preprocessing.
+        $clocked_duration = $time_entry->calculated_duration ?? 0.0;
+        $scheduled_duration = $time_entry->scheduled_duration ?? 0.0;
 
         // --- Determine Pay Period Start Date (Monday) ---
         $pay_period_start = 'N/A';
@@ -1182,12 +1213,11 @@ private function group_timesheet_by_pay_period( $times, $user_map ) {
                 $day_of_week = (int)$dt_start_utc->format('N');
                 
                 // Adjust to the previous Monday (the start of the pay week)
-                // If it's Saturday (6) or Sunday (7), we treat it as part of the *previous* pay period week (Mon-Fri).
                 if ($day_of_week === 6 || $day_of_week === 7) {
-                    // Go back to the previous Monday (current date - 1 day to hit Sunday, then 'last Monday')
+                    // Saturday (6) or Sunday (7) go back to the *previous* Monday
                     $dt_start_utc->modify('last Monday'); 
                 } else {
-                    // Go back to the start of the week (Monday)
+                    // Monday through Friday uses 'this Monday'
                     $dt_start_utc->modify('this Monday');
                 }
 
@@ -1205,13 +1235,15 @@ private function group_timesheet_by_pay_period( $times, $user_map ) {
         }
         if ( !isset($grouped_data[$employee_name][$pay_period_start]) ) {
             $grouped_data[$employee_name][$pay_period_start] = [
-                'total_hours' => 0.0,
+                'total_clocked_hours' => 0.0, // Updated key
+                'total_scheduled_hours' => 0.0, // New key
                 'records' => []
             ];
         }
 
         // Aggregate total hours and add the record
-        $grouped_data[$employee_name][$pay_period_start]['total_hours'] += $duration;
+        $grouped_data[$employee_name][$pay_period_start]['total_clocked_hours'] += $clocked_duration;
+        $grouped_data[$employee_name][$pay_period_start]['total_scheduled_hours'] += $scheduled_duration;
         $grouped_data[$employee_name][$pay_period_start]['records'][] = $time_entry;
     }
 
