@@ -769,12 +769,13 @@ public function admin_shifts_page() {
             
             $site_map[0] = (object) ['name' => 'No Assigned Location']; 
             
-            // --- NEW PREPROCESSING STEP ---
-            // Calculate and inject the scheduled duration into each shift object BEFORE grouping/sorting.
+            // --- PREPROCESSING STEP: Calculate duration and assign to the expected property ---
             foreach ($shifts as &$shift_entry) {
+                // Calculate scheduled duration
                 $calculated_duration = $this->calculate_shift_duration_in_hours($shift_entry);
                 
-                // *** FIX: Use 'calculated_duration' to match the grouping function ***
+                // CRITICAL: Assign the scheduled duration to 'calculated_duration'. 
+                // The grouping function aggregates this into 'total_clocked_hours' (its default accumulator).
                 $shift_entry->calculated_duration = $calculated_duration;
             }
             unset($shift_entry); // Clean up reference
@@ -834,13 +835,15 @@ public function admin_shifts_page() {
                         foreach ($periods as $period_start_date => $period_data) : 
                             $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
                             
-                            // --- PAY PERIOD TOTAL ROW ---
+                            // --- PAY PERIOD TOTAL ROW (FIXED KEY) ---
+                            // We now retrieve the scheduled hours total from 'total_clocked_hours'
+                            $total_scheduled_hours = number_format($period_data['total_clocked_hours'] ?? 0.0, 2);
                             ?>
                             <tr class="wiw-period-total">
                                 <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
                                     📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                 </td>
-                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo number_format($period_data['total_hours'], 2); ?></td>
+                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_scheduled_hours; ?></td>
                                 <td colspan="1" style="background-color: #f0f0ff;"></td>
                             </tr>
                             <?php
@@ -890,8 +893,8 @@ public function admin_shifts_page() {
                                 }
                                 // --- End Date and Time Processing ---
                                 
-                                // *** FIX: Retrieve duration from the correct pre-calculated property ***
-                                $duration = $shift_entry->calculated_duration ?? 0.0;
+                                // Retrieve duration from the pre-calculated property
+                                $duration = number_format($shift_entry->calculated_duration ?? 0.0, 2);
                                 
                                 $row_id = 'wiw-shift-raw-' . $global_row_index++;
                                 
@@ -922,7 +925,7 @@ public function admin_shifts_page() {
                                             <pre style="font-size: 11px;"><?php print_r($shift_entry); ?></pre>
                                         </div>
                                     </td>
-                                </tr>
+                                </div>
                                 <?php 
                             endforeach; // End daily records loop
                         endforeach; // End weekly periods loop
