@@ -121,12 +121,16 @@ public function admin_timesheets_page() {
         } else {
             // Extract and map data
             $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
-            // --- FIX APPLIED HERE ---
             $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
             $included_shifts = isset($timesheets_data->shifts) ? $timesheets_data->shifts : [];
+            // NEW: Extract sites data
+            $included_sites = isset($timesheets_data->sites) ? $timesheets_data->sites : []; 
             
             $user_map = array_column($included_users, null, 'id');
             $shift_map = array_column($included_shifts, null, 'id');
+            // NEW: Map sites data
+            $site_map = array_column($included_sites, null, 'id');
+            $site_map[0] = (object) ['name' => 'No Assigned Location']; // Add default for missing site ID
             
             // --- Timezone Setup ---
             $wp_timezone_string = get_option('timezone_string');
@@ -147,7 +151,7 @@ public function admin_timesheets_page() {
                     $shift_id = $time_entry->shift_id ?? null;
                     $scheduled_shift_obj = $shift_map[$shift_id] ?? null;
 
-                    // 3. Calculate Scheduled Duration and set display times
+                    // 3. Calculate Scheduled Duration, set display times, and FIND LOCATION
                     if ($scheduled_shift_obj) {
                         $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours($scheduled_shift_obj);
                         
@@ -159,9 +163,15 @@ public function admin_timesheets_page() {
                         $time_entry->scheduled_shift_display = 
                             $dt_sched_start->format($time_format) . ' - ' . $dt_sched_end->format($time_format);
 
+                        // NEW: Find Location Name
+                        $site_lookup_id = $scheduled_shift_obj->site_id ?? 0;
+                        $site_obj = $site_map[$site_lookup_id] ?? null; 
+                        $time_entry->location_name = ($site_obj && isset($site_obj->name)) ? esc_html($site_obj->name) : 'No Assigned Location';
+
                     } else {
                         $time_entry->scheduled_duration = 0.0;
                         $time_entry->scheduled_shift_display = 'N/A';
+                        $time_entry->location_name = 'N/A';
                     }
                 }
                 unset($time_entry); 
@@ -175,6 +185,9 @@ public function admin_timesheets_page() {
             // 2. Group the records by employee and week (pay period)
             $grouped_timesheets = $this->group_timesheet_by_pay_period( $times, $user_map );
             
+            // --- Security Nonce for AJAX ---
+            $timesheet_nonce = wp_create_nonce('wiw_timesheet_nonce');
+            
             ?>
             <div class="notice notice-success"><p>✅ Timesheet data fetched successfully!</p></div>
             
@@ -184,17 +197,17 @@ public function admin_timesheets_page() {
                 <p>No timesheet records found within the filtered period.</p>
             <?php else : ?>
 
-            <table class="wp-list-table widefat fixed striped">
+            <table class="wp-list-table widefat fixed striped" id="wiw-timesheets-table">
                 <thead>
                     <tr>
                         <th width="5%">Record ID</th>
-                        <th width="10%">Date</th>
-                        <th width="15%">Employee Name</th>
-                        <th width="15%">Scheduled Shift</th>
-                        <th width="10%">Clock In</th>
-                        <th width="10%">Clock Out</th>
-                        <th width="7%">Hrs Clocked</th>
-                        <th width="7%">Hrs Scheduled</th>
+                        <th width="8%">Date</th>
+                        <th width="12%">Employee Name</th>
+                        <th width="12%">Location</th> <th width="12%">Scheduled Shift</th>
+                        <th width="8%">Clock In</th>
+                        <th width="8%">Clock Out</th>
+                        <th width="6%">Hrs Clocked</th>
+                        <th width="6%">Hrs Scheduled</th>
                         <th width="8%">Status</th>
                         <th width="7%">Actions</th>
                     </tr>
@@ -207,7 +220,7 @@ public function admin_timesheets_page() {
                         // --- EMPLOYEE HEADER ROW ---
                         ?>
                         <tr class="wiw-employee-header">
-                            <td colspan="10" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                            <td colspan="11" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
                                 👤 Employee: <?php echo esc_html($employee_name); ?>
                             </td>
                         </tr>
@@ -222,7 +235,7 @@ public function admin_timesheets_page() {
                             // --- PAY PERIOD TOTAL ROW ---
                             ?>
                             <tr class="wiw-period-total">
-                                <td colspan="6" style="background-color: #f0f0ff; font-weight: bold;">
+                                <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
                                     📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                 </td>
                                 
@@ -238,6 +251,7 @@ public function admin_timesheets_page() {
                                 
                                 $time_id = $time_entry->id ?? 'N/A';
                                 $scheduled_shift_display = $time_entry->scheduled_shift_display ?? 'N/A';
+                                $location_name = $time_entry->location_name ?? 'N/A'; // NEW: Get location name
                                 
                                 $start_time_utc = $time_entry->start_time ?? ''; 
                                 $end_time_utc = $time_entry->end_time ?? '';
@@ -286,25 +300,35 @@ public function admin_timesheets_page() {
 
                                 // --- Daily Record Row Display ---
                                 ?>
-                                <tr class="wiw-daily-record">
+                                <tr class="wiw-daily-record" data-time-id="<?php echo esc_attr($time_id); ?>">
                                     <td><?php echo esc_html($time_id); ?></td>
                                     <td <?php echo $date_cell_style; ?>><?php echo esc_html($display_date); ?></td>
                                     <td><?php echo $employee_name; ?></td>
-                                    <td><?php echo esc_html($scheduled_shift_display); ?></td>
+                                    <td><?php echo $location_name; ?></td> <td><?php echo esc_html($scheduled_shift_display); ?></td>
                                     <td><?php echo esc_html($display_start_time); ?></td>
                                     <td><?php echo esc_html($display_end_time); ?></td>
                                     <td><?php echo esc_html($clocked_duration); ?></td>
                                     <td><?php echo esc_html($scheduled_duration); ?></td>
-                                    <td><?php echo esc_html($status); ?></td>
+                                    <td class="wiw-status-cell">
+                                        <span class="wiw-status-text"><?php echo esc_html($status); ?></span>
+                                    </td>
                                     <td>
                                         <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
-                                            View Data
+                                            Data
                                         </button>
+                                        <?php if ($status === 'Pending') : ?>
+                                            <button type="button" 
+                                                    class="button button-primary button-small wiw-approve-action" 
+                                                    data-time-id="<?php echo esc_attr($time_id); ?>" 
+                                                    data-nonce="<?php echo esc_attr($timesheet_nonce); ?>">
+                                                Approve
+                                            </button>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                                 
                                 <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
-                                    <td colspan="10">
+                                    <td colspan="11">
                                         <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
                                             <strong>Raw API Data:</strong>
                                             <pre style="font-size: 11px;"><?php print_r($time_entry); ?></pre>
@@ -322,9 +346,53 @@ public function admin_timesheets_page() {
             
             <script type="text/javascript">
                 jQuery(document).ready(function($) {
+                    
+                    // Toggle Raw Data
                     $('.action-toggle-raw').on('click', function() {
                         var targetId = $(this).data('target');
                         $('#' + targetId).toggle();
+                    });
+
+                    // AJAX Approve Action
+                    $('#wiw-timesheets-table').on('click', '.wiw-approve-action', function(e) {
+                        e.preventDefault();
+                        
+                        var $button = $(this);
+                        var timeId = $button.data('time-id');
+                        var nonce = $button.data('nonce');
+                        var originalText = $button.text();
+
+                        // Visual feedback for processing
+                        $button.text('Processing...').prop('disabled', true);
+
+                        var data = {
+                            'action': 'wiw_approve_timesheet',
+                            'security': nonce,
+                            'time_id': timeId
+                        };
+
+                        $.post(ajaxurl, data, function(response) {
+                            if (response.success) {
+                                // Find the row and update the status cell
+                                var $row = $button.closest('tr');
+                                $row.find('.wiw-status-text').text(response.data.status);
+                                
+                                // Provide success feedback and remove the button
+                                $button.text('Approved').removeClass('button-primary').addClass('button-secondary');
+                                $button.remove();
+
+                                // Optional: Show a temporary success message
+                                alert(response.data.message);
+
+                            } else {
+                                // Handle error
+                                alert('Approval Failed: ' + response.data.message);
+                                $button.text(originalText).prop('disabled', false); // Restore button
+                            }
+                        }).fail(function(jqXHR, textStatus, errorThrown) {
+                            alert('AJAX Request Failed: ' + errorThrown);
+                            $button.text(originalText).prop('disabled', false); // Restore button
+                        });
                     });
                 });
             </script>
@@ -350,6 +418,10 @@ public function admin_timesheets_page() {
                                 <td>Name retrieved from **`users`** data.</td>
                             </tr>
                             <tr>
+                                <th scope="row">Location</th>
+                                <td>**Assigned Location** retrieved from the corresponding shift record.</td>
+                            </tr>
+                            <tr>
                                 <th scope="row">Scheduled Shift</th>
                                 <td>**Scheduled Start - End Time** (local timezone) retrieved from the corresponding shift record. Shows N/A if no shift is linked.</td>
                             </tr>
@@ -359,11 +431,11 @@ public function admin_timesheets_page() {
                             </tr>
                             <tr>
                                 <th scope="row">Hrs Clocked</th>
-                                <td>**Total Clocked Hours** (Start Time to End Time based on timesheet data). Pay period totals aggregate this value.</td>
+                                <td>**Total Clocked Hours**. Pay period totals aggregate this value.</td>
                             </tr>
                             <tr>
                                 <th scope="row">Hrs Scheduled</th>
-                                <td>**Total Scheduled Hours** (Shift Start to Shift End minus Break). Pay period totals aggregate this value.</td>
+                                <td>**Total Scheduled Hours**. Pay period totals aggregate this value.</td>
                             </tr>
                             <tr>
                                 <th scope="row">Status</th>
@@ -371,7 +443,7 @@ public function admin_timesheets_page() {
                             </tr>
                             <tr>
                                 <th scope="row">Actions</th>
-                                <td>Interactive options (currently **View Data**).</td>
+                                <td>Interactive options (**Data** and **Approve**).</td>
                             </tr>
                         </tbody>
                     </table>
@@ -667,8 +739,8 @@ private function fetch_timesheets_data($filters = []) {
     $endpoint = 'times'; 
     
     $default_filters = [
-        // CRITICAL: Remove 'positions', Add 'shifts'
-        'include' => 'users,shifts', 
+        // FIX: Include 'sites' to get location data
+        'include' => 'users,shifts,sites', 
         
         // Default time frame: last 30 days
         'start' => date('Y-m-d', strtotime('-30 days')),
