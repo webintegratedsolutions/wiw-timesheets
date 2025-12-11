@@ -121,6 +121,7 @@ public function admin_timesheets_page() {
         } else {
             // Extract and map data
             $times = isset($timesheets_data->times) ? $timesheets_data->times : [];
+            // --- FIX APPLIED HERE ---
             $included_users = isset($timesheets_data->users) ? $timesheets_data->users : [];
             $included_shifts = isset($timesheets_data->shifts) ? $timesheets_data->shifts : [];
             
@@ -140,7 +141,7 @@ public function admin_timesheets_page() {
                 foreach ($times as &$time_entry) {
                     // 1. Calculate Clocked Duration (for aggregation/display)
                     $clocked_duration = $this->calculate_timesheet_duration_in_hours($time_entry);
-                    $time_entry->calculated_duration = $clocked_duration; // Used for pay period total aggregation
+                    $time_entry->calculated_duration = $clocked_duration; 
                     
                     // 2. Map Scheduled Shift Data
                     $shift_id = $time_entry->shift_id ?? null;
@@ -148,10 +149,8 @@ public function admin_timesheets_page() {
 
                     // 3. Calculate Scheduled Duration and set display times
                     if ($scheduled_shift_obj) {
-                        // Use the dedicated shift duration calculator helper
-                        $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours($scheduled_shift_obj); // Used for pay period total aggregation
+                        $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours($scheduled_shift_obj);
                         
-                        // Store scheduled times for display
                         $dt_sched_start = new DateTime($scheduled_shift_obj->start_time, new DateTimeZone('UTC'));
                         $dt_sched_end = new DateTime($scheduled_shift_obj->end_time, new DateTimeZone('UTC'));
                         $dt_sched_start->setTimezone($wp_timezone);
@@ -165,7 +164,7 @@ public function admin_timesheets_page() {
                         $time_entry->scheduled_shift_display = 'N/A';
                     }
                 }
-                unset($time_entry); // Clean up reference
+                unset($time_entry); 
             }
             // --- END PREPROCESSING ---
 
@@ -194,7 +193,8 @@ public function admin_timesheets_page() {
                         <th width="15%">Scheduled Shift</th>
                         <th width="10%">Clock In</th>
                         <th width="10%">Clock Out</th>
-                        <th width="10%">Hrs Clocked/Scheduled</th>
+                        <th width="7%">Hrs Clocked</th>
+                        <th width="7%">Hrs Scheduled</th>
                         <th width="8%">Status</th>
                         <th width="7%">Actions</th>
                     </tr>
@@ -207,7 +207,7 @@ public function admin_timesheets_page() {
                         // --- EMPLOYEE HEADER ROW ---
                         ?>
                         <tr class="wiw-employee-header">
-                            <td colspan="9" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                            <td colspan="10" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
                                 👤 Employee: <?php echo esc_html($employee_name); ?>
                             </td>
                         </tr>
@@ -216,10 +216,8 @@ public function admin_timesheets_page() {
                         foreach ($periods as $period_start_date => $period_data) : 
                             $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
                             
-                            // *** NEW: Get both total hour types ***
                             $total_clocked = number_format($period_data['total_clocked_hours'] ?? 0.0, 2);
                             $total_scheduled = number_format($period_data['total_scheduled_hours'] ?? 0.0, 2);
-                            $combined_total = "{$total_clocked} / {$total_scheduled}";
 
                             // --- PAY PERIOD TOTAL ROW ---
                             ?>
@@ -227,7 +225,10 @@ public function admin_timesheets_page() {
                                 <td colspan="6" style="background-color: #f0f0ff; font-weight: bold;">
                                     📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                 </td>
-                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $combined_total; ?></td>
+                                
+                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_clocked; ?></td>
+                                <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_scheduled; ?></td>
+                                
                                 <td colspan="2" style="background-color: #f0f0ff;"></td>
                             </tr>
                             <?php
@@ -273,10 +274,9 @@ public function admin_timesheets_page() {
                                 }
                                 // --- End Date and Time Processing ---
                                 
-                                // Combined Duration Display
+                                // Separated Duration Display
                                 $clocked_duration = number_format($time_entry->calculated_duration ?? 0.0, 2);
                                 $scheduled_duration = number_format($time_entry->scheduled_duration ?? 0.0, 2);
-                                $combined_duration = "{$clocked_duration} / {$scheduled_duration}";
                                 
                                 $status = (isset($time_entry->approved) && $time_entry->approved) ? 'Approved' : 'Pending';
 
@@ -293,7 +293,8 @@ public function admin_timesheets_page() {
                                     <td><?php echo esc_html($scheduled_shift_display); ?></td>
                                     <td><?php echo esc_html($display_start_time); ?></td>
                                     <td><?php echo esc_html($display_end_time); ?></td>
-                                    <td><?php echo esc_html($combined_duration); ?></td>
+                                    <td><?php echo esc_html($clocked_duration); ?></td>
+                                    <td><?php echo esc_html($scheduled_duration); ?></td>
                                     <td><?php echo esc_html($status); ?></td>
                                     <td>
                                         <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
@@ -303,7 +304,7 @@ public function admin_timesheets_page() {
                                 </tr>
                                 
                                 <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
-                                    <td colspan="9">
+                                    <td colspan="10">
                                         <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
                                             <strong>Raw API Data:</strong>
                                             <pre style="font-size: 11px;"><?php print_r($time_entry); ?></pre>
@@ -357,8 +358,12 @@ public function admin_timesheets_page() {
                                 <td>**Actual Clock In/Out Time** (local timezone). Clock Out shows **"Active (N/A)"** if the shift is open.</td>
                             </tr>
                             <tr>
-                                <th scope="row">Hrs Clocked/Scheduled</th>
-                                <td>**Clocked Hours** (left of /) and **Scheduled Hours** (right of /). Pay period totals aggregate both sets of hours.</td>
+                                <th scope="row">Hrs Clocked</th>
+                                <td>**Total Clocked Hours** (Start Time to End Time based on timesheet data). Pay period totals aggregate this value.</td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Hrs Scheduled</th>
+                                <td>**Total Scheduled Hours** (Shift Start to Shift End minus Break). Pay period totals aggregate this value.</td>
                             </tr>
                             <tr>
                                 <th scope="row">Status</th>
