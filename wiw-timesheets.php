@@ -56,6 +56,16 @@ class WIW_Timesheet_Manager {
             6                        // Position
         );
 
+        // Submenu page for Employees
+        add_submenu_page(
+            'wiw-timesheets',
+            'WIW Employees',
+            'Employees',
+            'manage_options',
+            'wiw-employees', // Unique slug for this page
+            array( $this, 'admin_employees_page' ) // Function that renders this page
+        );
+
         // Submenu page for Locations
         add_submenu_page(
             'wiw-timesheets',
@@ -583,6 +593,25 @@ private function fetch_timesheets_data($filters = []) {
 }
 
 /**
+ * Fetches user/employee data from the When I Work API.
+ * Uses the /users endpoint.
+ * @return object|WP_Error The API response object or a WP_Error object.
+ */
+private function fetch_employees_data() {
+    $endpoint = 'users'; 
+    
+    // Filters to only show employees (not managers/admins) and include positions/locations
+    $params = [
+        'include' => 'positions,sites', 
+        'employment_status' => 1 // Typically '1' means active employee
+    ];
+
+    $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
+
+    return $result;
+}
+
+/**
  * Fetches site/location data from the When I Work API.
  * Uses the /sites endpoint (https://apidocs.wheniwork.com/external/index.html#tag/Sites).
  * @return object|WP_Error The API response object or a WP_Error object.
@@ -595,6 +624,123 @@ private function fetch_locations_data() {
     $result = Wheniwork::request($endpoint, $params, Wheniwork::METHOD_GET);
 
     return $result;
+}
+
+// In WIW_Timesheet_Manager class...
+
+/**
+ * Renders the Employees management page (Admin Area).
+ */
+public function admin_employees_page() {
+    ?>
+    <div class="wrap">
+        <h1>👥 When I Work Employees</h1>
+        <p>This page displays all active employee records retrieved from the When I Work API.</p>
+        
+        <?php 
+        $employees_data = $this->fetch_employees_data();
+        
+        if ( is_wp_error( $employees_data ) ) {
+            $error_message = $employees_data->get_error_message();
+            ?>
+            <div class="notice notice-error">
+                <p><strong>❌ Employee Fetch Error:</strong> <?php echo esc_html($error_message); ?></p>
+                <?php if ($employees_data->get_error_code() === 'wiw_token_missing') : ?>
+                    <p>Please go to the <a href="<?php echo esc_url(admin_url('admin.php?page=wiw-timesheets-settings')); ?>">Settings Page</a> to log in and save your session token.</p>
+                <?php endif; ?>
+            </div>
+            <?php
+        } else {
+            $users = isset($employees_data->users) ? $employees_data->users : [];
+            
+            // Define the specific position ID to Name mapping as requested
+            $position_name_map = [
+                2611462 => 'ECA',
+                2611465 => 'RECE',
+            ];
+            
+            if (empty($users)) : ?>
+                <div class="notice notice-warning"><p>No active employee records found.</p></div>
+            <?php else : ?>
+
+            <div class="notice notice-success"><p>✅ Successfully fetched <?php echo count($users); ?> employees.</p></div>
+            
+            <table class="wp-list-table widefat fixed striped">
+                <thead>
+                    <tr>
+                        <th width="8%">ID</th>
+                        <th width="20%">Name</th>
+                        <th width="15%">Email</th>
+                        <th width="15%">Positions</th> <th width="15%">Employee Code</th> <th width="12%">Status</th>
+                        <th width="15%">View Data</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php 
+                    $employee_row_index = 0;
+                    foreach ($users as $user) : 
+                        
+                        $user_id = $user->id ?? 'N/A';
+                        $full_name = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? ''));
+                        
+                        // NEW: Get Employee Code
+                        $employee_code = $user->employee_code ?? 'N/A';
+                        
+                        // NEW LOGIC: Process all positions and map them
+                        $user_position_ids = $user->positions ?? [];
+                        $mapped_positions = [];
+                        
+                        foreach ($user_position_ids as $pos_id) {
+                            if (isset($position_name_map[$pos_id])) {
+                                $mapped_positions[] = $position_name_map[$pos_id];
+                            }
+                        }
+                        
+                        // Display comma-separated list or 'N/A'
+                        $positions_display = !empty($mapped_positions) ? implode(', ', $mapped_positions) : 'N/A';
+                        
+                        $status = ($user->is_active ?? false) ? 'Active' : 'Inactive';
+                        
+                        $row_id = 'wiw-employee-raw-' . $employee_row_index++;
+                    ?>
+                        <tr class="wiw-employee-record">
+                            <td><?php echo esc_html($user_id); ?></td>
+                            <td style="font-weight: bold;"><?php echo esc_html($full_name); ?></td>
+                            <td><?php echo esc_html($user->email ?? 'N/A'); ?></td>
+                            <td><?php echo esc_html($positions_display); ?></td> <td><?php echo esc_html($employee_code); ?></td> <td><?php echo esc_html($status); ?></td>
+                            <td>
+                                <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
+                                    View Data
+                                </button>
+                            </td>
+                        </tr>
+                        
+                        <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
+                            <td colspan="7"> 
+                                <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
+                                    <strong>Raw API Data:</strong>
+                                    <pre style="font-size: 11px;"><?php print_r($user); ?></pre>
+                                </div>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            
+            <script type="text/javascript">
+                jQuery(document).ready(function($) {
+                    $('.action-toggle-raw').on('click', function() {
+                        var targetId = $(this).data('target');
+                        $('#' + targetId).toggle();
+                    });
+                });
+            </script>
+            
+            <?php endif; // End check for empty users
+        } // End 'else' block for successful data fetch
+        ?>
+    </div>
+    <?php
 }
 
 /**
