@@ -21,6 +21,26 @@ if ( ! defined( 'WIW_PLUGIN_PATH' ) ) {
 require_once WIW_PLUGIN_PATH . 'includes/wheniwork.php';
 
 /**
+ * Enqueue admin CSS for WIW Timesheets plugin.
+ */
+function wiwts_enqueue_admin_styles( $hook_suffix ) {
+    // Optional: only load on your plugin's admin screen.
+    // Replace 'toplevel_page_wiw-timesheets' with your actual screen ID / hook.
+    if ( $hook_suffix !== 'toplevel_page_wiw-timesheets' ) {
+        return;
+    }
+
+    wp_enqueue_style(
+        'wiwts-admin-styles',
+        plugin_dir_url( __FILE__ ) . 'css/wiw-admin.css',
+        array(),          // dependencies
+        '1.0.0'           // version
+    );
+}
+add_action( 'admin_enqueue_scripts', 'wiwts_enqueue_admin_styles' );
+
+
+/**
  * Core Plugin Class
  */
 class WIW_Timesheet_Manager {
@@ -96,6 +116,117 @@ class WIW_Timesheet_Manager {
             array( $this, 'admin_settings_page' )
         );
     }
+
+// Register_ajax_hooks()
+    private function register_ajax_hooks() {
+    // ... existing hooks (e.g., for login, settings, timesheet approval)
+
+    // Hook for editing a single timesheet
+    add_action( 'wp_ajax_wiw_edit_timesheet_hours', array( $this, 'ajax_edit_timesheet_hours' ) );
+}
+
+/**
+ * Handles the AJAX request to update a single timesheet record's clock times.
+ */
+public function ajax_edit_timesheet_hours() {
+    // 1. Security Check
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( array( 'message' => 'Authorization failed.' ), 403 );
+    }
+
+    // You need to replace 'wiw_timesheet_nonce' with the actual nonce name if it's different.
+    if ( ! isset( $_POST['security'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['security'] ) ), 'wiw_timesheet_nonce' ) ) {
+        wp_send_json_error( array( 'message' => 'Security check failed.' ), 403 );
+    }
+
+    $time_id = isset( $_POST['time_id'] ) ? absint( $_POST['time_id'] ) : 0;
+    if ( $time_id === 0 ) {
+        wp_send_json_error( array( 'message' => 'Invalid timesheet ID.' ) );
+    }
+
+    $start_datetime_full = isset( $_POST['start_datetime_full'] ) ? sanitize_text_field( wp_unslash( $_POST['start_datetime_full'] ) ) : '';
+    $end_datetime_full = isset( $_POST['end_datetime_full'] ) ? sanitize_text_field( wp_unslash( $_POST['end_datetime_full'] ) ) : '';
+
+    $start_time_new = isset( $_POST['start_time_new'] ) ? sanitize_text_field( wp_unslash( $_POST['start_time_new'] ) ) : '';
+    $end_time_new = isset( $_POST['end_time_new'] ) ? sanitize_text_field( wp_unslash( $_POST['end_time_new'] ) ) : '';
+
+    // 2. Reconstruct the Full Date/Time in UTC
+    $update_data = [];
+
+    // --- Timezone Setup ---
+    $wp_timezone_string = get_option('timezone_string');
+    $wp_timezone = new DateTimeZone($wp_timezone_string ?: 'UTC'); 
+    // --- End Timezone Setup ---
+
+
+    // --- Start Time Reconstruction ---
+    if ( ! empty( $start_datetime_full ) && ! empty( $start_time_new ) ) {
+        try {
+            // Get the date part from the original full datetime string (in local timezone)
+            $dt_original_start = new DateTime(explode(' ', $start_datetime_full)[0], $wp_timezone);
+            $date_part = $dt_original_start->format('Y-m-d');
+            
+            // Combine new time (H:i) with the original date (Y-m-d) and add seconds back as 00
+            $new_local_datetime_str = "{$date_part} {$start_time_new}:00"; 
+            
+            // Create the final local datetime object
+            $dt_new_local = new DateTime($new_local_datetime_str, $wp_timezone);
+            
+            // Convert to UTC for the API
+            $dt_new_local->setTimezone(new DateTimeZone('UTC'));
+            $update_data['start_time'] = $dt_new_local->format('Y-m-d H:i:s');
+        } catch (Exception $e) {
+            wp_send_json_error( array( 'message' => 'Error parsing new start time: ' . $e->getMessage() ) );
+        }
+    }
+
+    // --- End Time Reconstruction ---
+    if ( ! empty( $end_datetime_full ) && ! empty( $end_time_new ) ) {
+        try {
+            // Get the date part from the original full datetime string (in local timezone)
+            $dt_original_end = new DateTime(explode(' ', $end_datetime_full)[0], $wp_timezone);
+            $date_part = $dt_original_end->format('Y-m-d');
+            
+            // Combine new time (H:i) with the original date (Y-m-d) and add seconds back as 00
+            $new_local_datetime_str = "{$date_part} {$end_time_new}:00"; 
+            
+            // Create the final local datetime object
+            $dt_new_local = new DateTime($new_local_datetime_str, $wp_timezone);
+            
+            // Convert to UTC for the API
+            $dt_new_local->setTimezone(new DateTimeZone('UTC'));
+            $update_data['end_time'] = $dt_new_local->format('Y-m-d H:i:s');
+        } catch (Exception $e) {
+            wp_send_json_error( array( 'message' => 'Error parsing new end time: ' . $e->getMessage() ) );
+        }
+    }
+    
+    if ( empty( $update_data ) ) {
+        wp_send_json_error( array( 'message' => 'No valid time data provided for update.' ) );
+    }
+
+    // 3. Call API to Update Timesheet
+    // Assumes WIW_API_Client::request is available and is the static method on the API class.
+    $endpoint = "times/{$time_id}";
+    $result = WIW_API_Client::request( 
+        $endpoint, 
+        ['time' => $update_data], // API expects 'time' wrapper for PUT
+        WIW_API_Client::METHOD_PUT 
+    );
+
+    // 4. Send Response
+    if ( is_wp_error( $result ) ) {
+        wp_send_json_error( array( 
+            'message' => 'API Update Failed: ' . $result->get_error_message() 
+        ) );
+    } else {
+        // Success response
+        wp_send_json_success( array( 
+            'message' => 'Timesheet #' . $time_id . ' successfully updated. Page will reload to show new hours.',
+            'new_data' => $result->time
+        ) );
+    }
+}
 
 /**
  * Renders the main Timesheets management page (Admin Area).
@@ -226,11 +357,24 @@ public function admin_timesheets_page() {
                         </tr>
                         <?php
 
-                        foreach ($periods as $period_start_date => $period_data) : 
+foreach ($periods as $period_start_date => $period_data) : 
                             $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
                             
                             $total_clocked = number_format($period_data['total_clocked_hours'] ?? 0.0, 2);
                             $total_scheduled = number_format($period_data['total_scheduled_hours'] ?? 0.0, 2);
+                            
+                            // Collect pending IDs for the Approve Period button
+                            $is_period_pending = false;
+                            $period_time_ids = [];
+                            foreach ($period_data['records'] as $time_entry) {
+                                $time_id = $time_entry->id ?? null;
+                                // Check if a record is pending AND has a time_id
+                                if ($time_id && (isset($time_entry->approved) && !$time_entry->approved)) {
+                                    $is_period_pending = true;
+                                    $period_time_ids[] = $time_id;
+                                }
+                            }
+                            $period_time_ids_str = implode(',', $period_time_ids);
 
                             // --- PAY PERIOD TOTAL ROW ---
                             ?>
@@ -242,7 +386,17 @@ public function admin_timesheets_page() {
                                 <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_clocked; ?></td>
                                 <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_scheduled; ?></td>
                                 
-                                <td colspan="2" style="background-color: #f0f0ff;"></td>
+                                <td colspan="2" style="background-color: #f0f0ff; text-align: right;">
+                                    <button type="button" 
+                                            class="button button-primary button-small wiw-approve-period-ui" 
+                                            data-period-ids="<?php echo esc_attr($period_time_ids_str); ?>"
+                                            data-nonce="<?php echo esc_attr($timesheet_nonce); ?>"
+                                            title="<?php echo $is_period_pending ? 'Approve all pending records in this pay period.' : 'All records in this period are already approved.'; ?>"
+                                            <?php echo $is_period_pending ? '' : 'disabled'; ?>
+                                    >
+                                        Approve Period
+                                    </button>
+                                </td>
                             </tr>
                             <?php
 
@@ -251,7 +405,7 @@ public function admin_timesheets_page() {
                                 
                                 $time_id = $time_entry->id ?? 'N/A';
                                 $scheduled_shift_display = $time_entry->scheduled_shift_display ?? 'N/A';
-                                $location_name = $time_entry->location_name ?? 'N/A'; // NEW: Get location name
+                                $location_name = $time_entry->location_name ?? 'N/A'; 
                                 
                                 $start_time_utc = $time_entry->start_time ?? ''; 
                                 $end_time_utc = $time_entry->end_time ?? '';
@@ -260,6 +414,10 @@ public function admin_timesheets_page() {
                                 $display_date = 'N/A';
                                 $display_start_time = 'N/A';
                                 $display_end_time = 'Active (N/A)';
+                                $raw_start_datetime = '';
+                                $raw_start_time_only = '';
+                                $raw_end_datetime = '';
+                                $raw_end_time_only = '';   
                                 $date_match = true;
 
                                 try {
@@ -269,6 +427,9 @@ public function admin_timesheets_page() {
                                         
                                         $display_date = $dt_start_utc->format('Y-m-d');
                                         $display_start_time = $dt_start_utc->format($time_format);
+                                        $raw_start_datetime = $dt_start_utc->format('Y-m-d H:i:s'); 
+                                        // FIX: Removed seconds from input value
+                                        $raw_start_time_only = $dt_start_utc->format('H:i'); 
                                     }
 
                                     if (!empty($end_time_utc)) {
@@ -276,6 +437,9 @@ public function admin_timesheets_page() {
                                         $dt_end_utc->setTimezone($wp_timezone);
                                         
                                         $display_end_time = $dt_end_utc->format($time_format);
+                                        $raw_end_datetime = $dt_end_utc->format('Y-m-d H:i:s');
+                                        // FIX: Removed seconds from input value
+                                        $raw_end_time_only = $dt_end_utc->format('H:i');     
                                         
                                         if ($display_date !== $dt_end_utc->format('Y-m-d')) {
                                             $date_match = false;
@@ -288,42 +452,70 @@ public function admin_timesheets_page() {
                                 }
                                 // --- End Date and Time Processing ---
                                 
-                                // Separated Duration Display
                                 $clocked_duration = number_format($time_entry->calculated_duration ?? 0.0, 2);
                                 $scheduled_duration = number_format($time_entry->scheduled_duration ?? 0.0, 2);
                                 
                                 $status = (isset($time_entry->approved) && $time_entry->approved) ? 'Approved' : 'Pending';
 
                                 $row_id = 'wiw-raw-' . $global_row_index++;
+                                $row_data_id = 'wiw-record-' . $time_id;
                                 
                                 $date_cell_style = ($date_match || $display_end_time === 'Active (N/A)') ? '' : 'style="background-color: #ffe0e0;" title="Clock out date does not match clock in date."';
 
+                                // Determine if the Edit button should be disabled for approved records
+                                $edit_button_style = ($status === 'Approved') ? 'style="display:none;"' : '';
+
                                 // --- Daily Record Row Display ---
                                 ?>
-                                <tr class="wiw-daily-record" data-time-id="<?php echo esc_attr($time_id); ?>">
+                                <tr class="wiw-daily-record" id="<?php echo esc_attr($row_data_id); ?>" data-time-id="<?php echo esc_attr($time_id); ?>">
                                     <td><?php echo esc_html($time_id); ?></td>
                                     <td <?php echo $date_cell_style; ?>><?php echo esc_html($display_date); ?></td>
                                     <td><?php echo $employee_name; ?></td>
-                                    <td><?php echo $location_name; ?></td> <td><?php echo esc_html($scheduled_shift_display); ?></td>
-                                    <td><?php echo esc_html($display_start_time); ?></td>
-                                    <td><?php echo esc_html($display_end_time); ?></td>
+                                    <td><?php echo $location_name; ?></td> 
+                                    <td><?php echo esc_html($scheduled_shift_display); ?></td>
+
+                                    <td class="wiw-clock-in-cell">
+                                        <span class="wiw-display-time"><?php echo esc_html($display_start_time); ?></span>
+                                        <input 
+                                            type="text" 
+                                            class="wiw-edit-input wiw-start-time" 
+                                            value="<?php echo esc_attr($raw_start_time_only); ?>" 
+                                            data-full-datetime="<?php echo esc_attr($raw_start_datetime); ?>" 
+                                            style="display:none; width: 80px; font-size: 11px;"
+                                        >
+                                    </td>
+                                    
+                                    <td class="wiw-clock-out-cell">
+                                        <span class="wiw-display-time"><?php echo esc_html($display_end_time); ?></span>
+                                        <input 
+                                            type="text" 
+                                            class="wiw-edit-input wiw-end-time" 
+                                            value="<?php echo esc_attr($raw_end_time_only); ?>" 
+                                            data-full-datetime="<?php echo esc_attr($raw_end_datetime); ?>" 
+                                            style="display:none; width: 80px; font-size: 11px;"
+                                        >
+                                    </td>
+                                    
                                     <td><?php echo esc_html($clocked_duration); ?></td>
                                     <td><?php echo esc_html($scheduled_duration); ?></td>
                                     <td class="wiw-status-cell">
                                         <span class="wiw-status-text"><?php echo esc_html($status); ?></span>
                                     </td>
-                                    <td>
+                                    <td class="wiw-actions-cell">
                                         <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
                                             Data
                                         </button>
-                                        <?php if ($status === 'Pending') : ?>
-                                            <button type="button" 
-                                                    class="button button-primary button-small wiw-approve-action" 
-                                                    data-time-id="<?php echo esc_attr($time_id); ?>" 
-                                                    data-nonce="<?php echo esc_attr($timesheet_nonce); ?>">
-                                                Approve
+                                        <div class="wiw-action-group">
+                                            <button type="button" class="button button-primary button-small wiw-edit-action" <?php echo $edit_button_style; ?>>
+                                                Edit Hours
                                             </button>
-                                        <?php endif; ?>
+                                            <button type="button" class="button button-primary button-small wiw-save-action" style="display:none;">
+                                                Save
+                                            </button>
+                                            <button type="button" class="button button-secondary button-small wiw-cancel-action" style="display:none;">
+                                                Cancel
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                                 
@@ -344,58 +536,168 @@ public function admin_timesheets_page() {
             </table>
             <?php endif; // End check for empty grouped_timesheets ?>
             
-            <script type="text/javascript">
-                jQuery(document).ready(function($) {
+<script>
+    jQuery(document).ready(function($) {
+        
+        // --- 1. Edit Hours Action (Toggles Inputs) ---
+        $('#wiw-timesheets-table').on('click', '.wiw-edit-action', function(e) {
+            e.preventDefault();
+            
+            var $button = $(this);
+            var $row = $button.closest('.wiw-daily-record');
+            
+            // Hide display spans
+            $row.find('.wiw-display-time').hide();
+            
+            // Show input fields and set focus to the start time
+            $row.find('.wiw-edit-input').show();
+            $row.find('.wiw-start-time').focus();
+            
+            // Hide Edit button and show Save/Cancel
+            $button.hide();
+            $row.find('.wiw-save-action, .wiw-cancel-action').show();
+            
+            // Optional: Temporarily disable the "Approve Period" button 
+            $('.wiw-approve-period-ui').prop('disabled', true);
+        });
+
+        // --- 2. Cancel Action (Reverts View) ---
+        $('#wiw-timesheets-table').on('click', '.wiw-cancel-action', function(e) {
+            e.preventDefault();
+            
+            var $row = $(this).closest('.wiw-daily-record');
+            
+            // Show display spans
+            $row.find('.wiw-display-time').show();
+            
+            // Hide input fields
+            $row.find('.wiw-edit-input').hide();
+            
+            // Restore Edit button and hide Save/Cancel
+            $row.find('.wiw-edit-action').show();
+            $row.find('.wiw-save-action, .wiw-cancel-action').hide();
+            
+            // Re-enable the "Approve Period" button
+            $('.wiw-approve-period-ui').prop('disabled', false);
+        });
+
+        // --- 3. Save Action (AJAX to Update Hours) ---
+        $('#wiw-timesheets-table').on('click', '.wiw-save-action', function(e) {
+            e.preventDefault();
+            
+            var $button = $(this);
+            var $row = $button.closest('.wiw-daily-record');
+            var timeId = $row.data('time-id');
+            // Assuming the nonce is stored on the pay period button
+            var nonce = $row.closest('table').find('.wiw-approve-period-ui').data('nonce'); 
+            
+            var $startTimeInput = $row.find('.wiw-start-time');
+            var $endTimeInput = $row.find('.wiw-end-time');
+            
+            var newTimeOnlyStart = $startTimeInput.val(); 
+            var newTimeOnlyEnd = $endTimeInput.val();     
+            
+            var originalFullDateStart = $startTimeInput.data('full-datetime');
+            var originalFullDateEnd = $endTimeInput.data('full-datetime');
+            
+            // Basic validation: ensure new times are in HH:MM format
+            var timeRegex = /^\d{1,2}:\d{2}$/;
+            if (!newTimeOnlyStart.match(timeRegex) || (originalFullDateEnd && !newTimeOnlyEnd.match(timeRegex))) {
+                 alert('Please enter valid clock in and clock out times in HH:MM format (e.g., 10:30).');
+                 return;
+            }
+
+            // Disable buttons and show loading state
+            $button.text('Saving...').prop('disabled', true);
+            $row.find('.wiw-cancel-action').prop('disabled', true);
+
+            var data = {
+                'action': 'wiw_edit_timesheet_hours', // PHP handler function name
+                'security': nonce,
+                'time_id': timeId,
+                'start_time_new': newTimeOnlyStart,
+                'end_time_new': newTimeOnlyEnd,
+                'start_datetime_full': originalFullDateStart,
+                'end_datetime_full': originalFullDateEnd
+            };
+
+            $.post(ajaxurl, data, function(response) {
+                if (response.success) {
+                    alert('Success! ' + response.data.message);
+                    // Reload the page to fetch and display the new calculated hours/status/times
+                    location.reload();
+                } else {
+                    alert('Save Failed: ' + response.data.message);
+                    $button.text('Save').prop('disabled', false);
+                    $row.find('.wiw-cancel-action').prop('disabled', false);
+                }
+            }).fail(function(jqXHR, textStatus, errorThrown) {
+                alert('AJAX Request Failed: ' + errorThrown);
+                $button.text('Save').prop('disabled', false);
+                $row.find('.wiw-cancel-action').prop('disabled', false);
+            });
+        });
+
+
+        // --- 4. Approve Period Action (AJAX to Approve Multiple IDs) ---
+        $('#wiw-timesheets-table').on('click', '.wiw-approve-period-ui', function(e) {
+            e.preventDefault();
+            
+            var $button = $(this);
+            var periodIds = $button.data('period-ids');
+            var nonce = $button.data('nonce');
+            var originalTitle = $button.attr('title');
+
+            if ($button.is(':disabled') || !periodIds) {
+                alert($button.attr('title') || 'No pending records to approve.');
+                return;
+            }
+            
+            // Disable button and show loading state
+            $button.prop('disabled', true).text('Approving...');
+
+            var data = {
+                'action': 'wiw_approve_timesheet_period', // PHP handler function name
+                'security': nonce,
+                'time_ids': periodIds // Comma-separated list of IDs
+            };
+
+            $.post(ajaxurl, data, function(response) {
+                if (response.success) {
+                    alert('Success! ' + response.data.message);
                     
-                    // Toggle Raw Data
-                    $('.action-toggle-raw').on('click', function() {
-                        var targetId = $(this).data('target');
-                        $('#' + targetId).toggle();
+                    // Find and update the status of all affected rows (client-side update)
+                    var approvedIds = periodIds.split(',');
+                    approvedIds.forEach(function(id) {
+                        var $row = $('#wiw-record-' + id.trim());
+                        $row.find('.wiw-status-text').text('Approved');
+                        // Remove the ability to edit an approved timesheet
+                        $row.find('.wiw-edit-action').hide();
                     });
+                    
+                    // Disable the period button since its job is done
+                    $button.prop('disabled', true).text('Approved').removeClass('button-primary').addClass('button-secondary');
+                    $button.attr('title', 'All timesheets in this period are now approved.');
 
-                    // AJAX Approve Action
-                    $('#wiw-timesheets-table').on('click', '.wiw-approve-action', function(e) {
-                        e.preventDefault();
-                        
-                        var $button = $(this);
-                        var timeId = $button.data('time-id');
-                        var nonce = $button.data('nonce');
-                        var originalText = $button.text();
+                } else {
+                    alert('Approval Failed: ' + response.data.message);
+                    $button.prop('disabled', false).text('Approve Period').attr('title', originalTitle); // Restore button
+                }
+            }).fail(function(jqXHR, textStatus, errorThrown) {
+                alert('AJAX Request Failed: ' + errorThrown);
+                $button.prop('disabled', false).text('Approve Period').attr('title', originalTitle); // Restore button
+            });
+        });
+        
+        // --- 5. Raw Data Toggle ---
+        $('#wiw-timesheets-table').on('click', '.action-toggle-raw', function(e) {
+            e.preventDefault();
+            var targetId = $(this).data('target');
+            $('#' + targetId).toggle();
+        });
 
-                        // Visual feedback for processing
-                        $button.text('Processing...').prop('disabled', true);
-
-                        var data = {
-                            'action': 'wiw_approve_timesheet',
-                            'security': nonce,
-                            'time_id': timeId
-                        };
-
-                        $.post(ajaxurl, data, function(response) {
-                            if (response.success) {
-                                // Find the row and update the status cell
-                                var $row = $button.closest('tr');
-                                $row.find('.wiw-status-text').text(response.data.status);
-                                
-                                // Provide success feedback and remove the button
-                                $button.text('Approved').removeClass('button-primary').addClass('button-secondary');
-                                $button.remove();
-
-                                // Optional: Show a temporary success message
-                                alert(response.data.message);
-
-                            } else {
-                                // Handle error
-                                alert('Approval Failed: ' + response.data.message);
-                                $button.text(originalText).prop('disabled', false); // Restore button
-                            }
-                        }).fail(function(jqXHR, textStatus, errorThrown) {
-                            alert('AJAX Request Failed: ' + errorThrown);
-                            $button.text(originalText).prop('disabled', false); // Restore button
-                        });
-                    });
-                });
-            </script>
+    });
+</script>
 
             <hr/>
             <details style="border: 1px solid #ccc; background: #fff; padding: 10px; margin-top: 20px;">

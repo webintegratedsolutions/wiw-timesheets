@@ -1,0 +1,13 @@
+/**
+ * Styles for the When I Work Timesheet Admin Dashboard
+ */
+
+/* Add margin to all primary buttons to separate them vertically */
+.wp-core-ui .button-primary {
+    margin: 5px 0;
+}
+
+/* Add a small top margin to the action group on the daily record rows */
+.wiw-actions-cell .wiw-action-group {
+    margin-top: 5px;
+}
