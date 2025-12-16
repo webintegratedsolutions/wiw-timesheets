@@ -130,6 +130,8 @@ if (empty($employee_data)):
                 
                 $date_cell_style = ($date_match || $display_end_time === 'Active (N/A)') ? '' : 'style="background-color: #ffe0e0;" title="Clock out date does not match clock in date."';
                 $edit_button_style = ($status === 'Approved') ? 'style="display:none;"' : '';
+                // Disable approve button if already approved
+                $approve_button_style = ($status === 'Approved') ? 'style="display:none;" disabled' : '';
 
                 // --- Daily Record Row Display ---
                 ?>
@@ -183,6 +185,15 @@ if (empty($employee_data)):
                         <span class="wiw-status-text"><?php echo esc_html($status); ?></span>
                     </td>
                     <td class="wiw-actions-cell">
+                        <button type="button" 
+                                class="button button-primary button-small wiw-approve-shift-ui" 
+                                data-nonce="<?php echo esc_attr($timesheet_nonce); ?>"
+                                data-time-id="<?php echo esc_attr($time_id); ?>"
+                                title="Approve this single shift."
+                                <?php echo $approve_button_style; ?>
+                        >
+                            Approve Shift Hours
+                        </button>
                         <div class="wiw-action-group">
                             <button type="button" class="button button-primary button-small wiw-edit-action" <?php echo $edit_button_style; ?>>
                                 Edit Hours
