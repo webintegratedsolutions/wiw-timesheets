@@ -183,9 +183,6 @@ if (empty($employee_data)):
                         <span class="wiw-status-text"><?php echo esc_html($status); ?></span>
                     </td>
                     <td class="wiw-actions-cell">
-                        <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
-                            Data
-                        </button>
                         <div class="wiw-action-group">
                             <button type="button" class="button button-primary button-small wiw-edit-action" <?php echo $edit_button_style; ?>>
                                 Edit Hours
@@ -200,6 +197,14 @@ if (empty($employee_data)):
                     </td>
                 </tr>
                 
+                <tr class="wiw-data-toggle-row" style="background-color: #f8f8ff;">
+                    <td colspan="12" style="padding-top: 5px; padding-bottom: 5px; text-align: left;">
+                        <button type="button" class="button action-toggle-raw" data-target="<?php echo esc_attr($row_id); ?>">
+                            View Shift Record Data
+                        </button>
+                    </td>
+                </tr>
+
                 <tr id="<?php echo esc_attr($row_id); ?>" style="display:none; background-color: #f9f9f9;">
                     <td colspan="12">
                         <div style="padding: 10px; border: 1px solid #ccc; max-height: 300px; overflow: auto;">
