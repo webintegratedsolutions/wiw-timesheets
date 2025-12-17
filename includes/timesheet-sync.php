@@ -9,10 +9,6 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Handles mirroring API times into local DB tables.
  */
 
-if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
-    return;
-}
-
 /**
  * Syncs fetched timesheet data from the WIW API into local DB tables:
  * - wp_wiw_timesheets        (header: one per employee + week + location)

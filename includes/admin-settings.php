@@ -8,10 +8,6 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  * It must be loaded before the class is instantiated.
  */
 
-if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
-    return;
-}
-
 trait WIW_Timesheet_Admin_Settings_Trait {
 
     public function add_admin_menus() {

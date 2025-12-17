@@ -9,10 +9,6 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Pure logic only — no hooks, no output, no side effects.
  */
 
-if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
-    return;
-}
-
 trait WIW_Timesheet_Helpers_Trait {
 
     private function calculate_shift_duration_in_hours( $shift_entry ) {
