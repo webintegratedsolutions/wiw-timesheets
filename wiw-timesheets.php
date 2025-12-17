@@ -17,8 +17,16 @@ if ( ! defined( 'WIW_PLUGIN_PATH' ) ) {
     define( 'WIW_PLUGIN_PATH', plugin_dir_path( __FILE__ ) );
 }
 
+// Define plugin URL for assets (CSS/JS)
+if ( ! defined( 'WIW_PLUGIN_URL' ) ) {
+    define( 'WIW_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+}
+
 // 💥 IMPORTANT: Include the When I Work API Wrapper file
 require_once WIW_PLUGIN_PATH . 'includes/wheniwork.php';
+
+// Include the admin enqueue file for styles/scripts
+require_once WIW_PLUGIN_PATH . 'includes/admin-enqueue.php';
 
 
 /**
@@ -117,27 +125,8 @@ $sql_edit_logs = "CREATE TABLE {$table_edit_logs} (
     dbDelta( $sql_edit_logs );
 }
 
-
-
 /**
- * Enqueue admin CSS for WIW Timesheets plugin.
- */
-function wiwts_enqueue_admin_styles( $hook_suffix ) {
-    // Optional: only load on your plugin's admin screen.
-    // Replace 'toplevel_page_wiw-timesheets' with your actual screen ID / hook.
-    if ( $hook_suffix !== 'toplevel_page_wiw-timesheets' ) {
-        return;
-    }
-
-    wp_enqueue_style(
-        'wiwts-admin-styles',
-        plugin_dir_url( __FILE__ ) . 'css/wiw-admin.css',
-        array(),          // dependencies
-        '1.0.0'           // version
-    );
-}
-add_action( 'admin_enqueue_scripts', 'wiwts_enqueue_admin_styles' );/**
- * Core Plugin Class
+* Core Plugin Class
  */
 class WIW_Timesheet_Manager {
 
