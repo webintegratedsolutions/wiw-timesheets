@@ -34,6 +34,7 @@ function wiw_timesheet_manager_install() {
 
     $table_timesheets        = $wpdb->prefix . 'wiw_timesheets';
     $table_timesheet_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_edit_logs         = $wpdb->prefix . 'wiw_timesheet_edit_logs';
 
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
@@ -80,8 +81,40 @@ function wiw_timesheet_manager_install() {
         KEY entry_date (date)
     ) {$charset_collate};";
 
+// Edit logs: one row per field change
+$sql_edit_logs = "CREATE TABLE {$table_edit_logs} (
+    id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+
+    timesheet_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+    entry_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+    wiw_time_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+
+    edit_type VARCHAR(50) NOT NULL DEFAULT '',
+
+    old_value TEXT NULL,
+    new_value TEXT NULL,
+
+    edited_by_user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+    edited_by_user_login VARCHAR(60) NOT NULL DEFAULT '',
+    edited_by_display_name VARCHAR(191) NOT NULL DEFAULT '',
+
+    employee_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+    employee_name VARCHAR(191) NOT NULL DEFAULT '',
+    location_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+    location_name VARCHAR(191) NOT NULL DEFAULT '',
+    week_start_date DATE NOT NULL,
+
+    created_at DATETIME NOT NULL,
+
+    PRIMARY KEY  (id),
+    KEY timesheet_id (timesheet_id),
+    KEY entry_id (entry_id),
+    KEY created_at (created_at)
+) {$charset_collate};";
+
     dbDelta( $sql_timesheets );
     dbDelta( $sql_timesheet_entries );
+    dbDelta( $sql_edit_logs );
 }
 
 
@@ -131,6 +164,46 @@ class WIW_Timesheet_Manager {
     add_action( 'admin_post_wiw_reset_local_timesheet', array( $this, 'handle_reset_local_timesheet' ) );
 
     }
+
+    /**
+ * Insert one edit log record (one per field change).
+ */
+private function insert_local_edit_log( $args ) {
+    global $wpdb;
+
+    $table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+
+    $wpdb->insert(
+        $table_logs,
+        array(
+            'timesheet_id'           => (int) ( $args['timesheet_id'] ?? 0 ),
+            'entry_id'               => (int) ( $args['entry_id'] ?? 0 ),
+            'wiw_time_id'            => (int) ( $args['wiw_time_id'] ?? 0 ),
+            'edit_type'              => (string) ( $args['edit_type'] ?? '' ),
+            'old_value'              => (string) ( $args['old_value'] ?? '' ),
+            'new_value'              => (string) ( $args['new_value'] ?? '' ),
+            'edited_by_user_id'      => (int) ( $args['edited_by_user_id'] ?? 0 ),
+            'edited_by_user_login'   => (string) ( $args['edited_by_user_login'] ?? '' ),
+            'edited_by_display_name' => (string) ( $args['edited_by_display_name'] ?? '' ),
+            'employee_id'            => (int) ( $args['employee_id'] ?? 0 ),
+            'employee_name'          => (string) ( $args['employee_name'] ?? '' ),
+            'location_id'            => (int) ( $args['location_id'] ?? 0 ),
+            'location_name'          => (string) ( $args['location_name'] ?? '' ),
+            'week_start_date'        => (string) ( $args['week_start_date'] ?? '' ),
+            'created_at'             => (string) ( $args['created_at'] ?? current_time( 'mysql' ) ),
+        ),
+        array(
+            '%d','%d','%d',
+            '%s',
+            '%s','%s',
+            '%d','%s','%s',
+            '%d','%s',
+            '%d','%s',
+            '%s',
+            '%s'
+        )
+    );
+}
 
     /**
      * Set up the administrative menu pages.
@@ -1675,6 +1748,53 @@ if ( isset( $_GET['reset_error'] ) && $_GET['reset_error'] !== '' ) : ?>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+<?php
+$table_edit_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+
+$logs = $wpdb->get_results(
+    $wpdb->prepare(
+        "SELECT * FROM {$table_edit_logs}
+         WHERE timesheet_id = %d
+         ORDER BY created_at DESC, id DESC",
+        (int) $header->id
+    )
+);
+?>
+
+<h3 style="margin-top: 30px;">Edit Log</h3>
+<?php if ( empty( $logs ) ) : ?>
+    <p>No edits have been made to this timesheet yet.</p>
+<?php else : ?>
+    <table class="widefat fixed striped">
+        <thead>
+            <tr>
+                <th width="18%">When</th>
+                <th width="18%">Edited By</th>
+                <th width="14%">Edit Type</th>
+                <th width="25%">From</th>
+                <th width="25%">To</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ( $logs as $log ) : ?>
+                <tr>
+                    <td><?php echo esc_html( $log->created_at ); ?></td>
+                    <td>
+                        <?php
+                        $who = $log->edited_by_display_name ? $log->edited_by_display_name : $log->edited_by_user_login;
+                        echo esc_html( $who );
+                        ?>
+                        <br/><small>User ID: <?php echo esc_html( (int) $log->edited_by_user_id ); ?></small>
+                    </td>
+                    <td><?php echo esc_html( $log->edit_type ); ?></td>
+                    <td><code><?php echo esc_html( $log->old_value ); ?></code></td>
+                    <td><code><?php echo esc_html( $log->new_value ); ?></code></td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+<?php endif; ?>
+ 
             <?php endif; ?>
 
 <?php
@@ -1758,6 +1878,7 @@ if (!/^\d+$/.test(newBreak)) {
     if (resp.data.header_total_clocked_display) {
         $('#wiw-local-header-total-clocked').text(resp.data.header_total_clocked_display);
     }
+
 }).fail(function() {
     alert('AJAX error updating entry.');
 });
@@ -1854,6 +1975,8 @@ if (!/^\d+$/.test(newBreak)) {
     </div><!-- .wrap -->
     <?php
 }
+
+
 
 /**
  * Admin-post handler: Reset a local timesheet back to the original API data.
@@ -2024,10 +2147,6 @@ exit;
     exit;
 }
 
-/**
- * AJAX handler to update a local timesheet entry's clock in/out and clocked hours.
- * Operates ONLY on local DB (wp_wiw_timesheet_entries + wp_wiw_timesheets).
- */
 public function ajax_local_update_entry() {
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
@@ -2038,7 +2157,7 @@ public function ajax_local_update_entry() {
     global $wpdb;
 
     $entry_id       = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
-    $break_minutes = isset( $_POST['break_minutes'] ) ? absint( $_POST['break_minutes'] ) : null;
+    $break_minutes  = isset( $_POST['break_minutes'] ) ? absint( $_POST['break_minutes'] ) : null;
     $clock_in_time  = isset( $_POST['clock_in_time'] ) ? sanitize_text_field( wp_unslash( $_POST['clock_in_time'] ) ) : '';
     $clock_out_time = isset( $_POST['clock_out_time'] ) ? sanitize_text_field( wp_unslash( $_POST['clock_out_time'] ) ) : '';
 
@@ -2046,13 +2165,12 @@ public function ajax_local_update_entry() {
         wp_send_json_error( array( 'message' => 'Missing or invalid parameters.' ) );
     }
 
-    // Basic HH:MM validation (24-hour format)
     if ( ! preg_match( '/^\d{2}:\d{2}$/', $clock_in_time ) || ! preg_match( '/^\d{2}:\d{2}$/', $clock_out_time ) ) {
         wp_send_json_error( array( 'message' => 'Time must be in HH:MM format.' ) );
     }
 
-    $table_entries   = $wpdb->prefix . 'wiw_timesheet_entries';
-    $table_headers   = $wpdb->prefix . 'wiw_timesheets';
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_headers = $wpdb->prefix . 'wiw_timesheets';
 
     $entry = $wpdb->get_row(
         $wpdb->prepare(
@@ -2065,14 +2183,20 @@ public function ajax_local_update_entry() {
         wp_send_json_error( array( 'message' => 'Entry not found.' ) );
     }
 
-    $date          = $entry->date;
-// If break_minutes is not provided, keep existing value
-if ( $break_minutes === null ) {
-    $break_minutes = (int) $entry->break_minutes;
-}
-    $timesheet_id  = (int) $entry->timesheet_id;
+    $date         = $entry->date;
+    $timesheet_id = (int) $entry->timesheet_id;
 
-    // WordPress timezone
+    if ( $break_minutes === null ) {
+        $break_minutes = (int) $entry->break_minutes;
+    }
+
+    $header = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$table_headers} WHERE id = %d",
+            $timesheet_id
+        )
+    );
+
     $tz_string = get_option( 'timezone_string' );
     if ( empty( $tz_string ) ) {
         $tz_string = 'UTC';
@@ -2086,17 +2210,14 @@ if ( $break_minutes === null ) {
         wp_send_json_error( array( 'message' => 'Error parsing times: ' . $e->getMessage() ) );
     }
 
-    // For simplicity: require clock out after clock in (no overnight handling here)
     if ( $dt_out <= $dt_in ) {
         wp_send_json_error( array( 'message' => 'Clock Out must be after Clock In.' ) );
     }
 
-    // Compute duration (seconds)
     $interval = $dt_in->diff( $dt_out );
     $seconds  = ( $interval->days * 86400 ) + ( $interval->h * 3600 ) + ( $interval->i * 60 ) + $interval->s;
 
-    // Subtract break minutes
-    $seconds -= ( $break_minutes * 60 );
+    $seconds -= ( (int) $break_minutes * 60 );
     if ( $seconds < 0 ) {
         $seconds = 0;
     }
@@ -2107,16 +2228,92 @@ if ( $break_minutes === null ) {
     $clock_out_str = $dt_out->format( 'Y-m-d H:i:s' );
     $now           = current_time( 'mysql' );
 
-    // Update entry row
-$updated = $wpdb->update(
-    $table_entries,
-    array(
-        'clock_in'      => $clock_in_str,
-        'clock_out'     => $clock_out_str,
-        'break_minutes' => $break_minutes,
-        'clocked_hours' => $clocked_hours,
-        'updated_at'    => $now,
-    ),
+    // --- LOGGING (one record per field change) ---
+    $old_clock_in  = (string) ( $entry->clock_in ?? '' );
+    $old_clock_out = (string) ( $entry->clock_out ?? '' );
+    $old_break     = (int) ( $entry->break_minutes ?? 0 );
+
+    $current_user = wp_get_current_user();
+    $editor_id    = (int) $current_user->ID;
+    $editor_login = (string) $current_user->user_login;
+    $editor_name  = (string) $current_user->display_name;
+
+    $employee_id     = $header ? (int) $header->employee_id : 0;
+    $employee_name   = $header ? (string) $header->employee_name : '';
+    $location_id     = $header ? (int) $header->location_id : 0;
+    $location_name   = $header ? (string) $header->location_name : '';
+    $week_start_date = $header ? (string) $header->week_start_date : '';
+
+    if ( $old_clock_in !== $clock_in_str ) {
+        $this->insert_local_edit_log( array(
+            'timesheet_id'           => $timesheet_id,
+            'entry_id'               => (int) $entry->id,
+            'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+            'edit_type'              => 'Clock in',
+            'old_value'              => $old_clock_in,
+            'new_value'              => $clock_in_str,
+            'edited_by_user_id'      => $editor_id,
+            'edited_by_user_login'   => $editor_login,
+            'edited_by_display_name' => $editor_name,
+            'employee_id'            => $employee_id,
+            'employee_name'          => $employee_name,
+            'location_id'            => $location_id,
+            'location_name'          => $location_name,
+            'week_start_date'        => $week_start_date,
+            'created_at'             => $now,
+        ) );
+    }
+
+    if ( $old_clock_out !== $clock_out_str ) {
+        $this->insert_local_edit_log( array(
+            'timesheet_id'           => $timesheet_id,
+            'entry_id'               => (int) $entry->id,
+            'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+            'edit_type'              => 'Clock out',
+            'old_value'              => $old_clock_out,
+            'new_value'              => $clock_out_str,
+            'edited_by_user_id'      => $editor_id,
+            'edited_by_user_login'   => $editor_login,
+            'edited_by_display_name' => $editor_name,
+            'employee_id'            => $employee_id,
+            'employee_name'          => $employee_name,
+            'location_id'            => $location_id,
+            'location_name'          => $location_name,
+            'week_start_date'        => $week_start_date,
+            'created_at'             => $now,
+        ) );
+    }
+
+    if ( $old_break !== (int) $break_minutes ) {
+        $this->insert_local_edit_log( array(
+            'timesheet_id'           => $timesheet_id,
+            'entry_id'               => (int) $entry->id,
+            'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+            'edit_type'              => 'Break Mins',
+            'old_value'              => (string) $old_break,
+            'new_value'              => (string) (int) $break_minutes,
+            'edited_by_user_id'      => $editor_id,
+            'edited_by_user_login'   => $editor_login,
+            'edited_by_display_name' => $editor_name,
+            'employee_id'            => $employee_id,
+            'employee_name'          => $employee_name,
+            'location_id'            => $location_id,
+            'location_name'          => $location_name,
+            'week_start_date'        => $week_start_date,
+            'created_at'             => $now,
+        ) );
+    }
+    // --- END LOGGING ---
+
+    $updated = $wpdb->update(
+        $table_entries,
+        array(
+            'clock_in'      => $clock_in_str,
+            'clock_out'     => $clock_out_str,
+            'break_minutes' => (int) $break_minutes,
+            'clocked_hours' => $clocked_hours,
+            'updated_at'    => $now,
+        ),
         array( 'id' => $entry_id ),
         array( '%s', '%s', '%d', '%f', '%s' ),
         array( '%d' )
@@ -2126,7 +2323,6 @@ $updated = $wpdb->update(
         wp_send_json_error( array( 'message' => 'Database update failed for entry.' ) );
     }
 
-    // Recompute header total_clocked_hours
     $total_clocked = (float) $wpdb->get_var(
         $wpdb->prepare(
             "SELECT SUM(clocked_hours) FROM {$table_entries} WHERE timesheet_id = %d",
@@ -2145,15 +2341,15 @@ $updated = $wpdb->update(
         array( '%d' )
     );
 
-wp_send_json_success(
-    array(
-        'clock_in_display'             => $clock_in_str,
-        'clock_out_display'            => $clock_out_str,
-        'break_minutes_display'        => (int) $break_minutes, // ✅ add this
-        'clocked_hours_display'        => number_format( $clocked_hours, 2 ),
-        'header_total_clocked_display' => number_format( $total_clocked, 2 ),
-    )
-);
+    wp_send_json_success(
+        array(
+            'clock_in_display'             => $clock_in_str,
+            'clock_out_display'            => $clock_out_str,
+            'break_minutes_display'        => (string) (int) $break_minutes,
+            'clocked_hours_display'        => number_format( $clocked_hours, 2 ),
+            'header_total_clocked_display' => number_format( $total_clocked, 2 ),
+        )
+    );
 }
 
 /**
