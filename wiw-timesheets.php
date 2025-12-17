@@ -1100,6 +1100,46 @@ if ( isset( $_GET['reset_error'] ) && $_GET['reset_error'] !== '' ) : ?>
                 )
             );
 
+            $format_time_range = function( $start_dt, $end_dt ) {
+    // Expect local DATETIME strings like "2025-12-15 09:55:50" (or NULL).
+    if ( empty( $start_dt ) || empty( $end_dt ) ) {
+        return 'N/A';
+    }
+
+    $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
+    $tz        = new DateTimeZone( $tz_string );
+
+    try {
+        $dt_start = new DateTime( (string) $start_dt, $tz );
+        $dt_end   = new DateTime( (string) $end_dt,   $tz );
+
+        // Force the exact look you asked for: "9:00am"
+        $fmt = 'g:ia';
+
+        return $dt_start->format( $fmt ) . ' to ' . $dt_end->format( $fmt );
+    } catch ( Exception $e ) {
+        return 'N/A';
+    }
+};
+
+$format_time_only = function( $dt_string ) {
+    if ( empty( $dt_string ) ) {
+        return 'N/A';
+    }
+
+    $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
+    $tz        = new DateTimeZone( $tz_string );
+
+    try {
+        $dt  = new DateTime( (string) $dt_string, $tz );
+        $fmt = 'g:ia';
+        return $dt->format( $fmt );
+    } catch ( Exception $e ) {
+        return 'N/A';
+    }
+};
+
+
             if ( empty( $entries ) ) : ?>
                 <p>No entries found for this timesheet.</p>
             <?php else : ?>
@@ -1108,6 +1148,10 @@ if ( isset( $_GET['reset_error'] ) && $_GET['reset_error'] !== '' ) : ?>
     <tr>
         <th width="10%">Date</th>
         <th width="12%">Time Record ID</th>
+
+        <!-- NEW -->
+        <th width="18%">Scheduled Start/End</th>
+
         <th width="18%">Clock In</th>
         <th width="18%">Clock Out</th>
         <th width="10%">Break (min)</th>
@@ -1117,46 +1161,79 @@ if ( isset( $_GET['reset_error'] ) && $_GET['reset_error'] !== '' ) : ?>
         <th width="5%">Actions</th>
     </tr>
 </thead>
-    <tbody>
-        <?php foreach ( $entries as $entry ) : ?>
-<tr>
-    <td><?php echo esc_html( $entry->date ); ?></td>
-    <td><?php echo esc_html( (int) $entry->wiw_time_id ); ?></td>
+<tbody>
+<?php foreach ( $entries as $entry ) : ?>
 
-    <td class="wiw-local-clock-in"
-        data-time="<?php echo esc_attr( $entry->clock_in ? substr( $entry->clock_in, 11, 5 ) : '' ); ?>">
-        <?php echo esc_html( $entry->clock_in ); ?>
-    </td>
+    <?php
+    // Format to "9:00am"
+    $fmt = function( $dt_string ) {
+        if ( empty( $dt_string ) ) { return 'N/A'; }
 
-    <td class="wiw-local-clock-out"
-        data-time="<?php echo esc_attr( $entry->clock_out ? substr( $entry->clock_out, 11, 5 ) : '' ); ?>">
-        <?php echo esc_html( $entry->clock_out ); ?>
-    </td>
+        $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
+        $tz        = new DateTimeZone( $tz_string );
 
-    <td class="wiw-local-break-min" data-break="<?php echo esc_attr( (int) $entry->break_minutes ); ?>">
-    <?php echo esc_html( (int) $entry->break_minutes ); ?>
-</td>
+        try {
+            $dt = new DateTime( (string) $dt_string, $tz );
+            return $dt->format( 'g:ia' );
+        } catch ( Exception $e ) {
+            return 'N/A';
+        }
+    };
 
-    <td><?php echo esc_html( number_format( (float) $entry->scheduled_hours, 2 ) ); ?></td>
+    // Scheduled range "9:00am to 4:00pm"
+    $scheduled_range = 'N/A';
+    if ( ! empty( $entry->scheduled_start ) && ! empty( $entry->scheduled_end ) ) {
+        $scheduled_range = $fmt( $entry->scheduled_start ) . ' to ' . $fmt( $entry->scheduled_end );
+    }
 
-    <td class="wiw-local-clocked-hours">
-        <?php echo esc_html( number_format( (float) $entry->clocked_hours, 2 ) ); ?>
-    </td>
+    // Clock In / Out display (no seconds)
+    $clock_in_display  = $fmt( $entry->clock_in );
+    $clock_out_display = $fmt( $entry->clock_out );
+    ?>
 
-    <td><?php echo esc_html( $entry->status ); ?></td>
+    <tr>
+        <td><?php echo esc_html( $entry->date ); ?></td>
 
-    <td>
-        <button type="button"
-                class="button button-small wiw-local-edit-entry"
-                data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
-            Edit
-        </button>
-    </td>
-</tr>
+        <td><?php echo esc_html( (int) $entry->wiw_time_id ); ?></td>
 
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+        <!-- NEW -->
+        <td><?php echo esc_html( $scheduled_range ); ?></td>
+
+        <td class="wiw-local-clock-in"
+            data-time="<?php echo esc_attr( $entry->clock_in ? substr( (string) $entry->clock_in, 11, 5 ) : '' ); ?>">
+            <?php echo esc_html( $clock_in_display ); ?>
+        </td>
+
+        <td class="wiw-local-clock-out"
+            data-time="<?php echo esc_attr( $entry->clock_out ? substr( (string) $entry->clock_out, 11, 5 ) : '' ); ?>">
+            <?php echo esc_html( $clock_out_display ); ?>
+        </td>
+
+        <td class="wiw-local-break-min" data-break="<?php echo esc_attr( (int) $entry->break_minutes ); ?>">
+            <?php echo esc_html( (int) $entry->break_minutes ); ?>
+        </td>
+
+        <td><?php echo esc_html( number_format( (float) $entry->scheduled_hours, 2 ) ); ?></td>
+
+        <td class="wiw-local-clocked-hours">
+            <?php echo esc_html( number_format( (float) $entry->clocked_hours, 2 ) ); ?>
+        </td>
+
+        <td><?php echo esc_html( $entry->status ); ?></td>
+
+        <td>
+            <button type="button"
+                    class="button button-small wiw-local-edit-entry"
+                    data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
+                Edit
+            </button>
+        </td>
+    </tr>
+
+<?php endforeach; ?>
+</tbody>
+</table>
+
 <?php
 $table_edit_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
 
