@@ -37,13 +37,20 @@ require_once WIW_PLUGIN_PATH . 'includes/admin-settings.php';
 // Include the admin login handler
 require_once WIW_PLUGIN_PATH . 'includes/admin-login-handler.php';
 
+//
+require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
+
 
 /**
 * Core Plugin Class
  */
 class WIW_Timesheet_Manager {
 
+    // Use traits for modular functionality
     use WIW_Timesheet_Admin_Settings_Trait;
+
+    // Include timesheet helper methods
+    use WIW_Timesheet_Helpers_Trait;
 
     public function __construct() {
     // 1. Add Admin Menus and Settings
@@ -663,64 +670,7 @@ private function sort_timesheet_data( $times, $user_map ) {
     return $times;
 }
 
-/**
- * Calculates the duration of a shift in hours (Start Time to End Time minus Break).
- * * @param object $shift_entry The raw shift object.
- * @return float Calculated duration in hours.
- */
-private function calculate_shift_duration_in_hours($shift_entry) {
-    $start_time_utc = $shift_entry->start_time ?? ''; 
-    $end_time_utc = $shift_entry->end_time ?? '';
-    $break_minutes = $shift_entry->break ?? 0; 
-    
-    $duration = 0.0;
 
-    try {
-        if (!empty($start_time_utc) && !empty($end_time_utc)) {
-            // Use UTC for parsing the raw API data
-            $dt_start = new DateTime($start_time_utc, new DateTimeZone('UTC'));
-            $dt_end = new DateTime($end_time_utc, new DateTimeZone('UTC'));
-            
-            $interval = $dt_start->diff($dt_end);
-            
-            // Convert interval to total seconds
-            $total_seconds = $interval->days * 86400 + $interval->h * 3600 + $interval->i * 60 + $interval->s;
-            
-            // Subtract break time (break is in minutes, convert to seconds)
-            $total_seconds -= ($break_minutes * 60);
-            
-            // Convert total seconds to hours (rounded to 2 decimal places)
-            $duration = round($total_seconds / 3600, 2);
-            
-            if ($duration < 0) {
-                $duration = 0.0;
-            }
-        }
-    } catch (Exception $e) {
-        // Log error if necessary, duration remains 0.0
-    }
-    
-    return $duration;
-}
-
-/**
- * Calculates the duration of a timesheet entry in hours.
- * Uses 'length' (hours) or 'duration' (seconds) from the API.
- * @param object $time_entry The raw timesheet object.
- * @return float Calculated duration in hours.
- */
-private function calculate_timesheet_duration_in_hours($time_entry) {
-    // Try to use 'length' (already in hours)
-    $duration = round(($time_entry->length ?? 0), 2);
-
-    // If 'length' is 0, try to use 'duration' (in seconds)
-    if ($duration == 0 && isset($time_entry->duration)) {
-         $duration = round(($time_entry->duration / 3600), 2);
-    }
-    
-    // Ensure duration is not negative (though unlikely for timesheets)
-    return max(0.0, $duration);
-}
 
 /**
  * Fetches timesheet data from the When I Work API.
@@ -2254,93 +2204,6 @@ public function ajax_local_update_entry() {
             'header_total_clocked_display' => number_format( $total_clocked, 2 ),
         )
     );
-}
-
-/**
- * Groups timesheet records into weekly Week ofs (Monday to Friday) 
- * for each employee and calculates the weekly totals.
- *
- * @param array $times The raw, sorted times array.
- * @param array $user_map Map of user IDs to user objects.
- * @return array The structured timesheet data.
- */
-private function group_timesheet_by_pay_period( $times, $user_map ) {
-    $grouped_data = [];
-
-    // Define the local WordPress timezone for date calculations
-    $wp_timezone_string = get_option('timezone_string');
-    if (empty($wp_timezone_string)) {
-        $wp_timezone_string = 'UTC';
-    }
-    $wp_timezone = new DateTimeZone($wp_timezone_string); 
-
-    foreach ( $times as $time_entry ) {
-        $user_id = $time_entry->user_id ?? 0;
-        $user = $user_map[$user_id] ?? null;
-        
-        if ( !$user ) continue;
-
-        $employee_name = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? 'Unknown'));
-        $start_time_utc = $time_entry->start_time ?? '';
-        
-        $clocked_duration = $time_entry->calculated_duration ?? 0.0;
-        $scheduled_duration = $time_entry->scheduled_duration ?? 0.0;
-
-        // --- Determine Week of Start Date (Monday) ---
-        $pay_period_start = 'N/A';
-        try {
-            if (!empty($start_time_utc)) {
-                // 1. Create DateTime object from UTC API time
-                $dt = new DateTime($start_time_utc, new DateTimeZone('UTC'));
-                // 2. Convert to local WordPress time for correct day of week calculation
-                $dt->setTimezone($wp_timezone); 
-                
-                $day_of_week_N = (int)$dt->format('N'); // 1=Mon, 7=Sun
-                $days_to_modify = 0;
-                
-                // 3. Apply deterministic shift calculation based on local day of week
-                if ($day_of_week_N >= 1 && $day_of_week_N <= 5) {
-                    // Monday (1) through Friday (5): Go back to current week's Monday.
-                    // e.g., Wednesday (3): 3 - 1 = 2. Go back 2 days.
-                    $days_to_modify = -($day_of_week_N - 1);
-                } else { 
-                    // Saturday (6) or Sunday (7): Go forward to next week's Monday.
-                    // e.g., Sat (6): 8 - 6 = 2. Go forward 2 days.
-                    // e.g., Sun (7): 8 - 7 = 1. Go forward 1 day.
-                    $days_to_modify = 8 - $day_of_week_N;
-                }
-                
-                // 4. Modify the date to the calculated Monday start date
-                if ($days_to_modify !== 0) {
-                    $dt->modify("{$days_to_modify} days");
-                }
-
-                $pay_period_start = $dt->format('Y-m-d');
-            }
-        } catch (Exception $e) {
-            continue;
-        }
-        // --- End Week of Calculation ---
-
-        // Initialize structures if they don't exist
-        if ( !isset($grouped_data[$employee_name]) ) {
-            $grouped_data[$employee_name] = [];
-        }
-        if ( !isset($grouped_data[$employee_name][$pay_period_start]) ) {
-            $grouped_data[$employee_name][$pay_period_start] = [
-                'total_clocked_hours' => 0.0,
-                'total_scheduled_hours' => 0.0,
-                'records' => []
-            ];
-        }
-
-        // Aggregate total hours and add the record
-        $grouped_data[$employee_name][$pay_period_start]['total_clocked_hours'] += $clocked_duration;
-        $grouped_data[$employee_name][$pay_period_start]['total_scheduled_hours'] += $scheduled_duration;
-        $grouped_data[$employee_name][$pay_period_start]['records'][] = $time_entry;
-    }
-
-    return $grouped_data;
 }
 
 }
