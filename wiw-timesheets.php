@@ -1104,22 +1104,24 @@ if ( isset( $_GET['reset_error'] ) && $_GET['reset_error'] !== '' ) : ?>
                 <p>No entries found for this timesheet.</p>
             <?php else : ?>
 <table class="widefat fixed striped">
-    <thead>
-        <tr>
-            <th width="10%">Date</th>
-            <th width="20%">Clock In</th>
-            <th width="20%">Clock Out</th>
-            <th width="10%">Break (min)</th>
-            <th width="10%">Sched. Hrs</th>
-            <th width="10%">Clocked Hrs</th>
-            <th width="10%">Status</th>
-            <th width="10%">Actions</th>
-        </tr>
-    </thead>
+<thead>
+    <tr>
+        <th width="10%">Date</th>
+        <th width="12%">Time Record ID</th>
+        <th width="18%">Clock In</th>
+        <th width="18%">Clock Out</th>
+        <th width="10%">Break (min)</th>
+        <th width="10%">Sched. Hrs</th>
+        <th width="10%">Clocked Hrs</th>
+        <th width="7%">Status</th>
+        <th width="5%">Actions</th>
+    </tr>
+</thead>
     <tbody>
         <?php foreach ( $entries as $entry ) : ?>
 <tr>
     <td><?php echo esc_html( $entry->date ); ?></td>
+    <td><?php echo esc_html( (int) $entry->wiw_time_id ); ?></td>
 
     <td class="wiw-local-clock-in"
         data-time="<?php echo esc_attr( $entry->clock_in ? substr( $entry->clock_in, 11, 5 ) : '' ); ?>">
@@ -1174,18 +1176,21 @@ $logs = $wpdb->get_results(
 <?php else : ?>
     <table class="widefat fixed striped">
         <thead>
-            <tr>
-                <th width="18%">When</th>
-                <th width="18%">Edited By</th>
-                <th width="14%">Edit Type</th>
-                <th width="25%">From</th>
-                <th width="25%">To</th>
-            </tr>
+    <tr>
+        <th width="16%">When</th>
+        <th width="14%">Time Record ID</th>
+        <th width="18%">Edited By</th>
+        <th width="14%">Edit Type</th>
+        <th width="19%">From</th>
+        <th width="19%">To</th>
+    </tr>
+
         </thead>
         <tbody>
             <?php foreach ( $logs as $log ) : ?>
                 <tr>
                     <td><?php echo esc_html( $log->created_at ); ?></td>
+                    <td><?php echo esc_html( (int) $log->wiw_time_id ); ?></td>
                     <td>
                         <?php
                         $who = $log->edited_by_display_name ? $log->edited_by_display_name : $log->edited_by_user_login;
