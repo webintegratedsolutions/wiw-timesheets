@@ -300,7 +300,7 @@ public function admin_timesheets_page() {
             // 1. Sort the records
             $times = $this->sort_timesheet_data( $times, $user_map );
 
-            // 2. Group the records by employee and week (pay period)
+            // 2. Group the records by employee and week (Week of)
             $grouped_timesheets = $this->group_timesheet_by_pay_period( $times, $user_map );
             
             // --- Security Nonce for AJAX ---
@@ -309,7 +309,7 @@ public function admin_timesheets_page() {
             ?>
             <div class="notice notice-success"><p>✅ Timesheet data fetched successfully!</p></div>
             
-            <h2>Latest Timesheets (Grouped by Employee and Pay Period)</h2>
+            <h2>Latest Timesheets (Grouped by Employee and Week of)</h2>
 
             <?php if (empty($grouped_timesheets)) : ?>
                 <p>No timesheet records found within the filtered period.</p>
@@ -358,10 +358,10 @@ public function admin_timesheets_page() {
                             <tr><th scope="row">Employee Name</th><td>Name retrieved from **`users`** data.</td></tr>
                             <tr><th scope="row">Location</th><td>**Assigned Location** retrieved from the corresponding shift record.</td></tr>
                             <tr><th scope="row">Scheduled Shift</th><td>**Scheduled Start - End Time** (local timezone). Shows N/A if no shift is linked.</td></tr>
-                            <tr><th scope="row">Hrs Scheduled</th><td>**Total Scheduled Hours**. Pay period totals aggregate this value.</td></tr>
+                            <tr><th scope="row">Hrs Scheduled</th><td>**Total Scheduled Hours**. Week of totals aggregate this value.</td></tr>
                             <tr><th scope="row">Clock In / Out</th><td>**Actual Clock In/Out Time** (local timezone). Clock Out shows **"Active (N/A)"** if the shift is open.</td></tr>
                             <tr><th scope="row">Breaks (Min -)</th><td>**Time deducted for breaks**, derived from the `break_hours` raw data converted to minutes.</td></tr>
-                            <tr><th scope="row">Hrs Clocked</th><td>**Total Clocked Hours**. Pay period totals aggregate this value.</td></tr>
+                            <tr><th scope="row">Hrs Clocked</th><td>**Total Clocked Hours**. Week of totals aggregate this value.</td></tr>
                             <tr><th scope="row">Status</th><td>Approval status: **Pending** or **Approved**.</td></tr>
                             <tr><th scope="row">Actions</th><td>Interactive options (**Data** and **Edit/Approve**).</td></tr>
                         </tbody>
@@ -781,7 +781,7 @@ public function admin_shifts_page() {
             // 1. Sort the records 
             $shifts = $this->sort_timesheet_data( $shifts, $user_map );
 
-            // 2. Group the records by employee and week (pay period) 
+            // 2. Group the records by employee and week (Week of) 
             $grouped_shifts = $this->group_timesheet_by_pay_period( $shifts, $user_map );
             
             // --- Timezone Setup ---
@@ -794,7 +794,7 @@ public function admin_shifts_page() {
             ?>
             <div class="notice notice-success"><p>✅ Shift data fetched successfully!</p></div>
             
-            <h2>Latest Shifts (Grouped by Employee and Pay Period)</h2>
+            <h2>Latest Shifts (Grouped by Employee and Week of)</h2>
 
             <?php if (empty($grouped_shifts)) : ?>
                 <p>No shift records found within the filtered period.</p>
@@ -831,13 +831,13 @@ public function admin_shifts_page() {
                         foreach ($periods as $period_start_date => $period_data) : 
                             $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
                             
-                            // --- PAY PERIOD TOTAL ROW (FIXED KEY) ---
+                            // --- Week of TOTAL ROW (FIXED KEY) ---
                             // We now retrieve the scheduled hours total from 'total_clocked_hours'
                             $total_scheduled_hours = number_format($period_data['total_clocked_hours'] ?? 0.0, 2);
                             ?>
                             <tr class="wiw-period-total">
                                 <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
-                                    📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
+                                    📅 Week of: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                 </td>
                                 <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_scheduled_hours; ?></td>
                                 <td colspan="1" style="background-color: #f0f0ff;"></td>
@@ -1169,7 +1169,7 @@ public function admin_locations_page() {
 }
 
 /**
- * Groups timesheet records into weekly pay periods (Monday to Friday) 
+ * Groups timesheet records into weekly Week ofs (Monday to Friday) 
  * for each employee and calculates the weekly totals.
  *
  * @param array $times The raw, sorted times array.
@@ -1198,7 +1198,7 @@ private function group_timesheet_by_pay_period( $times, $user_map ) {
         $clocked_duration = $time_entry->calculated_duration ?? 0.0;
         $scheduled_duration = $time_entry->scheduled_duration ?? 0.0;
 
-        // --- Determine Pay Period Start Date (Monday) ---
+        // --- Determine Week of Start Date (Monday) ---
         $pay_period_start = 'N/A';
         try {
             if (!empty($start_time_utc)) {
@@ -1232,7 +1232,7 @@ private function group_timesheet_by_pay_period( $times, $user_map ) {
         } catch (Exception $e) {
             continue;
         }
-        // --- End Pay Period Calculation ---
+        // --- End Week of Calculation ---
 
         // Initialize structures if they don't exist
         if ( !isset($grouped_data[$employee_name]) ) {

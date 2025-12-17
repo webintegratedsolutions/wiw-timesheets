@@ -4,7 +4,7 @@
 if (empty($employee_data)): 
     ?>
     <tr>
-        <td colspan="12">No timesheet records found within the filtered period.</td>
+        <td colspan="12">No timesheet records found within the filtered week.</td>
     </tr>
 <?php else: ?>
     <?php foreach ($employee_data as $employee_name => $periods) : 
@@ -36,11 +36,11 @@ if (empty($employee_data)):
             }
             $period_time_ids_str = implode(',', $period_time_ids);
 
-            // --- PAY PERIOD TOTAL ROW ---
+            // --- Week of TOTAL ROW ---
             ?>
             <tr class="wiw-period-total">
                 <td colspan="5" style="background-color: #f0f0ff; font-weight: bold;">
-                    📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
+                    📅  Week of: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                 </td>
                 
                 <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_scheduled; ?></td>
@@ -54,10 +54,10 @@ if (empty($employee_data)):
                             class="button button-primary button-small wiw-approve-period-ui" 
                             data-period-ids="<?php echo esc_attr($period_time_ids_str); ?>"
                             data-nonce="<?php echo esc_attr($timesheet_nonce); ?>"
-                            title="<?php echo $is_period_pending ? 'Approve all pending records in this pay period.' : 'All records in this period are already approved.'; ?>"
+                            title="<?php echo $is_period_pending ? 'Approve all pending records in this week.' : 'All records in this period are already approved.'; ?>"
                             <?php echo $is_period_pending ? '' : 'disabled'; ?>
                     >
-                        Approve Period
+                        Approve Week
                     </button>
                 </td>
             </tr>
