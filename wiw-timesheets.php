@@ -45,8 +45,6 @@ require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
 
 
-
-
 /**
 * Core Plugin Class
  */
@@ -370,10 +368,12 @@ $this->sync_timesheets_to_local_db( $times, $user_map, $wp_timezone );
                         <th width="10%">Employee Name</th>
                         <th width="10%">Location</th>
                         <th width="10%">Scheduled Shift</th>
-                        <th width="6%">Hrs Scheduled</th>   <th width="8%">Clock In</th>
+                        <th width="6%">Hrs Scheduled</th>   
+                        <th width="8%">Clock In</th>
                         <th width="8%">Clock Out</th>
-                        <th width="7%">Breaks (Min -)</th>  <th width="6%">Hrs Clocked</th>     <th width="7%">Status</th>
-                        <th width="7%">Actions</th>
+                        <th width="7%">Breaks (Min -)</th>  
+                        <th width="6%">Hrs Clocked</th>     
+                        <th width="7%">Status</th>
                     </tr>
                 </thead>
                 <tbody>
