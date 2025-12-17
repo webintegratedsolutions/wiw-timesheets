@@ -1389,31 +1389,37 @@ public function handle_reset_local_timesheet() {
         wp_die( 'Permission denied.' );
     }
 
-    if ( ! isset( $_POST['wiw_reset_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['wiw_reset_nonce'] ) ), 'wiw_reset_local_timesheet' ) ) {
+    if (
+        ! isset( $_POST['wiw_reset_nonce'] ) ||
+        ! wp_verify_nonce(
+            sanitize_text_field( wp_unslash( $_POST['wiw_reset_nonce'] ) ),
+            'wiw_reset_local_timesheet'
+        )
+    ) {
         wp_die( 'Security check failed.' );
-    }
-
-    $timesheet_id = isset( $_POST['timesheet_id'] ) ? absint( $_POST['timesheet_id'] ) : 0;
-
-$redirect_base = admin_url( 'admin.php?page=wiw-local-timesheets' );
-$redirect_back = add_query_arg(
-    array( 'timesheet_id' => $timesheet_id ),
-    $redirect_base
-);
-
-    if ( ! $timesheet_id ) {
-wp_safe_redirect( esc_url_raw( add_query_arg( 'reset_success', '1', $redirect_back ) ) );
-exit;
-
     }
 
     global $wpdb;
 
-    $table_timesheets        = $wpdb->prefix . 'wiw_timesheets';
-    $table_timesheet_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+    $timesheet_id = isset( $_POST['timesheet_id'] ) ? absint( $_POST['timesheet_id'] ) : 0;
+
+    $redirect_base = admin_url( 'admin.php?page=wiw-local-timesheets' );
+    $redirect_back = add_query_arg(
+        array( 'timesheet_id' => $timesheet_id ),
+        $redirect_base
+    );
+
+    if ( ! $timesheet_id ) {
+        wp_safe_redirect( add_query_arg( 'reset_error', rawurlencode( 'Invalid timesheet ID.' ), $redirect_base ) );
+        exit;
+    }
+
+    $table_headers = $wpdb->prefix . 'wiw_timesheets';
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
 
     $header = $wpdb->get_row(
-        $wpdb->prepare( "SELECT * FROM {$table_timesheets} WHERE id = %d", $timesheet_id )
+        $wpdb->prepare( "SELECT * FROM {$table_headers} WHERE id = %d", $timesheet_id )
     );
 
     if ( ! $header ) {
@@ -1426,11 +1432,40 @@ exit;
     if ( empty( $tz_string ) ) { $tz_string = 'UTC'; }
     $wp_timezone = new DateTimeZone( $tz_string );
 
-    // Fetch times for this week range from API (then filter locally by employee + location)
-    $start = $header->week_start_date;
+    // Helper: compare minute precision to avoid "seconds-only" diffs
+    $to_minute = function( $datetime ) {
+        $datetime = is_string( $datetime ) ? trim( $datetime ) : '';
+        if ( $datetime === '' ) return '';
+        return ( strlen( $datetime ) >= 16 ) ? substr( $datetime, 0, 16 ) : $datetime;
+    };
+
+    // 1) Snapshot BEFORE reset
+    $before_entries = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT id, wiw_time_id, clock_in, clock_out, break_minutes
+             FROM {$table_entries}
+             WHERE timesheet_id = %d",
+            $timesheet_id
+        )
+    );
+
+    $before_map = array();
+    foreach ( $before_entries as $row ) {
+        $wiw_id = (int) ( $row->wiw_time_id ?? 0 );
+        if ( ! $wiw_id ) { continue; }
+
+        $before_map[ $wiw_id ] = array(
+            'clock_in'      => (string) ( $row->clock_in ?? '' ),
+            'clock_out'     => (string) ( $row->clock_out ?? '' ),
+            'break_minutes' => (int) ( $row->break_minutes ?? 0 ),
+        );
+    }
+
+    // 2) Fetch API data for this header's week range
+    $start = (string) $header->week_start_date;
     $end   = ! empty( $header->week_end_date )
         ? date( 'Y-m-d', strtotime( $header->week_end_date . ' +1 day' ) )
-        : date( 'Y-m-d', strtotime( $header->week_start_date . ' +6 day' ) );
+        : date( 'Y-m-d', strtotime( $header->week_start_date . ' +7 days' ) );
 
     $api = WIW_API_Client::request(
         'times',
@@ -1447,168 +1482,114 @@ exit;
         exit;
     }
 
-    $times           = isset( $api->times )  ? $api->times  : array();
-    $included_users  = isset( $api->users )  ? $api->users  : array();
-    $included_shifts = isset( $api->shifts ) ? $api->shifts : array();
-    $included_sites  = isset( $api->sites )  ? $api->sites  : array();
+    $times  = isset( $api->times )  ? $api->times  : array();
+    $users  = isset( $api->users )  ? $api->users  : array();
+    $shifts = isset( $api->shifts ) ? $api->shifts : array();
 
-    $user_map  = array_column( $included_users, null, 'id' );
-    $shift_map = array_column( $included_shifts, null, 'id' );
-    $site_map  = array_column( $included_sites, null, 'id' );
-    $site_map[0] = (object) array( 'name' => 'No Assigned Location' );
+    $user_map  = array_column( $users,  null, 'id' );
+    $shift_map = array_column( $shifts, null, 'id' );
 
-    // Preprocess times so they have:
-    // - calculated_duration
-    // - scheduled_duration
-    // - location_id / location_name
-    foreach ( $times as &$time_entry ) {
-        $time_entry->calculated_duration = $this->calculate_timesheet_duration_in_hours( $time_entry );
-
-        $shift_id = $time_entry->shift_id ?? null;
-        $shift    = $shift_id ? ( $shift_map[ $shift_id ] ?? null ) : null;
-
-        if ( $shift ) {
-            $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours( $shift );
-
-            $site_lookup_id = $shift->site_id ?? 0;
-            $site_obj       = $site_map[ $site_lookup_id ] ?? null;
-
-            $time_entry->location_id   = (int) $site_lookup_id;
-            $time_entry->location_name = ( $site_obj && isset( $site_obj->name ) ) ? (string) $site_obj->name : 'No Assigned Location';
-        } else {
-            $time_entry->scheduled_duration = 0.0;
-            $time_entry->location_id        = 0;
-            $time_entry->location_name      = 'N/A';
-        }
-    }
-    unset( $time_entry );
-
-    // Filter to ONLY this local header’s employee + week + location
-    $employee_id  = (int) $header->employee_id;
-    $location_id  = (int) $header->location_id;
-    $week_start   = (string) $header->week_start_date;
-
-    $filtered = array();
+    // 3) Build reset map (API truth) for ONLY this header (employee + location + week)
+    $reset_map      = array();
+    $filtered_times = array();
 
     foreach ( $times as $time_entry ) {
-        if ( (int) ( $time_entry->user_id ?? 0 ) !== $employee_id ) {
-            continue;
-        }
-        if ( (int) ( $time_entry->location_id ?? 0 ) !== $location_id ) {
+        $employee_id = (int) ( $time_entry->user_id ?? 0 );
+        if ( $employee_id !== (int) $header->employee_id ) {
             continue;
         }
 
-        // Ensure it truly belongs to this “Week of” using the same Monday-based logic
-        $start_time_utc = $time_entry->start_time ?? '';
-        if ( empty( $start_time_utc ) ) { continue; }
+        $shift_id = (int) ( $time_entry->shift_id ?? 0 );
+        $shift    = $shift_id ? ( $shift_map[ $shift_id ] ?? null ) : null;
+        $site_id  = $shift ? (int) ( $shift->site_id ?? 0 ) : 0;
 
+        if ( $site_id !== (int) $header->location_id ) {
+            continue;
+        }
+
+        $start_time_utc = (string) ( $time_entry->start_time ?? '' );
+        if ( $start_time_utc === '' ) {
+            continue;
+        }
+
+        // Verify "Week of" matches using the same Monday logic as sync
         try {
-            $dt = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
-            $dt->setTimezone( $wp_timezone );
+            $dt_week = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
+            $dt_week->setTimezone( $wp_timezone );
 
-            $dayN = (int) $dt->format( 'N' ); // 1=Mon..7=Sun
-            $days_to_modify = ( $dayN >= 1 && $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
-            if ( $days_to_modify !== 0 ) {
-                $dt->modify( "{$days_to_modify} days" );
-            }
+            $dayN = (int) $dt_week->format( 'N' ); // 1=Mon..7=Sun
+            $days = ( $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
+            if ( $days !== 0 ) { $dt_week->modify( "{$days} days" ); }
 
-            if ( $dt->format( 'Y-m-d' ) !== $week_start ) {
+            if ( $dt_week->format( 'Y-m-d' ) !== (string) $header->week_start_date ) {
                 continue;
             }
         } catch ( Exception $e ) {
             continue;
         }
 
-        $filtered[] = $time_entry;
-    }
+        $wiw_time_id = (int) ( $time_entry->id ?? 0 );
+        if ( ! $wiw_time_id ) { continue; }
 
-
-    // Snapshot current local entries BEFORE reset so we can log what changed.
-    $before_entries = $wpdb->get_results(
-        $wpdb->prepare(
-            "SELECT id, wiw_time_id, clock_in, clock_out, break_minutes
-             FROM {$table_entries}
-             WHERE timesheet_id = %d",
-            $timesheet_id
-        )
-    );
-
-    $before_map = array();
-    foreach ( $before_entries as $be ) {
-        $wiw_id = (int) ( $be->wiw_time_id ?? 0 );
-        if ( $wiw_id ) {
-            $before_map[ $wiw_id ] = array(
-                'entry_id'      => (int) ( $be->id ?? 0 ),
-                'clock_in'      => (string) ( $be->clock_in ?? '' ),
-                'clock_out'     => (string) ( $be->clock_out ?? '' ),
-                'break_minutes' => (int) ( $be->break_minutes ?? 0 ),
-            );
-        }
-    }
-
-    // 1) Delete local edited entries for this header
-    
-    // Log reset diffs per-field BEFORE deleting/re-inserting (so reset always creates logs)
-    $current_user = wp_get_current_user();
-    $edited_by_user_id      = (int) ( $current_user->ID ?? 0 );
-    $edited_by_user_login   = (string) ( $current_user->user_login ?? '' );
-    $edited_by_display_name = (string) ( $current_user->display_name ?? '' );
-
-    // Build the "API truth" map (values that will be written during the reset)
-    $reset_values_map = array();
-
-    foreach ( $filtered_times as $time_entry ) {
-        $wiw_time_id = isset( $time_entry->id ) ? (int) $time_entry->id : 0;
-        if ( ! $wiw_time_id ) {
-            continue;
-        }
-
-        $start_time_utc = $time_entry->start_time ?? '';
-        if ( empty( $start_time_utc ) ) {
-            continue;
-        }
-
-        $end_time_utc  = $time_entry->end_time ?? '';
-        $break_minutes = isset( $time_entry->break ) ? (int) $time_entry->break : 0;
-
+        // Convert API UTC timestamps to local WP time for logging + (optionally) storage
         try {
-            $dt_start_utc = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
-            $dt_start_utc->setTimezone( $wp_timezone );
-            $local_clock_in = $dt_start_utc->format( 'Y-m-d H:i:s' );
+            $dt_in = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
+            $dt_in->setTimezone( $wp_timezone );
+            $clock_in_local = $dt_in->format( 'Y-m-d H:i:s' );
         } catch ( Exception $e ) {
             continue;
         }
 
-        $local_clock_out = null;
-        if ( ! empty( $end_time_utc ) ) {
+        $clock_out_local = '';
+        $end_time_utc = (string) ( $time_entry->end_time ?? '' );
+        if ( $end_time_utc !== '' ) {
             try {
-                $dt_end_utc = new DateTime( $end_time_utc, new DateTimeZone( 'UTC' ) );
-                $dt_end_utc->setTimezone( $wp_timezone );
-                $local_clock_out = $dt_end_utc->format( 'Y-m-d H:i:s' );
+                $dt_out = new DateTime( $end_time_utc, new DateTimeZone( 'UTC' ) );
+                $dt_out->setTimezone( $wp_timezone );
+                $clock_out_local = $dt_out->format( 'Y-m-d H:i:s' );
             } catch ( Exception $e ) {
-                $local_clock_out = null;
+                $clock_out_local = '';
             }
         }
 
-        $reset_values_map[ $wiw_time_id ] = array(
-            'clock_in'      => $local_clock_in,
-            'clock_out'     => $local_clock_out,
+        $break_minutes = (int) ( $time_entry->break ?? 0 );
+
+        $reset_map[ $wiw_time_id ] = array(
+            'clock_in'      => $clock_in_local,
+            'clock_out'     => $clock_out_local,
             'break_minutes' => $break_minutes,
         );
+
+        $filtered_times[] = $time_entry;
     }
 
-    // Insert one log row per field changed by the reset
-    foreach ( $before_entries_map as $wiw_time_id => $before_entry ) {
-        if ( ! isset( $reset_values_map[ $wiw_time_id ] ) ) {
+    // If we found nothing to restore, do NOT delete anything.
+    if ( empty( $filtered_times ) ) {
+        wp_safe_redirect(
+            add_query_arg(
+                'reset_error',
+                rawurlencode( 'No matching API entries found to restore for this timesheet.' ),
+                $redirect_back
+            )
+        );
+        exit;
+    }
+
+    // 4) Log diffs with (Reset)
+    $current_user = wp_get_current_user();
+    $now          = current_time( 'mysql' );
+
+    foreach ( $before_map as $wiw_time_id => $before ) {
+        if ( ! isset( $reset_map[ $wiw_time_id ] ) ) {
             continue;
         }
 
-        $new_vals = $reset_values_map[ $wiw_time_id ];
+        $after = $reset_map[ $wiw_time_id ];
 
         $changes = array(
-            'Clock in'    => array( (string) ( $before_entry->clock_in ?? '' ),  (string) ( $new_vals['clock_in'] ?? '' ) ),
-            'Clock out'   => array( (string) ( $before_entry->clock_out ?? '' ), (string) ( $new_vals['clock_out'] ?? '' ) ),
-            'Break Mins'  => array( (string) ( (int) ( $before_entry->break_minutes ?? 0 ) ), (string) ( (int) ( $new_vals['break_minutes'] ?? 0 ) ) ),
+            'Clock in (Reset)'   => array( $to_minute( (string) ( $before['clock_in'] ?? '' ) ),  $to_minute( (string) ( $after['clock_in'] ?? '' ) ) ),
+            'Clock out (Reset)'  => array( $to_minute( (string) ( $before['clock_out'] ?? '' ) ), $to_minute( (string) ( $after['clock_out'] ?? '' ) ) ),
+            'Break Mins (Reset)' => array( (string) (int) ( $before['break_minutes'] ?? 0 ),      (string) (int) ( $after['break_minutes'] ?? 0 ) ),
         );
 
         foreach ( $changes as $edit_type => $pair ) {
@@ -1620,37 +1601,70 @@ exit;
             }
 
             $wpdb->insert(
-                $table_edit_logs,
+                $table_logs,
                 array(
-                    'timesheet_id'            => (int) $header->id,
-                    'entry_id'                => 0, // entry IDs will be replaced during reset; use wiw_time_id to link
-                    'wiw_time_id'             => (int) $wiw_time_id,
-                    'edit_type'               => (string) $edit_type,
-                    'old_value'               => $old_val,
-                    'new_value'               => $new_val,
-                    'edited_by_user_id'       => $edited_by_user_id,
-                    'edited_by_user_login'    => $edited_by_user_login,
-                    'edited_by_display_name'  => $edited_by_display_name,
-                    'employee_id'             => (int) ( $header->employee_id ?? 0 ),
-                    'employee_name'           => (string) ( $header->employee_name ?? '' ),
-                    'location_id'             => (int) ( $header->location_id ?? 0 ),
-                    'location_name'           => (string) ( $header->location_name ?? '' ),
-                    'week_start_date'         => (string) ( $header->week_start_date ?? '' ),
-                    'created_at'              => $now,
-                ),
-                array(
-                    '%d','%d','%d','%s','%s','%s','%d','%s','%s','%d','%s','%d','%s','%s','%s'
+                    'timesheet_id'           => (int) $timesheet_id,
+                    'entry_id'               => 0,
+                    'wiw_time_id'            => (int) $wiw_time_id,
+                    'edit_type'              => (string) $edit_type,
+                    'old_value'              => $old_val,
+                    'new_value'              => $new_val,
+                    'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
+                    'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
+                    'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+                    'employee_id'            => (int) ( $header->employee_id ?? 0 ),
+                    'employee_name'          => (string) ( $header->employee_name ?? '' ),
+                    'location_id'            => (int) ( $header->location_id ?? 0 ),
+                    'location_name'          => (string) ( $header->location_name ?? '' ),
+                    'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
+                    'created_at'             => $now,
                 )
             );
         }
     }
 
-$wpdb->delete( $table_timesheet_entries, array( 'timesheet_id' => $timesheet_id ), array( '%d' ) );
+    // PREPROCESS filtered times so sync groups them into THIS header (employee + week + location)
+    foreach ( $filtered_times as &$time_entry ) {
+        // Force location fields to match this header key
+        $time_entry->location_id   = (int) ( $header->location_id ?? 0 );
+        $time_entry->location_name = (string) ( $header->location_name ?? '' );
 
-    // 2) Reset header totals/status immediately (even if API returns no rows)
-    $now = current_time( 'mysql' );
+        // Convert start/end to local strings so sync writes correct DATETIME values
+        if ( ! empty( $time_entry->start_time ) ) {
+            try {
+                $dt_local_in = new DateTime( (string) $time_entry->start_time, new DateTimeZone( 'UTC' ) );
+                $dt_local_in->setTimezone( $wp_timezone );
+                $time_entry->start_time = $dt_local_in->format( 'Y-m-d H:i:s' );
+            } catch ( Exception $e ) {}
+        }
+
+        if ( ! empty( $time_entry->end_time ) ) {
+            try {
+                $dt_local_out = new DateTime( (string) $time_entry->end_time, new DateTimeZone( 'UTC' ) );
+                $dt_local_out->setTimezone( $wp_timezone );
+                $time_entry->end_time = $dt_local_out->format( 'Y-m-d H:i:s' );
+            } catch ( Exception $e ) {}
+        }
+
+        // Durations needed by sync
+        $time_entry->calculated_duration = $this->calculate_timesheet_duration_in_hours( $time_entry );
+
+        $shift_id = (int) ( $time_entry->shift_id ?? 0 );
+        $shift    = $shift_id ? ( $shift_map[ $shift_id ] ?? null ) : null;
+
+        if ( $shift ) {
+            $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours( $shift );
+        } else {
+            $time_entry->scheduled_duration = 0.0;
+        }
+    }
+    unset( $time_entry );
+
+    // 5) Delete entries + reset header totals/status
+    $wpdb->delete( $table_entries, array( 'timesheet_id' => $timesheet_id ), array( '%d' ) );
+
     $wpdb->update(
-        $table_timesheets,
+        $table_headers,
         array(
             'total_scheduled_hours' => 0.00,
             'total_clocked_hours'   => 0.00,
@@ -1662,124 +1676,8 @@ $wpdb->delete( $table_timesheet_entries, array( 'timesheet_id' => $timesheet_id 
         array( '%d' )
     );
 
-    // 3) Re-sync from API back into local DB
-    if ( ! empty( $filtered ) ) {
-        $this->sync_timesheets_to_local_db( $filtered, $user_map, $wp_timezone );
-
-        // After re-sync, compare with snapshot and log changes caused by the reset.
-        $after_entries = $wpdb->get_results(
-            $wpdb->prepare(
-                "SELECT id, wiw_time_id, clock_in, clock_out, break_minutes
-                 FROM {$table_entries}
-                 WHERE timesheet_id = %d",
-                $timesheet_id
-            )
-        );
-
-        $after_map = array();
-        foreach ( $after_entries as $ae ) {
-            $wiw_id = (int) ( $ae->wiw_time_id ?? 0 );
-            if ( $wiw_id ) {
-                $after_map[ $wiw_id ] = array(
-                    'entry_id'      => (int) ( $ae->id ?? 0 ),
-                    'clock_in'      => (string) ( $ae->clock_in ?? '' ),
-                    'clock_out'     => (string) ( $ae->clock_out ?? '' ),
-                    'break_minutes' => (int) ( $ae->break_minutes ?? 0 ),
-                );
-            }
-        }
-
-        // WordPress user who triggered the reset
-        $wp_user = wp_get_current_user();
-        $edited_by_user_id      = (int) ( $wp_user->ID ?? 0 );
-        $edited_by_user_login   = (string) ( $wp_user->user_login ?? '' );
-        $edited_by_display_name = (string) ( $wp_user->display_name ?? '' );
-
-        $now_mysql = current_time( 'mysql' );
-
-        // Only compare entries that exist both before and after (same WIW time id).
-        foreach ( $after_map as $wiw_time_id => $after_row ) {
-            if ( ! isset( $before_map[ $wiw_time_id ] ) ) {
-                continue;
-            }
-
-            $before_row = $before_map[ $wiw_time_id ];
-
-            // Clock In change
-            if ( (string) $before_row['clock_in'] !== (string) $after_row['clock_in'] ) {
-                $wpdb->insert(
-                    $table_edit_logs,
-                    array(
-                        'timesheet_id'           => $timesheet_id,
-                        'entry_id'               => (int) $after_row['entry_id'],
-                        'wiw_time_id'            => (int) $wiw_time_id,
-                        'edit_type'              => 'Clock in',
-                        'old_value'              => (string) $before_row['clock_in'],
-                        'new_value'              => (string) $after_row['clock_in'],
-                        'edited_by_user_id'      => $edited_by_user_id,
-                        'edited_by_user_login'   => $edited_by_user_login,
-                        'edited_by_display_name' => $edited_by_display_name,
-                        'employee_id'            => (int) $timesheet->employee_id,
-                        'employee_name'          => (string) $timesheet->employee_name,
-                        'location_id'            => (int) $timesheet->location_id,
-                        'location_name'          => (string) $timesheet->location_name,
-                        'week_start_date'        => (string) $timesheet->week_start_date,
-                        'created_at'             => $now_mysql,
-                    )
-                );
-            }
-
-            // Clock Out change
-            if ( (string) $before_row['clock_out'] !== (string) $after_row['clock_out'] ) {
-                $wpdb->insert(
-                    $table_edit_logs,
-                    array(
-                        'timesheet_id'           => $timesheet_id,
-                        'entry_id'               => (int) $after_row['entry_id'],
-                        'wiw_time_id'            => (int) $wiw_time_id,
-                        'edit_type'              => 'Clock out',
-                        'old_value'              => (string) $before_row['clock_out'],
-                        'new_value'              => (string) $after_row['clock_out'],
-                        'edited_by_user_id'      => $edited_by_user_id,
-                        'edited_by_user_login'   => $edited_by_user_login,
-                        'edited_by_display_name' => $edited_by_display_name,
-                        'employee_id'            => (int) $timesheet->employee_id,
-                        'employee_name'          => (string) $timesheet->employee_name,
-                        'location_id'            => (int) $timesheet->location_id,
-                        'location_name'          => (string) $timesheet->location_name,
-                        'week_start_date'        => (string) $timesheet->week_start_date,
-                        'created_at'             => $now_mysql,
-                    )
-                );
-            }
-
-            // Break minutes change
-            if ( (int) $before_row['break_minutes'] !== (int) $after_row['break_minutes'] ) {
-                $wpdb->insert(
-                    $table_edit_logs,
-                    array(
-                        'timesheet_id'           => $timesheet_id,
-                        'entry_id'               => (int) $after_row['entry_id'],
-                        'wiw_time_id'            => (int) $wiw_time_id,
-                        'edit_type'              => 'Break Mins',
-                        'old_value'              => (string) (int) $before_row['break_minutes'],
-                        'new_value'              => (string) (int) $after_row['break_minutes'],
-                        'edited_by_user_id'      => $edited_by_user_id,
-                        'edited_by_user_login'   => $edited_by_user_login,
-                        'edited_by_display_name' => $edited_by_display_name,
-                        'employee_id'            => (int) $timesheet->employee_id,
-                        'employee_name'          => (string) $timesheet->employee_name,
-                        'location_id'            => (int) $timesheet->location_id,
-                        'location_name'          => (string) $timesheet->location_name,
-                        'week_start_date'        => (string) $timesheet->week_start_date,
-                        'created_at'             => $now_mysql,
-                    )
-                );
-            }
-        }
-
-
-    }
+    // 6) Re-sync ONLY this header’s filtered times
+    $this->sync_timesheets_to_local_db( $filtered_times, $user_map, $wp_timezone );
 
     wp_safe_redirect( add_query_arg( 'reset_success', '1', $redirect_back ) );
     exit;
