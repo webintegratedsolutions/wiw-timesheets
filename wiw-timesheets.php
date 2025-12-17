@@ -126,6 +126,10 @@ class WIW_Timesheet_Manager {
 
     // 5. Login handler
     add_action( 'admin_post_wiw_login_handler', array( $this, 'handle_wiw_login' ) );
+
+    // 6. Reset local timesheet from API (admin-post)
+    add_action( 'admin_post_wiw_reset_local_timesheet', array( $this, 'handle_reset_local_timesheet' ) );
+
     }
 
     /**
@@ -1534,6 +1538,29 @@ public function admin_local_timesheets_page() {
                 <a href="<?php echo esc_url( $list_url ); ?>" class="button">← Back to Local Timesheets List</a>
             </p>
 
+<?php
+// Reset notices
+if ( isset( $_GET['reset_success'] ) ) : ?>
+    <div class="notice notice-success is-dismissible"><p>✅ Local timesheet reset from When I Work successfully.</p></div>
+<?php endif;
+
+if ( isset( $_GET['reset_error'] ) && $_GET['reset_error'] !== '' ) : ?>
+    <div class="notice notice-error is-dismissible">
+        <p><strong>❌ Reset failed:</strong> <?php echo esc_html( sanitize_text_field( wp_unslash( $_GET['reset_error'] ) ) ); ?></p>
+    </div>
+<?php endif; ?>
+
+<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: 10px 0 20px;">
+    <input type="hidden" name="action" value="wiw_reset_local_timesheet" />
+    <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( (int) $header->id ); ?>" />
+    <?php wp_nonce_field( 'wiw_reset_local_timesheet', 'wiw_reset_nonce' ); ?>
+    <button type="submit" class="button button-secondary"
+        onclick="return confirm('Reset will discard ALL local edits for this timesheet and restore the original data from When I Work. Continue?');">
+        Reset from API
+    </button>
+</form>
+
+
             <h2>Timesheet #<?php echo esc_html( $header->id ); ?> Details</h2>
             <table class="widefat striped" style="max-width: 900px;">
                 <tbody>
@@ -1826,6 +1853,175 @@ if (!/^\d+$/.test(newBreak)) {
 
     </div><!-- .wrap -->
     <?php
+}
+
+/**
+ * Admin-post handler: Reset a local timesheet back to the original API data.
+ * Deletes local edits and re-syncs the untouched data from When I Work.
+ */
+public function handle_reset_local_timesheet() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( 'Permission denied.' );
+    }
+
+    if ( ! isset( $_POST['wiw_reset_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['wiw_reset_nonce'] ) ), 'wiw_reset_local_timesheet' ) ) {
+        wp_die( 'Security check failed.' );
+    }
+
+    $timesheet_id = isset( $_POST['timesheet_id'] ) ? absint( $_POST['timesheet_id'] ) : 0;
+
+$redirect_base = admin_url( 'admin.php?page=wiw-local-timesheets' );
+$redirect_back = add_query_arg(
+    array( 'timesheet_id' => $timesheet_id ),
+    $redirect_base
+);
+
+    if ( ! $timesheet_id ) {
+wp_safe_redirect( esc_url_raw( add_query_arg( 'reset_success', '1', $redirect_back ) ) );
+exit;
+
+    }
+
+    global $wpdb;
+
+    $table_timesheets        = $wpdb->prefix . 'wiw_timesheets';
+    $table_timesheet_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+    $header = $wpdb->get_row(
+        $wpdb->prepare( "SELECT * FROM {$table_timesheets} WHERE id = %d", $timesheet_id )
+    );
+
+    if ( ! $header ) {
+        wp_safe_redirect( add_query_arg( 'reset_error', rawurlencode( 'Timesheet not found.' ), $redirect_base ) );
+        exit;
+    }
+
+    // WordPress timezone
+    $tz_string = get_option( 'timezone_string' );
+    if ( empty( $tz_string ) ) { $tz_string = 'UTC'; }
+    $wp_timezone = new DateTimeZone( $tz_string );
+
+    // Fetch times for this week range from API (then filter locally by employee + location)
+    $start = $header->week_start_date;
+    $end   = ! empty( $header->week_end_date )
+        ? date( 'Y-m-d', strtotime( $header->week_end_date . ' +1 day' ) )
+        : date( 'Y-m-d', strtotime( $header->week_start_date . ' +6 day' ) );
+
+    $api = WIW_API_Client::request(
+        'times',
+        array(
+            'include' => 'users,shifts,sites',
+            'start'   => $start,
+            'end'     => $end,
+        ),
+        WIW_API_Client::METHOD_GET
+    );
+
+    if ( is_wp_error( $api ) ) {
+        wp_safe_redirect( add_query_arg( 'reset_error', rawurlencode( $api->get_error_message() ), $redirect_back ) );
+        exit;
+    }
+
+    $times           = isset( $api->times )  ? $api->times  : array();
+    $included_users  = isset( $api->users )  ? $api->users  : array();
+    $included_shifts = isset( $api->shifts ) ? $api->shifts : array();
+    $included_sites  = isset( $api->sites )  ? $api->sites  : array();
+
+    $user_map  = array_column( $included_users, null, 'id' );
+    $shift_map = array_column( $included_shifts, null, 'id' );
+    $site_map  = array_column( $included_sites, null, 'id' );
+    $site_map[0] = (object) array( 'name' => 'No Assigned Location' );
+
+    // Preprocess times so they have:
+    // - calculated_duration
+    // - scheduled_duration
+    // - location_id / location_name
+    foreach ( $times as &$time_entry ) {
+        $time_entry->calculated_duration = $this->calculate_timesheet_duration_in_hours( $time_entry );
+
+        $shift_id = $time_entry->shift_id ?? null;
+        $shift    = $shift_id ? ( $shift_map[ $shift_id ] ?? null ) : null;
+
+        if ( $shift ) {
+            $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours( $shift );
+
+            $site_lookup_id = $shift->site_id ?? 0;
+            $site_obj       = $site_map[ $site_lookup_id ] ?? null;
+
+            $time_entry->location_id   = (int) $site_lookup_id;
+            $time_entry->location_name = ( $site_obj && isset( $site_obj->name ) ) ? (string) $site_obj->name : 'No Assigned Location';
+        } else {
+            $time_entry->scheduled_duration = 0.0;
+            $time_entry->location_id        = 0;
+            $time_entry->location_name      = 'N/A';
+        }
+    }
+    unset( $time_entry );
+
+    // Filter to ONLY this local header’s employee + week + location
+    $employee_id  = (int) $header->employee_id;
+    $location_id  = (int) $header->location_id;
+    $week_start   = (string) $header->week_start_date;
+
+    $filtered = array();
+
+    foreach ( $times as $time_entry ) {
+        if ( (int) ( $time_entry->user_id ?? 0 ) !== $employee_id ) {
+            continue;
+        }
+        if ( (int) ( $time_entry->location_id ?? 0 ) !== $location_id ) {
+            continue;
+        }
+
+        // Ensure it truly belongs to this “Week of” using the same Monday-based logic
+        $start_time_utc = $time_entry->start_time ?? '';
+        if ( empty( $start_time_utc ) ) { continue; }
+
+        try {
+            $dt = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
+            $dt->setTimezone( $wp_timezone );
+
+            $dayN = (int) $dt->format( 'N' ); // 1=Mon..7=Sun
+            $days_to_modify = ( $dayN >= 1 && $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
+            if ( $days_to_modify !== 0 ) {
+                $dt->modify( "{$days_to_modify} days" );
+            }
+
+            if ( $dt->format( 'Y-m-d' ) !== $week_start ) {
+                continue;
+            }
+        } catch ( Exception $e ) {
+            continue;
+        }
+
+        $filtered[] = $time_entry;
+    }
+
+    // 1) Delete local edited entries for this header
+    $wpdb->delete( $table_timesheet_entries, array( 'timesheet_id' => $timesheet_id ), array( '%d' ) );
+
+    // 2) Reset header totals/status immediately (even if API returns no rows)
+    $now = current_time( 'mysql' );
+    $wpdb->update(
+        $table_timesheets,
+        array(
+            'total_scheduled_hours' => 0.00,
+            'total_clocked_hours'   => 0.00,
+            'status'                => 'pending',
+            'updated_at'            => $now,
+        ),
+        array( 'id' => $timesheet_id ),
+        array( '%f', '%f', '%s', '%s' ),
+        array( '%d' )
+    );
+
+    // 3) Re-sync from API back into local DB
+    if ( ! empty( $filtered ) ) {
+        $this->sync_timesheets_to_local_db( $filtered, $user_map, $wp_timezone );
+    }
+
+    wp_safe_redirect( add_query_arg( 'reset_success', '1', $redirect_back ) );
+    exit;
 }
 
 /**
