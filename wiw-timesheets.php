@@ -1806,7 +1806,7 @@ public function ajax_local_update_entry() {
         wp_send_json_error( array( 'message' => 'Entry not found.' ) );
     }
 
-    $date         = $entry->date;
+    $date         = (string) $entry->date;
     $timesheet_id = (int) $entry->timesheet_id;
 
     if ( $break_minutes === null ) {
@@ -1829,9 +1829,8 @@ public function ajax_local_update_entry() {
     $location_name   = (string) $header->location_name;
     $week_start_date = (string) $header->week_start_date;
 
-    $current_user = wp_get_current_user();
+    $current_user    = wp_get_current_user();
     $edited_by_login = (string) ( $current_user->user_login ?? '' );
-
 
     $tz_string = get_option( 'timezone_string' );
     if ( empty( $tz_string ) ) {
@@ -1864,8 +1863,11 @@ public function ajax_local_update_entry() {
     $clock_out_str = $dt_out->format( 'Y-m-d H:i:s' );
     $now           = current_time( 'mysql' );
 
-    // --- LOGGING ---
-    // Normalize to minute precision to avoid "seconds-only" differences (the UI edits HH:MM).
+    // Display format (no seconds) for the UI
+    $clock_in_display  = $dt_in->format( 'g:ia' );
+    $clock_out_display = $dt_out->format( 'g:ia' );
+
+    // --- LOGGING (unchanged) ---
     $old_clock_in_raw  = (string) ( $entry->clock_in  ? $entry->clock_in  : '' );
     $old_clock_out_raw = (string) ( $entry->clock_out ? $entry->clock_out : '' );
 
@@ -1879,24 +1881,23 @@ public function ajax_local_update_entry() {
     $new_break = (int) $break_minutes;
 
     if ( $old_clock_in_norm !== $new_clock_in_norm ) {
-$this->insert_local_edit_log( array(
-    'timesheet_id'           => $timesheet_id,
-    'entry_id'               => $entry_id,
-    'wiw_time_id'            => (int) $entry->wiw_time_id,
-    'edit_type'              => 'Clock in',
-    'old_value'              => $old_clock_in_norm,
-    'new_value'              => $new_clock_in_norm,
-    'edited_by_user_id'      => get_current_user_id(),
-    'edited_by_user_login'   => $edited_by_login,
-    'edited_by_display_name' => $current_user->display_name,
-    'employee_id'            => (int) $entry->user_id,
-    'employee_name'          => $employee_name,
-    'location_id'            => $location_id,
-    'location_name'          => $location_name,
-    'week_start_date'        => $week_start_date,
-    'created_at'             => $now,
-) );
-
+        $this->insert_local_edit_log( array(
+            'timesheet_id'           => $timesheet_id,
+            'entry_id'               => $entry_id,
+            'wiw_time_id'            => (int) $entry->wiw_time_id,
+            'edit_type'              => 'Clock in',
+            'old_value'              => $old_clock_in_norm,
+            'new_value'              => $new_clock_in_norm,
+            'edited_by_user_id'      => get_current_user_id(),
+            'edited_by_user_login'   => $edited_by_login,
+            'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+            'employee_id'            => (int) $entry->user_id,
+            'employee_name'          => $employee_name,
+            'location_id'            => $location_id,
+            'location_name'          => $location_name,
+            'week_start_date'        => $week_start_date,
+            'created_at'             => $now,
+        ) );
     }
 
     if ( $old_clock_out_norm !== $new_clock_out_norm ) {
@@ -1908,7 +1909,8 @@ $this->insert_local_edit_log( array(
             'old_value'              => $old_clock_out_norm,
             'new_value'              => $new_clock_out_norm,
             'edited_by_user_id'      => get_current_user_id(),
-            'edited_by_display_name' => wp_get_current_user()->display_name,
+            'edited_by_user_login'   => $edited_by_login,
+            'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
             'created_at'             => $now,
             'employee_id'            => (int) $entry->user_id,
             'employee_name'          => $employee_name,
@@ -1927,7 +1929,8 @@ $this->insert_local_edit_log( array(
             'old_value'              => (string) $old_break,
             'new_value'              => (string) $new_break,
             'edited_by_user_id'      => get_current_user_id(),
-            'edited_by_display_name' => wp_get_current_user()->display_name,
+            'edited_by_user_login'   => $edited_by_login,
+            'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
             'created_at'             => $now,
             'employee_id'            => (int) $entry->user_id,
             'employee_name'          => $employee_name,
@@ -1936,7 +1939,6 @@ $this->insert_local_edit_log( array(
             'week_start_date'        => $week_start_date,
         ) );
     }
-
 
     $updated = $wpdb->update(
         $table_entries,
@@ -1976,8 +1978,10 @@ $this->insert_local_edit_log( array(
 
     wp_send_json_success(
         array(
-            'clock_in_display'             => $clock_in_str,
-            'clock_out_display'            => $clock_out_str,
+            // IMPORTANT: these are now the formatted strings for display
+            'clock_in_display'             => $clock_in_display,
+            'clock_out_display'            => $clock_out_display,
+
             'break_minutes_display'        => (string) (int) $break_minutes,
             'clocked_hours_display'        => number_format( $clocked_hours, 2 ),
             'header_total_clocked_display' => number_format( $total_clocked, 2 ),
