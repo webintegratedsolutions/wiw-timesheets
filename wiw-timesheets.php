@@ -37,8 +37,12 @@ require_once WIW_PLUGIN_PATH . 'includes/admin-settings.php';
 // Include the admin login handler
 require_once WIW_PLUGIN_PATH . 'includes/admin-login-handler.php';
 
-//
+// Include the timesheet sync trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
+
+// Include the timesheet helpers trait
+require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
+
 
 
 /**
@@ -51,6 +55,9 @@ class WIW_Timesheet_Manager {
 
     // Include timesheet helper methods
     use WIW_Timesheet_Helpers_Trait;
+
+    // Include timesheet sync methods
+    use WIW_Timesheet_Sync_Trait;
 
     public function __construct() {
     // 1. Add Admin Menus and Settings
@@ -401,241 +408,6 @@ $this->sync_timesheets_to_local_db( $times, $user_map, $wp_timezone );
         ?>
     </div>
     <?php
-}
-
-/**
- * Syncs fetched timesheet data from the WIW API into local DB tables:
- * - wp_wiw_timesheets        (header: one per employee + week + location)
- * - wp_wiw_timesheet_entries (line items: one per WIW time record)
- *
- * This does NOT change any UI or workflow; it just mirrors data locally.
- *
- * @param array        $times       The raw times array (with calculated_duration, scheduled_duration, location fields).
- * @param array        $user_map    Map of user IDs to user objects.
- * @param DateTimeZone $wp_timezone WordPress timezone object.
- */
-private function sync_timesheets_to_local_db( $times, $user_map, $wp_timezone ) {
-    global $wpdb;
-
-    if ( empty( $times ) ) {
-        return;
-    }
-
-    $table_timesheets        = $wpdb->prefix . 'wiw_timesheets';
-    $table_timesheet_entries = $wpdb->prefix . 'wiw_timesheet_entries';
-
-    $grouped = [];
-
-    // 1. Group by employee_id + week_start + location_id
-    foreach ( $times as $time_entry ) {
-        $user_id = isset( $time_entry->user_id ) ? (int) $time_entry->user_id : 0;
-        if ( ! $user_id || ! isset( $user_map[ $user_id ] ) ) {
-            continue;
-        }
-
-        $user          = $user_map[ $user_id ];
-        $employee_name = trim( ( $user->first_name ?? '' ) . ' ' . ( $user->last_name ?? 'Unknown' ) );
-
-        $start_time_utc = $time_entry->start_time ?? '';
-        if ( empty( $start_time_utc ) ) {
-            continue;
-        }
-
-        $location_id   = isset( $time_entry->location_id ) ? (int) $time_entry->location_id : 0;
-        $location_name = isset( $time_entry->location_name ) ? (string) $time_entry->location_name : '';
-
-        // --- Compute "Week of" (Monday-based) like group_timesheet_by_pay_period() ---
-        try {
-            $dt = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
-            $dt->setTimezone( $wp_timezone ); // local time for day-of-week
-
-            $day_of_week_N  = (int) $dt->format( 'N' ); // 1=Mon, 7=Sun
-            $days_to_modify = 0;
-
-            if ( $day_of_week_N >= 1 && $day_of_week_N <= 5 ) {
-                // Mon–Fri: go back to that week's Monday
-                $days_to_modify = - ( $day_of_week_N - 1 );
-            } else {
-                // Sat/Sun: go forward to next Monday
-                $days_to_modify = 8 - $day_of_week_N;
-            }
-
-            if ( 0 !== $days_to_modify ) {
-                $dt->modify( "{$days_to_modify} days" );
-            }
-
-            $week_start = $dt->format( 'Y-m-d' );
-        } catch ( Exception $e ) {
-            continue;
-        }
-        // -----------------------------------------------------------------------
-
-        // Key includes location_id
-        $key = $user_id . '|' . $week_start . '|' . $location_id;
-
-        if ( ! isset( $grouped[ $key ] ) ) {
-            $grouped[ $key ] = [
-                'employee_id'           => $user_id,
-                'employee_name'         => $employee_name,
-                'location_id'           => $location_id,
-                'location_name'         => $location_name,
-                'week_start_date'       => $week_start,
-                'records'               => [],
-                'total_clocked_hours'   => 0.0,
-                'total_scheduled_hours' => 0.0,
-            ];
-        }
-
-        $clocked_duration   = (float) ( $time_entry->calculated_duration   ?? 0.0 );
-        $scheduled_duration = (float) ( $time_entry->scheduled_duration    ?? 0.0 );
-
-        $grouped[ $key ]['total_clocked_hours']   += $clocked_duration;
-        $grouped[ $key ]['total_scheduled_hours'] += $scheduled_duration;
-        $grouped[ $key ]['records'][]             = $time_entry;
-    }
-
-    if ( empty( $grouped ) ) {
-        return;
-    }
-
-    $now = current_time( 'mysql' );
-
-    // 2. Upsert headers + entries
-    foreach ( $grouped as $bundle ) {
-        $employee_id           = $bundle['employee_id'];
-        $employee_name         = $bundle['employee_name'];
-        $location_id           = $bundle['location_id'];
-        $location_name         = $bundle['location_name'];
-        $week_start_date       = $bundle['week_start_date'];
-        $week_end_date         = date( 'Y-m-d', strtotime( $week_start_date . ' +4 days' ) ); // Mon–Fri
-        $total_clocked_hours   = round( $bundle['total_clocked_hours'],   2 );
-        $total_scheduled_hours = round( $bundle['total_scheduled_hours'], 2 );
-        $records               = $bundle['records'];
-
-        // --- Header upsert: one per employee + week_start_date + location_id ---
-        $header_id = $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT id FROM {$table_timesheets} 
-                 WHERE employee_id = %d AND week_start_date = %s AND location_id = %d",
-                $employee_id,
-                $week_start_date,
-                $location_id
-            )
-        );
-
-        $header_data = [
-            'employee_id'           => $employee_id,
-            'employee_name'         => $employee_name,
-            'location_id'           => $location_id,
-            'location_name'         => $location_name,
-            'week_start_date'       => $week_start_date,
-            'week_end_date'         => $week_end_date,
-            'total_scheduled_hours' => $total_scheduled_hours,
-            'total_clocked_hours'   => $total_clocked_hours,
-            'updated_at'            => $now,
-        ];
-
-        if ( $header_id ) {
-            $wpdb->update(
-                $table_timesheets,
-                $header_data,
-                [ 'id' => $header_id ]
-            );
-        } else {
-            $header_data['status']     = 'pending';
-            $header_data['created_at'] = $now;
-
-            $wpdb->insert(
-                $table_timesheets,
-                $header_data
-            );
-            $header_id = (int) $wpdb->insert_id;
-        }
-
-        if ( ! $header_id ) {
-            // If header can't be created, skip its records
-            continue;
-        }
-
-        // --- Entries upsert: one per WIW time record ---
-        foreach ( $records as $time_entry ) {
-            $wiw_time_id = isset( $time_entry->id ) ? (int) $time_entry->id : 0;
-            if ( ! $wiw_time_id ) {
-                continue;
-            }
-
-            $start_time_utc = $time_entry->start_time ?? '';
-            if ( empty( $start_time_utc ) ) {
-                continue;
-            }
-
-            $end_time_utc    = $time_entry->end_time ?? '';
-            $break_minutes   = isset( $time_entry->break ) ? (int) $time_entry->break : 0;
-            $scheduled_hours = (float) ( $time_entry->scheduled_duration  ?? 0.0 );
-            $clocked_hours   = (float) ( $time_entry->calculated_duration ?? 0.0 );
-            $location_id     = isset( $time_entry->location_id ) ? (int) $time_entry->location_id : 0;
-            $location_name   = isset( $time_entry->location_name ) ? (string) $time_entry->location_name : '';
-
-            // Convert to local date/time
-            try {
-                $dt_start_utc = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
-                $dt_start_utc->setTimezone( $wp_timezone );
-                $local_date     = $dt_start_utc->format( 'Y-m-d' );
-                $local_clock_in = $dt_start_utc->format( 'Y-m-d H:i:s' );
-            } catch ( Exception $e ) {
-                continue;
-            }
-
-            $local_clock_out = null;
-            if ( ! empty( $end_time_utc ) ) {
-                try {
-                    $dt_end_utc = new DateTime( $end_time_utc, new DateTimeZone( 'UTC' ) );
-                    $dt_end_utc->setTimezone( $wp_timezone );
-                    $local_clock_out = $dt_end_utc->format( 'Y-m-d H:i:s' );
-                } catch ( Exception $e ) {
-                    $local_clock_out = null;
-                }
-            }
-
-            // Upsert entry by wiw_time_id
-            $entry_id = $wpdb->get_var(
-                $wpdb->prepare(
-                    "SELECT id FROM {$table_timesheet_entries} WHERE wiw_time_id = %d",
-                    $wiw_time_id
-                )
-            );
-
-            $entry_data = [
-                'timesheet_id'    => $header_id,
-                'wiw_time_id'     => $wiw_time_id,
-                'wiw_shift_id'    => isset( $time_entry->shift_id ) ? (int) $time_entry->shift_id : null,
-                'date'            => $local_date,
-                'location_id'     => $location_id,
-                'location_name'   => $location_name,
-                'clock_in'        => $local_clock_in,
-                'clock_out'       => $local_clock_out,
-                'break_minutes'   => $break_minutes,
-                'scheduled_hours' => round( $scheduled_hours, 2 ),
-                'clocked_hours'   => round( $clocked_hours, 2 ),
-                'status'          => 'pending',
-                'updated_at'      => $now,
-            ];
-
-            if ( $entry_id ) {
-                $wpdb->update(
-                    $table_timesheet_entries,
-                    $entry_data,
-                    [ 'id' => $entry_id ]
-                );
-            } else {
-                $entry_data['created_at'] = $now;
-                $wpdb->insert(
-                    $table_timesheet_entries,
-                    $entry_data
-                );
-            }
-        }
-    }
 }
 
 /**
