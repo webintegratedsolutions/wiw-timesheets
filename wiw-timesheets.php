@@ -1,33 +1,67 @@
 <?php
 /**
  * Plugin Name: When I Work Timesheets Manager
- * Version: 1.1.0
+ * Description: Integrates with the When I Work API to manage and approve employee timesheets.
+ * Version: 1.0.0
+ * Author: Web Integrated Solutions
+ * License: GPL2
  */
 
-if (!defined('ABSPATH')) exit;
-define('WIW_PLUGIN_PATH', plugin_dir_path(__FILE__));
+// Exit if accessed directly (security)
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 
-// 1. Load the "Engines"
-require_once WIW_PLUGIN_PATH . 'includes/wheniwork.php'; // Your API Client
-require_once WIW_PLUGIN_PATH . 'includes/class-wiw-api-handler.php';
-require_once WIW_PLUGIN_PATH . 'includes/class-wiw-ajax-handler.php';
+// Define plugin path for easy file reference
+if ( ! defined( 'WIW_PLUGIN_PATH' ) ) {
+    define( 'WIW_PLUGIN_PATH', plugin_dir_path( __FILE__ ) );
+}
 
-class WIW_Timesheet_Manager {
-    public $api;
-    public $ajax;
+// 💥 IMPORTANT: Include the When I Work API Wrapper file
+require_once WIW_PLUGIN_PATH . 'includes/wheniwork.php';
 
-    public function __construct() {
-        // Initialize the sub-handlers
-        $this->api  = new WIW_API_Handler();
-        $this->ajax = new WIW_AJAX_Handler();
-
-        add_action('admin_menu', [$this, 'add_admin_menus']);
-        
-        // Connect AJAX actions to the new AJAX handler class
-        add_action('wp_ajax_wiw_edit_timesheet_hours', [$this->ajax, 'handle_save_hours']);
-        add_action('wp_ajax_wiw_approve_period', [$this->ajax, 'handle_approve_period']);
+/**
+ * Enqueue admin CSS for WIW Timesheets plugin.
+ */
+function wiwts_enqueue_admin_styles( $hook_suffix ) {
+    // Optional: only load on your plugin's admin screen.
+    // Replace 'toplevel_page_wiw-timesheets' with your actual screen ID / hook.
+    if ( $hook_suffix !== 'toplevel_page_wiw-timesheets' ) {
+        return;
     }
 
+    wp_enqueue_style(
+        'wiwts-admin-styles',
+        plugin_dir_url( __FILE__ ) . 'css/wiw-admin.css',
+        array(),          // dependencies
+        '1.0.0'           // version
+    );
+}
+add_action( 'admin_enqueue_scripts', 'wiwts_enqueue_admin_styles' );/**
+ * Core Plugin Class
+ */
+class WIW_Timesheet_Manager {
+
+    public function __construct() {
+    // 1. Add Admin Menus and Settings
+    add_action( 'admin_menu', array( $this, 'add_admin_menus' ) );
+    add_action( 'admin_init', array( $this, 'register_settings' ) );
+
+    // 2. Add Front-end UI (Client Area) via Shortcode (Still registered, but logic is deferred)
+    add_shortcode( 'wiw_timesheets_client', array( $this, 'render_client_ui' ) );
+
+    // 3. Handle AJAX requests for viewing/adjusting/approving (Crucial for interaction)
+    // REMOVED: add_action( 'wp_ajax_wiw_fetch_timesheets', array( $this, 'handle_fetch_timesheets' ) );
+    add_action( 'wp_ajax_wiw_approve_timesheet', array( $this, 'handle_approve_timesheet' ) );
+    // NOTE: The 'nopriv' hook is generally NOT used for secure client areas.
+
+    // 4. Handle Login Request via POST (when admin clicks "Log In" button)
+    add_action( 'admin_post_wiw_login_handler', array( $this, 'handle_wiw_login' ) );
+    }
+
+    /**
+     * Set up the administrative menu pages.
+     */
     public function add_admin_menus() {
         add_menu_page(
             'WIW Timesheets',        // Page Title

@@ -11,11 +11,10 @@ if (empty($employee_data)):
         
         // --- EMPLOYEE HEADER ROW ---
         ?>
-        <tr id="<?php echo esc_attr($row_id); ?>" class="wiw-daily-record">
-            <td><?php echo esc_html($record->id); ?></td>
-            <td><?php echo esc_html($record->start_time); ?></td>
-            <td></td>
-            <td></td>
+        <tr class="wiw-employee-header">
+            <td colspan="12" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                👤 Employee: <?php echo esc_html($employee_name); ?>
+            </td>
         </tr>
         <?php
 
