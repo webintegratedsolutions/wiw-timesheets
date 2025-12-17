@@ -43,6 +43,10 @@ require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
+//  Include the AJAX handlers
+require_once WIW_PLUGIN_PATH . 'includes/ajax-handlers.php';
+
+
 
 
 /**
@@ -80,6 +84,9 @@ class WIW_Timesheet_Manager {
 
     // 6. Reset local timesheet from API (admin-post)
     add_action( 'admin_post_wiw_reset_local_timesheet', array( $this, 'handle_reset_local_timesheet' ) );
+
+     // ✅ 7. Register additional AJAX hooks (THIS was missing)
+    $this->register_ajax_hooks();
 
     }
 

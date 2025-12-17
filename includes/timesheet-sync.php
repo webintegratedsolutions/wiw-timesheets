@@ -51,25 +51,28 @@ trait WIW_Timesheet_Sync_Trait {
                 ( $user->last_name ?? 'Unknown' )
             );
 
-            $start_time_utc = $time_entry->start_time ?? '';
-            if ( empty( $start_time_utc ) ) {
+            $start_time_raw = $time_entry->start_time ?? '';
+            if ( empty( $start_time_raw ) ) {
                 continue;
             }
 
             $location_id   = (int) ( $time_entry->location_id ?? 0 );
             $location_name = (string) ( $time_entry->location_name ?? '' );
 
+            // Parse start time reliably (WIW returns strings like "Mon, 08 Dec 2025 08:30:30 -0500").
+            // Convert to WP timezone and use that local date for grouping.
             try {
-                $dt = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
-                $dt->setTimezone( $wp_timezone );
+                $dt_local = new DateTime( $start_time_raw ); // respects the offset in the string
+                $dt_local->setTimezone( $wp_timezone );
 
-                $dayN = (int) $dt->format( 'N' );
+                // Monday-based week start (Mon-Fri week)
+                $dayN = (int) $dt_local->format( 'N' ); // 1=Mon..7=Sun
                 $days = ( $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
                 if ( $days !== 0 ) {
-                    $dt->modify( "{$days} days" );
+                    $dt_local->modify( "{$days} days" );
                 }
 
-                $week_start = $dt->format( 'Y-m-d' );
+                $week_start = $dt_local->format( 'Y-m-d' );
             } catch ( Exception $e ) {
                 continue;
             }
@@ -168,15 +171,41 @@ trait WIW_Timesheet_Sync_Trait {
                     )
                 );
 
+                // Convert WIW times to local WP timezone and store as MySQL DATETIME strings.
+                $clock_in_local  = null;
+                $clock_out_local = null;
+                $entry_date      = null;
+
+                try {
+                    $dt_in = new DateTime( (string) ( $time_entry->start_time ?? '' ) );
+                    $dt_in->setTimezone( $wp_timezone );
+                    $clock_in_local = $dt_in->format( 'Y-m-d H:i:s' );
+                    $entry_date     = $dt_in->format( 'Y-m-d' );
+                } catch ( Exception $e ) {
+                    // If we can't parse start_time, skip this row rather than writing bad data.
+                    continue;
+                }
+
+                $end_raw = (string) ( $time_entry->end_time ?? '' );
+                if ( $end_raw !== '' ) {
+                    try {
+                        $dt_out = new DateTime( $end_raw );
+                        $dt_out->setTimezone( $wp_timezone );
+                        $clock_out_local = $dt_out->format( 'Y-m-d H:i:s' );
+                    } catch ( Exception $e ) {
+                        $clock_out_local = null;
+                    }
+                }
+
                 $entry_data = [
                     'timesheet_id'    => $header_id,
                     'wiw_time_id'     => $wiw_time_id,
                     'wiw_shift_id'    => (int) ( $time_entry->shift_id ?? 0 ),
-                    'date'            => substr( $time_entry->start_time, 0, 10 ),
+                    'date'            => $entry_date,
                     'location_id'     => (int) ( $time_entry->location_id ?? 0 ),
                     'location_name'   => (string) ( $time_entry->location_name ?? '' ),
-                    'clock_in'        => $time_entry->start_time ?? null,
-                    'clock_out'       => $time_entry->end_time ?? null,
+                    'clock_in'        => $clock_in_local,
+                    'clock_out'       => $clock_out_local,
                     'break_minutes'   => (int) ( $time_entry->break ?? 0 ),
                     'scheduled_hours' => round( (float) ( $time_entry->scheduled_duration ?? 0 ), 2 ),
                     'clocked_hours'   => round( (float) ( $time_entry->calculated_duration ?? 0 ), 2 ),
