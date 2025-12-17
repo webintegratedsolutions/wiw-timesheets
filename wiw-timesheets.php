@@ -169,6 +169,16 @@ class WIW_Timesheet_Manager {
         array( $this, 'admin_locations_page' ) // Function that renders this page
         );
 
+        // Submenu page for Local Timesheets (local DB view)
+        add_submenu_page(
+            'wiw-timesheets',
+            'Local Timesheets',
+            'Local Timesheets',
+            'manage_options',
+            'wiw-local-timesheets', // Unique slug for this page
+            array( $this, 'admin_local_timesheets_page' ) // Function that renders this page
+        );
+
         // Settings Submenu
         add_submenu_page(
             'wiw-timesheets',
@@ -178,6 +188,7 @@ class WIW_Timesheet_Manager {
             'wiw-timesheets-settings',
             array( $this, 'admin_settings_page' )
         );
+
     }
 
 // Register_ajax_hooks()
@@ -1477,6 +1488,214 @@ public function admin_locations_page() {
     </div>
     <?php
 }
+
+/**
+ * Renders the Local Timesheets view (Admin Area) from the local DB tables.
+ *
+ * This is read-only for now: one list of timesheet headers, and an optional
+ * detail view showing the daily entries for a selected timesheet.
+ */
+public function admin_local_timesheets_page() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( esc_html__( 'You do not have permission to access this page.', 'wiw-timesheets' ) );
+    }
+
+    global $wpdb;
+
+    $table_timesheets        = $wpdb->prefix . 'wiw_timesheets';
+    $table_timesheet_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+    // Selected timesheet ID for detail view (if any)
+    $selected_id = isset( $_GET['timesheet_id'] ) ? (int) $_GET['timesheet_id'] : 0;
+
+    ?>
+    <div class="wrap">
+        <h1>📁 Local Timesheets (Database View)</h1>
+        <p>This page displays timesheets stored locally in WordPress, grouped by Employee, Week, and Location.</p>
+    <?php
+
+    // If a specific timesheet is selected, show header info + entries
+    if ( $selected_id > 0 ) {
+        $header = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT * FROM {$table_timesheets} WHERE id = %d",
+                $selected_id
+            )
+        );
+
+        if ( $header ) {
+            // Back link to list
+            $list_url = remove_query_arg( 'timesheet_id' );
+            ?>
+            <p>
+                <a href="<?php echo esc_url( $list_url ); ?>" class="button">← Back to Local Timesheets List</a>
+            </p>
+
+            <h2>Timesheet #<?php echo esc_html( $header->id ); ?> Details</h2>
+            <table class="widefat striped" style="max-width: 900px;">
+                <tbody>
+                    <tr>
+                        <th scope="row" style="width: 200px;">Employee</th>
+                        <td><?php echo esc_html( $header->employee_name ); ?> (ID: <?php echo esc_html( $header->employee_id ); ?>)</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Location</th>
+                        <td>
+                            <?php echo esc_html( $header->location_name ); ?>
+                            <?php if ( ! empty( $header->location_id ) ) : ?>
+                                (ID: <?php echo esc_html( $header->location_id ); ?>)
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Week of</th>
+                        <td>
+                            <?php echo esc_html( $header->week_start_date ); ?>
+                            <?php if ( ! empty( $header->week_end_date ) ) : ?>
+                                &nbsp;to&nbsp;<?php echo esc_html( $header->week_end_date ); ?>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Totals</th>
+                        <td>
+                            Scheduled: <?php echo esc_html( number_format( (float) $header->total_scheduled_hours, 2 ) ); ?> hrs,
+                            Clocked: <?php echo esc_html( number_format( (float) $header->total_clocked_hours, 2 ) ); ?> hrs
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Status</th>
+                        <td><?php echo esc_html( $header->status ); ?></td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Created / Updated</th>
+                        <td>
+                            Created: <?php echo esc_html( $header->created_at ); ?><br/>
+                            Updated: <?php echo esc_html( $header->updated_at ); ?>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 style="margin-top: 30px;">Daily Entries</h3>
+            <?php
+            $entries = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT * FROM {$table_timesheet_entries} 
+                     WHERE timesheet_id = %d 
+                     ORDER BY date ASC, clock_in ASC",
+                    $header->id
+                )
+            );
+
+            if ( empty( $entries ) ) : ?>
+                <p>No entries found for this timesheet.</p>
+            <?php else : ?>
+                <table class="widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th width="10%">Date</th>
+                            <th width="20%">Clock In</th>
+                            <th width="20%">Clock Out</th>
+                            <th width="10%">Break (min)</th>
+                            <th width="10%">Sched. Hrs</th>
+                            <th width="10%">Clocked Hrs</th>
+                            <th width="10%">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $entries as $entry ) : ?>
+                            <tr>
+                                <td><?php echo esc_html( $entry->date ); ?></td>
+                                <td><?php echo esc_html( $entry->clock_in ); ?></td>
+                                <td><?php echo esc_html( $entry->clock_out ); ?></td>
+                                <td><?php echo esc_html( $entry->break_minutes ); ?></td>
+                                <td><?php echo esc_html( number_format( (float) $entry->scheduled_hours, 2 ) ); ?></td>
+                                <td><?php echo esc_html( number_format( (float) $entry->clocked_hours, 2 ) ); ?></td>
+                                <td><?php echo esc_html( $entry->status ); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+
+            <?php
+        } else {
+            // Invalid ID or not found
+            ?>
+            <div class="notice notice-error">
+                <p>Timesheet not found.</p>
+            </div>
+            <?php
+        }
+
+        echo '</div>'; // .wrap
+        return;
+    }
+
+    // No specific ID selected: show list of headers
+    $headers = $wpdb->get_results(
+        "SELECT * FROM {$table_timesheets} 
+         ORDER BY week_start_date DESC, employee_name ASC, location_name ASC 
+         LIMIT 200"
+    );
+
+    if ( empty( $headers ) ) : ?>
+        <div class="notice notice-warning">
+            <p>No local timesheets found. Visit the main WIW Timesheets Dashboard to fetch and sync data.</p>
+        </div>
+    <?php else : ?>
+        <table class="wp-list-table widefat fixed striped">
+            <thead>
+                <tr>
+                    <th width="6%">ID</th>
+                    <th width="16%">Week of</th>
+                    <th width="18%">Employee</th>
+                    <th width="20%">Location</th>
+                    <th width="12%">Sched. Hrs</th>
+                    <th width="12%">Clocked Hrs</th>
+                    <th width="10%">Status</th>
+                    <th width="6%">View</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ( $headers as $row ) : 
+                    $detail_url = add_query_arg(
+                        array( 'timesheet_id' => (int) $row->id ),
+                        menu_page_url( 'wiw-local-timesheets', false )
+                    );
+                    ?>
+                    <tr>
+                        <td><?php echo esc_html( $row->id ); ?></td>
+                        <td>
+                            <?php echo esc_html( $row->week_start_date ); ?>
+                            <?php if ( ! empty( $row->week_end_date ) ) : ?>
+                                &nbsp;to&nbsp;<?php echo esc_html( $row->week_end_date ); ?>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo esc_html( $row->employee_name ); ?></td>
+                        <td>
+                            <?php echo esc_html( $row->location_name ); ?>
+                            <?php if ( ! empty( $row->location_id ) ) : ?>
+                                <br/><small>(ID: <?php echo esc_html( $row->location_id ); ?>)</small>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo esc_html( number_format( (float) $row->total_scheduled_hours, 2 ) ); ?></td>
+                        <td><?php echo esc_html( number_format( (float) $row->total_clocked_hours, 2 ) ); ?></td>
+                        <td><?php echo esc_html( $row->status ); ?></td>
+                        <td>
+                            <a href="<?php echo esc_url( $detail_url ); ?>" class="button button-small">View</a>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
+
+    </div><!-- .wrap -->
+    <?php
+}
+
 
 /**
  * Groups timesheet records into weekly Week ofs (Monday to Friday) 
