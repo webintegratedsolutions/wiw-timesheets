@@ -148,12 +148,19 @@ private function insert_local_edit_log( $args ) {
 }
 
 // Register_ajax_hooks()
-    private function register_ajax_hooks() {
-    // ... existing hooks (e.g., for login, settings, timesheet approval)
-
-    // Hook for editing a single timesheet
+private function register_ajax_hooks() {
+    // Edit a single timesheet record's clock times (API)
     add_action( 'wp_ajax_wiw_edit_timesheet_hours', array( $this, 'ajax_edit_timesheet_hours' ) );
+
+    // ✅ Align approve AJAX action names used by the JS with the existing handler
+    // (JS calls these actions; we route both to the same handler you already have)
+    add_action( 'wp_ajax_wiw_approve_single_timesheet', array( $this, 'handle_approve_timesheet' ) );
+    add_action( 'wp_ajax_wiw_approve_timesheet_period', array( $this, 'handle_approve_timesheet' ) );
+
+    // Keep legacy / existing action if you still use it anywhere
+    add_action( 'wp_ajax_wiw_approve_timesheet', array( $this, 'handle_approve_timesheet' ) );
 }
+
 
 /**
  * Handles the AJAX request to update a single timesheet record's clock times.
