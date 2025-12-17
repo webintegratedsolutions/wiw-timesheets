@@ -121,7 +121,10 @@ class WIW_Timesheet_Manager {
     add_action( 'wp_ajax_wiw_approve_timesheet', array( $this, 'handle_approve_timesheet' ) );
     // NOTE: The 'nopriv' hook is generally NOT used for secure client areas.
 
-    // 4. Handle Login Request via POST (when admin clicks "Log In" button)
+    // 4. NEW: AJAX for local entry hours update (Local Timesheets view)
+    add_action( 'wp_ajax_wiw_local_update_entry', array( $this, 'ajax_local_update_entry' ) );
+
+    // 5. Login handler
     add_action( 'admin_post_wiw_login_handler', array( $this, 'handle_wiw_login' ) );
     }
 
@@ -1556,13 +1559,15 @@ public function admin_local_timesheets_page() {
                             <?php endif; ?>
                         </td>
                     </tr>
-                    <tr>
-                        <th scope="row">Totals</th>
-                        <td>
-                            Scheduled: <?php echo esc_html( number_format( (float) $header->total_scheduled_hours, 2 ) ); ?> hrs,
-                            Clocked: <?php echo esc_html( number_format( (float) $header->total_clocked_hours, 2 ) ); ?> hrs
-                        </td>
-                    </tr>
+<tr>
+    <th scope="row">Totals</th>
+    <td>
+        Scheduled: <?php echo esc_html( number_format( (float) $header->total_scheduled_hours, 2 ) ); ?> hrs,
+        Clocked: <span id="wiw-local-header-total-clocked">
+            <?php echo esc_html( number_format( (float) $header->total_clocked_hours, 2 ) ); ?>
+        </span> hrs
+    </td>
+</tr>
                     <tr>
                         <th scope="row">Status</th>
                         <td><?php echo esc_html( $header->status ); ?></td>
@@ -1591,33 +1596,148 @@ public function admin_local_timesheets_page() {
             if ( empty( $entries ) ) : ?>
                 <p>No entries found for this timesheet.</p>
             <?php else : ?>
-                <table class="widefat fixed striped">
-                    <thead>
-                        <tr>
-                            <th width="10%">Date</th>
-                            <th width="20%">Clock In</th>
-                            <th width="20%">Clock Out</th>
-                            <th width="10%">Break (min)</th>
-                            <th width="10%">Sched. Hrs</th>
-                            <th width="10%">Clocked Hrs</th>
-                            <th width="10%">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ( $entries as $entry ) : ?>
-                            <tr>
-                                <td><?php echo esc_html( $entry->date ); ?></td>
-                                <td><?php echo esc_html( $entry->clock_in ); ?></td>
-                                <td><?php echo esc_html( $entry->clock_out ); ?></td>
-                                <td><?php echo esc_html( $entry->break_minutes ); ?></td>
-                                <td><?php echo esc_html( number_format( (float) $entry->scheduled_hours, 2 ) ); ?></td>
-                                <td><?php echo esc_html( number_format( (float) $entry->clocked_hours, 2 ) ); ?></td>
-                                <td><?php echo esc_html( $entry->status ); ?></td>
-                            </tr>
+<table class="widefat fixed striped">
+    <thead>
+        <tr>
+            <th width="10%">Date</th>
+            <th width="20%">Clock In</th>
+            <th width="20%">Clock Out</th>
+            <th width="10%">Break (min)</th>
+            <th width="10%">Sched. Hrs</th>
+            <th width="10%">Clocked Hrs</th>
+            <th width="10%">Status</th>
+            <th width="10%">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        <?php foreach ( $entries as $entry ) : ?>
+<tr>
+    <td><?php echo esc_html( $entry->date ); ?></td>
+
+    <td class="wiw-local-clock-in"
+        data-time="<?php echo esc_attr( $entry->clock_in ? substr( $entry->clock_in, 11, 5 ) : '' ); ?>">
+        <?php echo esc_html( $entry->clock_in ); ?>
+    </td>
+
+    <td class="wiw-local-clock-out"
+        data-time="<?php echo esc_attr( $entry->clock_out ? substr( $entry->clock_out, 11, 5 ) : '' ); ?>">
+        <?php echo esc_html( $entry->clock_out ); ?>
+    </td>
+
+    <td class="wiw-local-break-min" data-break="<?php echo esc_attr( (int) $entry->break_minutes ); ?>">
+    <?php echo esc_html( (int) $entry->break_minutes ); ?>
+</td>
+
+    <td><?php echo esc_html( number_format( (float) $entry->scheduled_hours, 2 ) ); ?></td>
+
+    <td class="wiw-local-clocked-hours">
+        <?php echo esc_html( number_format( (float) $entry->clocked_hours, 2 ) ); ?>
+    </td>
+
+    <td><?php echo esc_html( $entry->status ); ?></td>
+
+    <td>
+        <button type="button"
+                class="button button-small wiw-local-edit-entry"
+                data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
+            Edit
+        </button>
+    </td>
+</tr>
+
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             <?php endif; ?>
+
+<?php
+// Nonce for local edit
+$local_edit_nonce = wp_create_nonce( 'wiw_local_edit_entry' );
+?>
+<script type="text/javascript">
+jQuery(function($) {
+    $('.wiw-local-edit-entry').on('click', function(e) {
+        e.preventDefault();
+
+        var $btn    = $(this);
+        var $row    = $btn.closest('tr');
+        var entryId = $btn.data('entry-id');
+
+        var $cellIn   = $row.find('.wiw-local-clock-in');
+        var $cellOut  = $row.find('.wiw-local-clock-out');
+        var $cellHrs  = $row.find('.wiw-local-clocked-hours');
+
+        var $cellBreak = $row.find('.wiw-local-break-min');
+var currentBreak = $cellBreak.data('break');
+if (currentBreak === undefined || currentBreak === null) currentBreak = 0;
+currentBreak = String(currentBreak);
+
+        var currentIn  = $cellIn.data('time')  || '';
+        var currentOut = $cellOut.data('time') || '';
+
+        var newIn = window.prompt('Enter new Clock In time (HH:MM, 24-hour)', currentIn);
+        if (!newIn) return;
+
+        var newOut = window.prompt('Enter new Clock Out time (HH:MM, 24-hour)', currentOut);
+        if (!newOut) return;
+
+        var newBreak = window.prompt('Enter Break minutes (0 or more)', currentBreak);
+if (newBreak === null) return;
+
+newBreak = String(newBreak).trim();
+if (newBreak === '') newBreak = '0';
+
+if (!/^\d+$/.test(newBreak)) {
+    alert('Break minutes must be a whole number (e.g., 0, 15, 30).');
+    return;
+}
+
+
+        $.post(ajaxurl, {
+            action: 'wiw_local_update_entry',
+            security: '<?php echo esc_js( $local_edit_nonce ); ?>',
+            entry_id: entryId,
+            clock_in_time: newIn,
+            clock_out_time: newOut,
+            break_minutes: newBreak
+}).done(function(resp) {
+    if (!resp || !resp.success) {
+        alert((resp && resp.data && resp.data.message) ? resp.data.message : 'Update failed.');
+        return;
+    }
+
+    // Update displayed times
+    if (resp.data.clock_in_display) {
+        $cellIn.text(resp.data.clock_in_display).data('time', newIn);
+    }
+
+    if (resp.data.clock_out_display) {
+        $cellOut.text(resp.data.clock_out_display).data('time', newOut);
+    }
+
+    // ✅ Update break on success
+    if (resp.data.break_minutes_display !== undefined) {
+        $cellBreak
+            .text(resp.data.break_minutes_display)
+            .data('break', parseInt(resp.data.break_minutes_display, 10));
+    }
+
+    // Update hours
+    if (resp.data.clocked_hours_display) {
+        $cellHrs.text(resp.data.clocked_hours_display);
+    }
+
+    // Update header total
+    if (resp.data.header_total_clocked_display) {
+        $('#wiw-local-header-total-clocked').text(resp.data.header_total_clocked_display);
+    }
+}).fail(function() {
+    alert('AJAX error updating entry.');
+});
+
+    });
+});
+</script>
 
             <?php
         } else {
@@ -1647,19 +1767,30 @@ public function admin_local_timesheets_page() {
     <?php else : ?>
         <table class="wp-list-table widefat fixed striped">
             <thead>
-                <tr>
-                    <th width="6%">ID</th>
-                    <th width="16%">Week of</th>
-                    <th width="18%">Employee</th>
-                    <th width="20%">Location</th>
-                    <th width="12%">Sched. Hrs</th>
-                    <th width="12%">Clocked Hrs</th>
-                    <th width="10%">Status</th>
-                    <th width="6%">View</th>
-                </tr>
+<tr>
+    <th width="6%">ID</th>
+    <th width="16%">Week of</th>
+    <th width="18%">Employee</th>
+    <th width="20%">Location</th>
+    <th width="10%">Break (Min)</th>
+    <th width="10%">Sched. Hrs</th>
+    <th width="10%">Clocked Hrs</th>
+    <th width="10%">Status</th>
+    <th width="6%">View</th>
+</tr>
+
             </thead>
             <tbody>
                 <?php foreach ( $headers as $row ) : 
+                $break_total = (int) $wpdb->get_var(
+    $wpdb->prepare(
+        "SELECT COALESCE(SUM(break_minutes), 0) 
+         FROM {$table_timesheet_entries} 
+         WHERE timesheet_id = %d",
+        (int) $row->id
+    )
+);
+
                     $detail_url = add_query_arg(
                         array( 'timesheet_id' => (int) $row->id ),
                         menu_page_url( 'wiw-local-timesheets', false )
@@ -1680,8 +1811,9 @@ public function admin_local_timesheets_page() {
                                 <br/><small>(ID: <?php echo esc_html( $row->location_id ); ?>)</small>
                             <?php endif; ?>
                         </td>
-                        <td><?php echo esc_html( number_format( (float) $row->total_scheduled_hours, 2 ) ); ?></td>
-                        <td><?php echo esc_html( number_format( (float) $row->total_clocked_hours, 2 ) ); ?></td>
+<td><?php echo esc_html( $break_total ); ?></td>
+<td><?php echo esc_html( number_format( (float) $row->total_scheduled_hours, 2 ) ); ?></td>
+<td><?php echo esc_html( number_format( (float) $row->total_clocked_hours, 2 ) ); ?></td>
                         <td><?php echo esc_html( $row->status ); ?></td>
                         <td>
                             <a href="<?php echo esc_url( $detail_url ); ?>" class="button button-small">View</a>
@@ -1696,6 +1828,137 @@ public function admin_local_timesheets_page() {
     <?php
 }
 
+/**
+ * AJAX handler to update a local timesheet entry's clock in/out and clocked hours.
+ * Operates ONLY on local DB (wp_wiw_timesheet_entries + wp_wiw_timesheets).
+ */
+public function ajax_local_update_entry() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
+    }
+
+    check_ajax_referer( 'wiw_local_edit_entry', 'security' );
+
+    global $wpdb;
+
+    $entry_id       = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+    $break_minutes = isset( $_POST['break_minutes'] ) ? absint( $_POST['break_minutes'] ) : null;
+    $clock_in_time  = isset( $_POST['clock_in_time'] ) ? sanitize_text_field( wp_unslash( $_POST['clock_in_time'] ) ) : '';
+    $clock_out_time = isset( $_POST['clock_out_time'] ) ? sanitize_text_field( wp_unslash( $_POST['clock_out_time'] ) ) : '';
+
+    if ( ! $entry_id || empty( $clock_in_time ) || empty( $clock_out_time ) ) {
+        wp_send_json_error( array( 'message' => 'Missing or invalid parameters.' ) );
+    }
+
+    // Basic HH:MM validation (24-hour format)
+    if ( ! preg_match( '/^\d{2}:\d{2}$/', $clock_in_time ) || ! preg_match( '/^\d{2}:\d{2}$/', $clock_out_time ) ) {
+        wp_send_json_error( array( 'message' => 'Time must be in HH:MM format.' ) );
+    }
+
+    $table_entries   = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_headers   = $wpdb->prefix . 'wiw_timesheets';
+
+    $entry = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$table_entries} WHERE id = %d",
+            $entry_id
+        )
+    );
+
+    if ( ! $entry ) {
+        wp_send_json_error( array( 'message' => 'Entry not found.' ) );
+    }
+
+    $date          = $entry->date;
+// If break_minutes is not provided, keep existing value
+if ( $break_minutes === null ) {
+    $break_minutes = (int) $entry->break_minutes;
+}
+    $timesheet_id  = (int) $entry->timesheet_id;
+
+    // WordPress timezone
+    $tz_string = get_option( 'timezone_string' );
+    if ( empty( $tz_string ) ) {
+        $tz_string = 'UTC';
+    }
+    $tz = new DateTimeZone( $tz_string );
+
+    try {
+        $dt_in  = new DateTime( $date . ' ' . $clock_in_time . ':00', $tz );
+        $dt_out = new DateTime( $date . ' ' . $clock_out_time . ':00', $tz );
+    } catch ( Exception $e ) {
+        wp_send_json_error( array( 'message' => 'Error parsing times: ' . $e->getMessage() ) );
+    }
+
+    // For simplicity: require clock out after clock in (no overnight handling here)
+    if ( $dt_out <= $dt_in ) {
+        wp_send_json_error( array( 'message' => 'Clock Out must be after Clock In.' ) );
+    }
+
+    // Compute duration (seconds)
+    $interval = $dt_in->diff( $dt_out );
+    $seconds  = ( $interval->days * 86400 ) + ( $interval->h * 3600 ) + ( $interval->i * 60 ) + $interval->s;
+
+    // Subtract break minutes
+    $seconds -= ( $break_minutes * 60 );
+    if ( $seconds < 0 ) {
+        $seconds = 0;
+    }
+
+    $clocked_hours = round( $seconds / 3600, 2 );
+
+    $clock_in_str  = $dt_in->format( 'Y-m-d H:i:s' );
+    $clock_out_str = $dt_out->format( 'Y-m-d H:i:s' );
+    $now           = current_time( 'mysql' );
+
+    // Update entry row
+$updated = $wpdb->update(
+    $table_entries,
+    array(
+        'clock_in'      => $clock_in_str,
+        'clock_out'     => $clock_out_str,
+        'break_minutes' => $break_minutes,
+        'clocked_hours' => $clocked_hours,
+        'updated_at'    => $now,
+    ),
+        array( 'id' => $entry_id ),
+        array( '%s', '%s', '%d', '%f', '%s' ),
+        array( '%d' )
+    );
+
+    if ( false === $updated ) {
+        wp_send_json_error( array( 'message' => 'Database update failed for entry.' ) );
+    }
+
+    // Recompute header total_clocked_hours
+    $total_clocked = (float) $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT SUM(clocked_hours) FROM {$table_entries} WHERE timesheet_id = %d",
+            $timesheet_id
+        )
+    );
+
+    $wpdb->update(
+        $table_headers,
+        array(
+            'total_clocked_hours' => $total_clocked,
+            'updated_at'          => $now,
+        ),
+        array( 'id' => $timesheet_id ),
+        array( '%f', '%s' ),
+        array( '%d' )
+    );
+
+wp_send_json_success(
+    array(
+        'clock_in_display'             => $clock_in_str,
+        'clock_out_display'            => $clock_out_str,
+        'break_minutes_display'        => (int) $break_minutes, // ✅ add this
+        'clocked_hours_display'        => number_format( $clocked_hours, 2 ),
+        'header_total_clocked_display' => number_format( $total_clocked, 2 ),
+    )
+);
+}
 
 /**
  * Groups timesheet records into weekly Week ofs (Monday to Friday) 
