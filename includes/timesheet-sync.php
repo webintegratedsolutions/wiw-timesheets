@@ -3,23 +3,9 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-/**
- * Local DB sync logic for timesheets.
- *
- * Handles mirroring API times into local DB tables.
- */
-
-/**
- * Syncs fetched timesheet data from the WIW API into local DB tables:
- * - wp_wiw_timesheets        (header: one per employee + week + location)
- * - wp_wiw_timesheet_entries (line items: one per WIW time record)
- *
- * This does NOT change any UI or workflow; it just mirrors data locally.
- *
- * @param array        $times       The raw times array (with calculated_duration, scheduled_duration, location fields).
- * @param array        $user_map    Map of user IDs to user objects.
- * @param DateTimeZone $wp_timezone WordPress timezone object.
- */
+if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
+    return;
+}
 
 trait WIW_Timesheet_Sync_Trait {
 
@@ -34,6 +20,63 @@ trait WIW_Timesheet_Sync_Trait {
         $table_timesheet_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
         $grouped = [];
+
+        /**
+         * Normalize API break into MINUTES.
+         * - Prefer "break" if present (often minutes).
+         * - Otherwise if "break_hours" exists (hours float), convert to minutes.
+         */
+        $get_break_minutes_from_api = function( $time_entry ) {
+            if ( isset( $time_entry->break ) && $time_entry->break !== null && $time_entry->break !== '' ) {
+                return (int) $time_entry->break;
+            }
+
+            if ( isset( $time_entry->break_hours ) && is_numeric( $time_entry->break_hours ) ) {
+                return (int) round( (float) $time_entry->break_hours * 60 );
+            }
+
+            return 0;
+        };
+
+        /**
+         * LOCAL helper: compute adjusted clocked hours for local storage.
+         * Uses start/end timestamps and subtracts ENFORCED break minutes.
+         * Falls back to API-calculated duration if end time is missing/unparseable.
+         */
+        $compute_local_clocked_hours = function( $start_raw, $end_raw, $enforced_break_minutes, $fallback_hours ) use ( $wp_timezone ) {
+            $fallback_hours = (float) $fallback_hours;
+
+            $start_raw = (string) $start_raw;
+            $end_raw   = (string) $end_raw;
+
+            if ( $start_raw === '' || $end_raw === '' ) {
+                return round( max( 0.0, $fallback_hours ), 2 );
+            }
+
+            try {
+                $dt_in  = new DateTime( $start_raw );
+                $dt_out = new DateTime( $end_raw );
+
+                $dt_in->setTimezone( $wp_timezone );
+                $dt_out->setTimezone( $wp_timezone );
+
+                if ( $dt_out <= $dt_in ) {
+                    return round( max( 0.0, $fallback_hours ), 2 );
+                }
+
+                $interval = $dt_in->diff( $dt_out );
+                $seconds  = ( $interval->days * 86400 ) + ( $interval->h * 3600 ) + ( $interval->i * 60 ) + $interval->s;
+
+                $seconds -= ( (int) $enforced_break_minutes * 60 );
+                if ( $seconds < 0 ) {
+                    $seconds = 0;
+                }
+
+                return round( $seconds / 3600, 2 );
+            } catch ( Exception $e ) {
+                return round( max( 0.0, $fallback_hours ), 2 );
+            }
+        };
 
         foreach ( $times as $time_entry ) {
             $user_id = isset( $time_entry->user_id ) ? (int) $time_entry->user_id : 0;
@@ -55,13 +98,11 @@ trait WIW_Timesheet_Sync_Trait {
             $location_id   = (int) ( $time_entry->location_id ?? 0 );
             $location_name = (string) ( $time_entry->location_name ?? '' );
 
-            // Parse start time reliably (WIW returns strings like "Mon, 08 Dec 2025 08:30:30 -0500").
-            // Convert to WP timezone and use that local date for grouping.
+            // Parse start time and use local date for grouping.
             try {
-                $dt_local = new DateTime( $start_time_raw ); // respects the offset in the string
+                $dt_local = new DateTime( $start_time_raw );
                 $dt_local->setTimezone( $wp_timezone );
 
-                // Monday-based week start (Mon-Fri week)
                 $dayN = (int) $dt_local->format( 'N' ); // 1=Mon..7=Sun
                 $days = ( $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
                 if ( $days !== 0 ) {
@@ -88,11 +129,35 @@ trait WIW_Timesheet_Sync_Trait {
                 ];
             }
 
-            $grouped[ $key ]['total_clocked_hours']
-                += (float) ( $time_entry->calculated_duration ?? 0.0 );
+            // ---------------- LOCAL-ONLY BREAK RULE ----------------
+            // Use scheduled_duration if available; if missing/0, fall back to calculated_duration
+            // so the rule still triggers for records missing scheduled data.
+            $scheduled_hours = (float) ( $time_entry->scheduled_duration ?? 0.0 );
+            if ( $scheduled_hours <= 0 ) {
+                $scheduled_hours = (float) ( $time_entry->calculated_duration ?? 0.0 );
+            }
 
-            $grouped[ $key ]['total_scheduled_hours']
-                += (float) ( $time_entry->scheduled_duration ?? 0.0 );
+            $break_api_minutes = $get_break_minutes_from_api( $time_entry );
+
+            // If Sched. Hrs exceed 5, break is EXACTLY 60.
+            $break_enforced = ( $scheduled_hours > 5.0 ) ? 60 : (int) $break_api_minutes;
+
+            // Recompute local clocked hours when possible, using enforced break.
+            $fallback_clocked = (float) ( $time_entry->calculated_duration ?? 0.0 );
+            $adjusted_clocked = $compute_local_clocked_hours(
+                (string) ( $time_entry->start_time ?? '' ),
+                (string) ( $time_entry->end_time ?? '' ),
+                $break_enforced,
+                $fallback_clocked
+            );
+
+            $grouped[ $key ]['total_clocked_hours']   += $adjusted_clocked;
+            $grouped[ $key ]['total_scheduled_hours'] += (float) ( $time_entry->scheduled_duration ?? 0.0 );
+
+            // Carry local-only values forward to insert/update stage.
+            $time_entry->_wiw_local_break_minutes = $break_enforced;
+            $time_entry->_wiw_local_clocked_hours = $adjusted_clocked;
+            // -------------------------------------------------------
 
             $grouped[ $key ]['records'][] = $time_entry;
         }
@@ -111,8 +176,8 @@ trait WIW_Timesheet_Sync_Trait {
             $week_start_date = $bundle['week_start_date'];
             $week_end_date   = date( 'Y-m-d', strtotime( $week_start_date . ' +4 days' ) );
 
-            $total_clocked_hours   = round( $bundle['total_clocked_hours'], 2 );
-            $total_scheduled_hours = round( $bundle['total_scheduled_hours'], 2 );
+            $total_clocked_hours   = round( (float) $bundle['total_clocked_hours'], 2 );
+            $total_scheduled_hours = round( (float) $bundle['total_scheduled_hours'], 2 );
 
             $header_id = $wpdb->get_var(
                 $wpdb->prepare(
@@ -167,7 +232,6 @@ trait WIW_Timesheet_Sync_Trait {
                     )
                 );
 
-                // Convert WIW times to local WP timezone and store as MySQL DATETIME strings.
                 $clock_in_local  = null;
                 $clock_out_local = null;
                 $entry_date      = null;
@@ -178,7 +242,6 @@ trait WIW_Timesheet_Sync_Trait {
                     $clock_in_local = $dt_in->format( 'Y-m-d H:i:s' );
                     $entry_date     = $dt_in->format( 'Y-m-d' );
                 } catch ( Exception $e ) {
-                    // If we can't parse start_time, skip this row rather than writing bad data.
                     continue;
                 }
 
@@ -193,6 +256,14 @@ trait WIW_Timesheet_Sync_Trait {
                     }
                 }
 
+                $break_minutes_local = isset( $time_entry->_wiw_local_break_minutes )
+                    ? (int) $time_entry->_wiw_local_break_minutes
+                    : 0;
+
+                $clocked_hours_local = isset( $time_entry->_wiw_local_clocked_hours )
+                    ? (float) $time_entry->_wiw_local_clocked_hours
+                    : round( (float) ( $time_entry->calculated_duration ?? 0.0 ), 2 );
+
                 $entry_data = [
                     'timesheet_id'    => $header_id,
                     'wiw_time_id'     => $wiw_time_id,
@@ -202,9 +273,12 @@ trait WIW_Timesheet_Sync_Trait {
                     'location_name'   => (string) ( $time_entry->location_name ?? '' ),
                     'clock_in'        => $clock_in_local,
                     'clock_out'       => $clock_out_local,
-                    'break_minutes'   => (int) ( $time_entry->break ?? 0 ),
-                    'scheduled_hours' => round( (float) ( $time_entry->scheduled_duration ?? 0 ), 2 ),
-                    'clocked_hours'   => round( (float) ( $time_entry->calculated_duration ?? 0 ), 2 ),
+
+                    // LOCAL-ONLY RULE applied here
+                    'break_minutes'   => (int) $break_minutes_local,
+                    'scheduled_hours' => round( (float) ( $time_entry->scheduled_duration ?? 0.0 ), 2 ),
+                    'clocked_hours'   => round( $clocked_hours_local, 2 ),
+
                     'status'          => 'pending',
                     'updated_at'      => $now,
                 ];
