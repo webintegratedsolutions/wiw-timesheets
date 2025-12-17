@@ -34,6 +34,8 @@ require_once WIW_PLUGIN_PATH . 'includes/install.php';
 // Include the admin settings trait
 require_once WIW_PLUGIN_PATH . 'includes/admin-settings.php';
 
+// Include the admin login handler
+require_once WIW_PLUGIN_PATH . 'includes/admin-login-handler.php';
 
 
 /**
@@ -60,7 +62,7 @@ class WIW_Timesheet_Manager {
     add_action( 'wp_ajax_wiw_local_update_entry', array( $this, 'ajax_local_update_entry' ) );
 
     // 5. Login handler
-    add_action( 'admin_post_wiw_login_handler', array( $this, 'handle_wiw_login' ) );
+    add_action( 'admin_post_wiw_login_handler', 'wiwts_handle_wiw_login' );
 
     // 6. Reset local timesheet from API (admin-post)
     add_action( 'admin_post_wiw_reset_local_timesheet', array( $this, 'handle_reset_local_timesheet' ) );
@@ -718,47 +720,6 @@ private function calculate_timesheet_duration_in_hours($time_entry) {
     
     // Ensure duration is not negative (though unlikely for timesheets)
     return max(0.0, $duration);
-}
-
-/**
- * Handles the login request when the admin submits the login form.
- */
-public function handle_wiw_login() {
-    // 1. Basic Security Check (Nonce & Capability)
-    if ( ! isset( $_POST['wiw_login_nonce'] ) || ! wp_verify_nonce( $_POST['wiw_login_nonce'], 'wiw_login_action' ) || ! current_user_can( 'manage_options' ) ) {
-        wp_die( 'Security check failed.' );
-    }
-
-    // 2. Get Credentials from saved options
-    $api_key = get_option( 'wiw_api_key' );      // <-- Correctly retrieving the API Key
-    $email   = get_option( 'wiw_login_email' );
-    $password = get_option( 'wiw_login_password' );
-
-    // 3. Perform the Login API Call, passing API Key as first argument (as required by the new function)
-    $login_result = WIW_API_Client::login( $api_key, $email, $password ); // <-- ARGUMENTS UPDATED
-
-    $redirect_url = admin_url( 'admin.php?page=wiw-timesheets-settings' ); 
-
-    if ( is_wp_error( $login_result ) ) {
-        // Login Failed: Redirect with an error message
-        $error_message = urlencode( $login_result->get_error_message() );
-        wp_safe_redirect( add_query_arg( 'wiw_login_error', $error_message, $redirect_url ) );
-        exit;
-    }
-
-    // 4. Login Success: Store the session token
-    if ( !isset($login_result->login->token) ) {
-        $error_message = urlencode( 'Login succeeded but token was not returned. Check API response structure.' );
-        wp_safe_redirect( add_query_arg( 'wiw_login_error', $error_message, $redirect_url ) );
-        exit;
-    }
-    
-    $session_token = $login_result->login->token;
-    update_option( 'wiw_session_token', $session_token );
-
-    // Redirect with a success message
-    wp_safe_redirect( add_query_arg( 'wiw_login_success', '1', $redirect_url ) );
-    exit;
 }
 
 /**
