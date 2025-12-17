@@ -168,6 +168,23 @@ class WIW_Timesheet_Manager {
     /**
  * Insert one edit log record (one per field change).
  */
+
+    /**
+     * Normalize a local DATETIME string to minute precision (YYYY-mm-dd HH:ii).
+     * The UI edits HH:MM, while the WIW API may include seconds. We treat
+     * "seconds-only" differences as no change for logging purposes.
+     */
+    private function normalize_datetime_to_minute( $datetime ) {
+        $datetime = is_string( $datetime ) ? trim( $datetime ) : '';
+        if ( $datetime === '' ) {
+            return '';
+        }
+        if ( strlen( $datetime ) >= 16 ) {
+            return substr( $datetime, 0, 16 );
+        }
+        return $datetime;
+    }
+
 private function insert_local_edit_log( $args ) {
     global $wpdb;
 
@@ -2120,8 +2137,130 @@ exit;
         $filtered[] = $time_entry;
     }
 
+
+    // Snapshot current local entries BEFORE reset so we can log what changed.
+    $before_entries = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT id, wiw_time_id, clock_in, clock_out, break_minutes
+             FROM {$table_entries}
+             WHERE timesheet_id = %d",
+            $timesheet_id
+        )
+    );
+
+    $before_map = array();
+    foreach ( $before_entries as $be ) {
+        $wiw_id = (int) ( $be->wiw_time_id ?? 0 );
+        if ( $wiw_id ) {
+            $before_map[ $wiw_id ] = array(
+                'entry_id'      => (int) ( $be->id ?? 0 ),
+                'clock_in'      => (string) ( $be->clock_in ?? '' ),
+                'clock_out'     => (string) ( $be->clock_out ?? '' ),
+                'break_minutes' => (int) ( $be->break_minutes ?? 0 ),
+            );
+        }
+    }
+
     // 1) Delete local edited entries for this header
-    $wpdb->delete( $table_timesheet_entries, array( 'timesheet_id' => $timesheet_id ), array( '%d' ) );
+    
+    // Log reset diffs per-field BEFORE deleting/re-inserting (so reset always creates logs)
+    $current_user = wp_get_current_user();
+    $edited_by_user_id      = (int) ( $current_user->ID ?? 0 );
+    $edited_by_user_login   = (string) ( $current_user->user_login ?? '' );
+    $edited_by_display_name = (string) ( $current_user->display_name ?? '' );
+
+    // Build the "API truth" map (values that will be written during the reset)
+    $reset_values_map = array();
+
+    foreach ( $filtered_times as $time_entry ) {
+        $wiw_time_id = isset( $time_entry->id ) ? (int) $time_entry->id : 0;
+        if ( ! $wiw_time_id ) {
+            continue;
+        }
+
+        $start_time_utc = $time_entry->start_time ?? '';
+        if ( empty( $start_time_utc ) ) {
+            continue;
+        }
+
+        $end_time_utc  = $time_entry->end_time ?? '';
+        $break_minutes = isset( $time_entry->break ) ? (int) $time_entry->break : 0;
+
+        try {
+            $dt_start_utc = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
+            $dt_start_utc->setTimezone( $wp_timezone );
+            $local_clock_in = $dt_start_utc->format( 'Y-m-d H:i:s' );
+        } catch ( Exception $e ) {
+            continue;
+        }
+
+        $local_clock_out = null;
+        if ( ! empty( $end_time_utc ) ) {
+            try {
+                $dt_end_utc = new DateTime( $end_time_utc, new DateTimeZone( 'UTC' ) );
+                $dt_end_utc->setTimezone( $wp_timezone );
+                $local_clock_out = $dt_end_utc->format( 'Y-m-d H:i:s' );
+            } catch ( Exception $e ) {
+                $local_clock_out = null;
+            }
+        }
+
+        $reset_values_map[ $wiw_time_id ] = array(
+            'clock_in'      => $local_clock_in,
+            'clock_out'     => $local_clock_out,
+            'break_minutes' => $break_minutes,
+        );
+    }
+
+    // Insert one log row per field changed by the reset
+    foreach ( $before_entries_map as $wiw_time_id => $before_entry ) {
+        if ( ! isset( $reset_values_map[ $wiw_time_id ] ) ) {
+            continue;
+        }
+
+        $new_vals = $reset_values_map[ $wiw_time_id ];
+
+        $changes = array(
+            'Clock in'    => array( (string) ( $before_entry->clock_in ?? '' ),  (string) ( $new_vals['clock_in'] ?? '' ) ),
+            'Clock out'   => array( (string) ( $before_entry->clock_out ?? '' ), (string) ( $new_vals['clock_out'] ?? '' ) ),
+            'Break Mins'  => array( (string) ( (int) ( $before_entry->break_minutes ?? 0 ) ), (string) ( (int) ( $new_vals['break_minutes'] ?? 0 ) ) ),
+        );
+
+        foreach ( $changes as $edit_type => $pair ) {
+            $old_val = (string) ( $pair[0] ?? '' );
+            $new_val = (string) ( $pair[1] ?? '' );
+
+            if ( $old_val === $new_val ) {
+                continue;
+            }
+
+            $wpdb->insert(
+                $table_edit_logs,
+                array(
+                    'timesheet_id'            => (int) $header->id,
+                    'entry_id'                => 0, // entry IDs will be replaced during reset; use wiw_time_id to link
+                    'wiw_time_id'             => (int) $wiw_time_id,
+                    'edit_type'               => (string) $edit_type,
+                    'old_value'               => $old_val,
+                    'new_value'               => $new_val,
+                    'edited_by_user_id'       => $edited_by_user_id,
+                    'edited_by_user_login'    => $edited_by_user_login,
+                    'edited_by_display_name'  => $edited_by_display_name,
+                    'employee_id'             => (int) ( $header->employee_id ?? 0 ),
+                    'employee_name'           => (string) ( $header->employee_name ?? '' ),
+                    'location_id'             => (int) ( $header->location_id ?? 0 ),
+                    'location_name'           => (string) ( $header->location_name ?? '' ),
+                    'week_start_date'         => (string) ( $header->week_start_date ?? '' ),
+                    'created_at'              => $now,
+                ),
+                array(
+                    '%d','%d','%d','%s','%s','%s','%d','%s','%s','%d','%s','%d','%s','%s','%s'
+                )
+            );
+        }
+    }
+
+$wpdb->delete( $table_timesheet_entries, array( 'timesheet_id' => $timesheet_id ), array( '%d' ) );
 
     // 2) Reset header totals/status immediately (even if API returns no rows)
     $now = current_time( 'mysql' );
@@ -2141,6 +2280,120 @@ exit;
     // 3) Re-sync from API back into local DB
     if ( ! empty( $filtered ) ) {
         $this->sync_timesheets_to_local_db( $filtered, $user_map, $wp_timezone );
+
+        // After re-sync, compare with snapshot and log changes caused by the reset.
+        $after_entries = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, wiw_time_id, clock_in, clock_out, break_minutes
+                 FROM {$table_entries}
+                 WHERE timesheet_id = %d",
+                $timesheet_id
+            )
+        );
+
+        $after_map = array();
+        foreach ( $after_entries as $ae ) {
+            $wiw_id = (int) ( $ae->wiw_time_id ?? 0 );
+            if ( $wiw_id ) {
+                $after_map[ $wiw_id ] = array(
+                    'entry_id'      => (int) ( $ae->id ?? 0 ),
+                    'clock_in'      => (string) ( $ae->clock_in ?? '' ),
+                    'clock_out'     => (string) ( $ae->clock_out ?? '' ),
+                    'break_minutes' => (int) ( $ae->break_minutes ?? 0 ),
+                );
+            }
+        }
+
+        // WordPress user who triggered the reset
+        $wp_user = wp_get_current_user();
+        $edited_by_user_id      = (int) ( $wp_user->ID ?? 0 );
+        $edited_by_user_login   = (string) ( $wp_user->user_login ?? '' );
+        $edited_by_display_name = (string) ( $wp_user->display_name ?? '' );
+
+        $now_mysql = current_time( 'mysql' );
+
+        // Only compare entries that exist both before and after (same WIW time id).
+        foreach ( $after_map as $wiw_time_id => $after_row ) {
+            if ( ! isset( $before_map[ $wiw_time_id ] ) ) {
+                continue;
+            }
+
+            $before_row = $before_map[ $wiw_time_id ];
+
+            // Clock In change
+            if ( (string) $before_row['clock_in'] !== (string) $after_row['clock_in'] ) {
+                $wpdb->insert(
+                    $table_edit_logs,
+                    array(
+                        'timesheet_id'           => $timesheet_id,
+                        'entry_id'               => (int) $after_row['entry_id'],
+                        'wiw_time_id'            => (int) $wiw_time_id,
+                        'edit_type'              => 'Clock in',
+                        'old_value'              => (string) $before_row['clock_in'],
+                        'new_value'              => (string) $after_row['clock_in'],
+                        'edited_by_user_id'      => $edited_by_user_id,
+                        'edited_by_user_login'   => $edited_by_user_login,
+                        'edited_by_display_name' => $edited_by_display_name,
+                        'employee_id'            => (int) $timesheet->employee_id,
+                        'employee_name'          => (string) $timesheet->employee_name,
+                        'location_id'            => (int) $timesheet->location_id,
+                        'location_name'          => (string) $timesheet->location_name,
+                        'week_start_date'        => (string) $timesheet->week_start_date,
+                        'created_at'             => $now_mysql,
+                    )
+                );
+            }
+
+            // Clock Out change
+            if ( (string) $before_row['clock_out'] !== (string) $after_row['clock_out'] ) {
+                $wpdb->insert(
+                    $table_edit_logs,
+                    array(
+                        'timesheet_id'           => $timesheet_id,
+                        'entry_id'               => (int) $after_row['entry_id'],
+                        'wiw_time_id'            => (int) $wiw_time_id,
+                        'edit_type'              => 'Clock out',
+                        'old_value'              => (string) $before_row['clock_out'],
+                        'new_value'              => (string) $after_row['clock_out'],
+                        'edited_by_user_id'      => $edited_by_user_id,
+                        'edited_by_user_login'   => $edited_by_user_login,
+                        'edited_by_display_name' => $edited_by_display_name,
+                        'employee_id'            => (int) $timesheet->employee_id,
+                        'employee_name'          => (string) $timesheet->employee_name,
+                        'location_id'            => (int) $timesheet->location_id,
+                        'location_name'          => (string) $timesheet->location_name,
+                        'week_start_date'        => (string) $timesheet->week_start_date,
+                        'created_at'             => $now_mysql,
+                    )
+                );
+            }
+
+            // Break minutes change
+            if ( (int) $before_row['break_minutes'] !== (int) $after_row['break_minutes'] ) {
+                $wpdb->insert(
+                    $table_edit_logs,
+                    array(
+                        'timesheet_id'           => $timesheet_id,
+                        'entry_id'               => (int) $after_row['entry_id'],
+                        'wiw_time_id'            => (int) $wiw_time_id,
+                        'edit_type'              => 'Break Mins',
+                        'old_value'              => (string) (int) $before_row['break_minutes'],
+                        'new_value'              => (string) (int) $after_row['break_minutes'],
+                        'edited_by_user_id'      => $edited_by_user_id,
+                        'edited_by_user_login'   => $edited_by_user_login,
+                        'edited_by_display_name' => $edited_by_display_name,
+                        'employee_id'            => (int) $timesheet->employee_id,
+                        'employee_name'          => (string) $timesheet->employee_name,
+                        'location_id'            => (int) $timesheet->location_id,
+                        'location_name'          => (string) $timesheet->location_name,
+                        'week_start_date'        => (string) $timesheet->week_start_date,
+                        'created_at'             => $now_mysql,
+                    )
+                );
+            }
+        }
+
+
     }
 
     wp_safe_redirect( add_query_arg( 'reset_success', '1', $redirect_back ) );
@@ -2228,82 +2481,77 @@ public function ajax_local_update_entry() {
     $clock_out_str = $dt_out->format( 'Y-m-d H:i:s' );
     $now           = current_time( 'mysql' );
 
-    // --- LOGGING (one record per field change) ---
-    $old_clock_in  = (string) ( $entry->clock_in ?? '' );
-    $old_clock_out = (string) ( $entry->clock_out ?? '' );
-    $old_break     = (int) ( $entry->break_minutes ?? 0 );
+    // --- LOGGING ---
+    // Normalize to minute precision to avoid "seconds-only" differences (the UI edits HH:MM).
+    $old_clock_in_raw  = (string) ( $entry->clock_in  ? $entry->clock_in  : '' );
+    $old_clock_out_raw = (string) ( $entry->clock_out ? $entry->clock_out : '' );
 
-    $current_user = wp_get_current_user();
-    $editor_id    = (int) $current_user->ID;
-    $editor_login = (string) $current_user->user_login;
-    $editor_name  = (string) $current_user->display_name;
+    $old_clock_in_norm  = $this->normalize_datetime_to_minute( $old_clock_in_raw );
+    $old_clock_out_norm = $this->normalize_datetime_to_minute( $old_clock_out_raw );
 
-    $employee_id     = $header ? (int) $header->employee_id : 0;
-    $employee_name   = $header ? (string) $header->employee_name : '';
-    $location_id     = $header ? (int) $header->location_id : 0;
-    $location_name   = $header ? (string) $header->location_name : '';
-    $week_start_date = $header ? (string) $header->week_start_date : '';
+    $new_clock_in_norm  = $this->normalize_datetime_to_minute( $clock_in_str );
+    $new_clock_out_norm = $this->normalize_datetime_to_minute( $clock_out_str );
 
-    if ( $old_clock_in !== $clock_in_str ) {
+    $old_break = (int) $entry->break_minutes;
+    $new_break = (int) $break_minutes;
+
+    if ( $old_clock_in_norm !== $new_clock_in_norm ) {
         $this->insert_local_edit_log( array(
             'timesheet_id'           => $timesheet_id,
-            'entry_id'               => (int) $entry->id,
-            'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+            'entry_id'               => $entry_id,
+            'wiw_time_id'            => (int) $entry->wiw_time_id,
             'edit_type'              => 'Clock in',
-            'old_value'              => $old_clock_in,
-            'new_value'              => $clock_in_str,
-            'edited_by_user_id'      => $editor_id,
-            'edited_by_user_login'   => $editor_login,
-            'edited_by_display_name' => $editor_name,
-            'employee_id'            => $employee_id,
+            'old_value'              => $old_clock_in_norm,
+            'new_value'              => $new_clock_in_norm,
+            'edited_by_user_id'      => get_current_user_id(),
+            'edited_by_display_name' => wp_get_current_user()->display_name,
+            'created_at'             => $now,
+            'employee_id'            => (int) $entry->user_id,
             'employee_name'          => $employee_name,
             'location_id'            => $location_id,
             'location_name'          => $location_name,
             'week_start_date'        => $week_start_date,
-            'created_at'             => $now,
         ) );
     }
 
-    if ( $old_clock_out !== $clock_out_str ) {
+    if ( $old_clock_out_norm !== $new_clock_out_norm ) {
         $this->insert_local_edit_log( array(
             'timesheet_id'           => $timesheet_id,
-            'entry_id'               => (int) $entry->id,
-            'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+            'entry_id'               => $entry_id,
+            'wiw_time_id'            => (int) $entry->wiw_time_id,
             'edit_type'              => 'Clock out',
-            'old_value'              => $old_clock_out,
-            'new_value'              => $clock_out_str,
-            'edited_by_user_id'      => $editor_id,
-            'edited_by_user_login'   => $editor_login,
-            'edited_by_display_name' => $editor_name,
-            'employee_id'            => $employee_id,
+            'old_value'              => $old_clock_out_norm,
+            'new_value'              => $new_clock_out_norm,
+            'edited_by_user_id'      => get_current_user_id(),
+            'edited_by_display_name' => wp_get_current_user()->display_name,
+            'created_at'             => $now,
+            'employee_id'            => (int) $entry->user_id,
             'employee_name'          => $employee_name,
             'location_id'            => $location_id,
             'location_name'          => $location_name,
             'week_start_date'        => $week_start_date,
-            'created_at'             => $now,
         ) );
     }
 
-    if ( $old_break !== (int) $break_minutes ) {
+    if ( $old_break !== $new_break ) {
         $this->insert_local_edit_log( array(
             'timesheet_id'           => $timesheet_id,
-            'entry_id'               => (int) $entry->id,
-            'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+            'entry_id'               => $entry_id,
+            'wiw_time_id'            => (int) $entry->wiw_time_id,
             'edit_type'              => 'Break Mins',
             'old_value'              => (string) $old_break,
-            'new_value'              => (string) (int) $break_minutes,
-            'edited_by_user_id'      => $editor_id,
-            'edited_by_user_login'   => $editor_login,
-            'edited_by_display_name' => $editor_name,
-            'employee_id'            => $employee_id,
+            'new_value'              => (string) $new_break,
+            'edited_by_user_id'      => get_current_user_id(),
+            'edited_by_display_name' => wp_get_current_user()->display_name,
+            'created_at'             => $now,
+            'employee_id'            => (int) $entry->user_id,
             'employee_name'          => $employee_name,
             'location_id'            => $location_id,
             'location_name'          => $location_name,
             'week_start_date'        => $week_start_date,
-            'created_at'             => $now,
         ) );
     }
-    // --- END LOGGING ---
+
 
     $updated = $wpdb->update(
         $table_entries,
