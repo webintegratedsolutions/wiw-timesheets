@@ -1733,6 +1733,19 @@ public function ajax_local_update_entry() {
         )
     );
 
+    if ( ! $header ) {
+        wp_send_json_error( array( 'message' => 'Timesheet header not found.' ) );
+    }
+
+    $employee_name   = (string) $header->employee_name;
+    $location_id     = (int)    $header->location_id;
+    $location_name   = (string) $header->location_name;
+    $week_start_date = (string) $header->week_start_date;
+
+    $current_user = wp_get_current_user();
+    $edited_by_login = (string) ( $current_user->user_login ?? '' );
+
+
     $tz_string = get_option( 'timezone_string' );
     if ( empty( $tz_string ) ) {
         $tz_string = 'UTC';
@@ -1779,22 +1792,24 @@ public function ajax_local_update_entry() {
     $new_break = (int) $break_minutes;
 
     if ( $old_clock_in_norm !== $new_clock_in_norm ) {
-        $this->insert_local_edit_log( array(
-            'timesheet_id'           => $timesheet_id,
-            'entry_id'               => $entry_id,
-            'wiw_time_id'            => (int) $entry->wiw_time_id,
-            'edit_type'              => 'Clock in',
-            'old_value'              => $old_clock_in_norm,
-            'new_value'              => $new_clock_in_norm,
-            'edited_by_user_id'      => get_current_user_id(),
-            'edited_by_display_name' => wp_get_current_user()->display_name,
-            'created_at'             => $now,
-            'employee_id'            => (int) $entry->user_id,
-            'employee_name'          => $employee_name,
-            'location_id'            => $location_id,
-            'location_name'          => $location_name,
-            'week_start_date'        => $week_start_date,
-        ) );
+$this->insert_local_edit_log( array(
+    'timesheet_id'           => $timesheet_id,
+    'entry_id'               => $entry_id,
+    'wiw_time_id'            => (int) $entry->wiw_time_id,
+    'edit_type'              => 'Clock in',
+    'old_value'              => $old_clock_in_norm,
+    'new_value'              => $new_clock_in_norm,
+    'edited_by_user_id'      => get_current_user_id(),
+    'edited_by_user_login'   => $edited_by_login,
+    'edited_by_display_name' => $current_user->display_name,
+    'employee_id'            => (int) $entry->user_id,
+    'employee_name'          => $employee_name,
+    'location_id'            => $location_id,
+    'location_name'          => $location_name,
+    'week_start_date'        => $week_start_date,
+    'created_at'             => $now,
+) );
+
     }
 
     if ( $old_clock_out_norm !== $new_clock_out_norm ) {
