@@ -9,7 +9,15 @@ if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
 
 trait WIW_Timesheet_Sync_Trait {
 
-    private function sync_timesheets_to_local_db( $times, $user_map, $wp_timezone ) {
+    /**
+     * Sync API times into local DB.
+     *
+     * @param array $times
+     * @param array $user_map
+     * @param DateTimeZone $wp_timezone
+     * @param array $shift_map Optional: map of shift_id => shift object (from API includes)
+     */
+    private function sync_timesheets_to_local_db( $times, $user_map, $wp_timezone, $shift_map = [] ) {
         global $wpdb;
 
         if ( empty( $times ) ) {
@@ -130,8 +138,6 @@ trait WIW_Timesheet_Sync_Trait {
             }
 
             // ---------------- LOCAL-ONLY BREAK RULE ----------------
-            // Use scheduled_duration if available; if missing/0, fall back to calculated_duration
-            // so the rule still triggers for records missing scheduled data.
             $scheduled_hours = (float) ( $time_entry->scheduled_duration ?? 0.0 );
             if ( $scheduled_hours <= 0 ) {
                 $scheduled_hours = (float) ( $time_entry->calculated_duration ?? 0.0 );
@@ -142,7 +148,6 @@ trait WIW_Timesheet_Sync_Trait {
             // If Sched. Hrs exceed 5, break is EXACTLY 60.
             $break_enforced = ( $scheduled_hours > 5.0 ) ? 60 : (int) $break_api_minutes;
 
-            // Recompute local clocked hours when possible, using enforced break.
             $fallback_clocked = (float) ( $time_entry->calculated_duration ?? 0.0 );
             $adjusted_clocked = $compute_local_clocked_hours(
                 (string) ( $time_entry->start_time ?? '' ),
@@ -154,7 +159,6 @@ trait WIW_Timesheet_Sync_Trait {
             $grouped[ $key ]['total_clocked_hours']   += $adjusted_clocked;
             $grouped[ $key ]['total_scheduled_hours'] += (float) ( $time_entry->scheduled_duration ?? 0.0 );
 
-            // Carry local-only values forward to insert/update stage.
             $time_entry->_wiw_local_break_minutes = $break_enforced;
             $time_entry->_wiw_local_clocked_hours = $adjusted_clocked;
             // -------------------------------------------------------
@@ -256,6 +260,38 @@ trait WIW_Timesheet_Sync_Trait {
                     }
                 }
 
+                // ✅ Scheduled start/end from SHIFT (this is the real fix)
+                $scheduled_start_local = null;
+                $scheduled_end_local   = null;
+
+                $shift_id = (int) ( $time_entry->shift_id ?? 0 );
+                $shift    = ( $shift_id && isset( $shift_map[ $shift_id ] ) ) ? $shift_map[ $shift_id ] : null;
+
+                if ( $shift ) {
+                    $shift_start_raw = (string) ( $shift->start_time ?? '' );
+                    $shift_end_raw   = (string) ( $shift->end_time ?? '' );
+
+                    if ( $shift_start_raw !== '' ) {
+                        try {
+                            $dt_sched_start = new DateTime( $shift_start_raw );
+                            $dt_sched_start->setTimezone( $wp_timezone );
+                            $scheduled_start_local = $dt_sched_start->format( 'Y-m-d H:i:s' );
+                        } catch ( Exception $e ) {
+                            $scheduled_start_local = null;
+                        }
+                    }
+
+                    if ( $shift_end_raw !== '' ) {
+                        try {
+                            $dt_sched_end = new DateTime( $shift_end_raw );
+                            $dt_sched_end->setTimezone( $wp_timezone );
+                            $scheduled_end_local = $dt_sched_end->format( 'Y-m-d H:i:s' );
+                        } catch ( Exception $e ) {
+                            $scheduled_end_local = null;
+                        }
+                    }
+                }
+
                 $break_minutes_local = isset( $time_entry->_wiw_local_break_minutes )
                     ? (int) $time_entry->_wiw_local_break_minutes
                     : 0;
@@ -274,7 +310,10 @@ trait WIW_Timesheet_Sync_Trait {
                     'clock_in'        => $clock_in_local,
                     'clock_out'       => $clock_out_local,
 
-                    // LOCAL-ONLY RULE applied here
+                    // ✅ DB columns you already added
+                    'scheduled_start' => $scheduled_start_local,
+                    'scheduled_end'   => $scheduled_end_local,
+
                     'break_minutes'   => (int) $break_minutes_local,
                     'scheduled_hours' => round( (float) ( $time_entry->scheduled_duration ?? 0.0 ), 2 ),
                     'clocked_hours'   => round( $clocked_hours_local, 2 ),

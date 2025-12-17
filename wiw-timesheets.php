@@ -340,7 +340,7 @@ if ( method_exists( $this, 'calculate_shift_duration_in_hours' ) ) {
 }
 
 // Sync the latest fetched times into local DB tables (headers + entries)
-$this->sync_timesheets_to_local_db( $times, $user_map, $wp_timezone );
+$this->sync_timesheets_to_local_db( $times, $user_map, $wp_timezone, $shift_map );
 
             // 1. Sort the records
             $times = $this->sort_timesheet_data( $times, $user_map );
