@@ -43,8 +43,6 @@ require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
-//  Include the AJAX handlers
-require_once WIW_PLUGIN_PATH . 'includes/ajax-handlers.php';
 
 
 
