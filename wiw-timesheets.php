@@ -967,13 +967,29 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                             <th scope="row">Status</th>
                             <td><?php echo esc_html( $header->status ); ?></td>
                         </tr>
-                        <tr>
-                            <th scope="row">Created / Updated</th>
-                            <td>
-                                Created: <?php echo esc_html( $header->created_at ); ?><br/>
-                                Updated: <?php echo esc_html( $header->updated_at ); ?>
-                            </td>
-                        </tr>
+<tr>
+    <th scope="row">Created / Updated</th>
+    <td>
+        Created: <?php echo esc_html( $header->created_at ); ?><br/>
+        Updated: <?php echo esc_html( $header->updated_at ); ?>
+    </td>
+</tr>
+
+<tr>
+    <th scope="row">Sign Off</th>
+    <td>
+        <button type="button"
+                class="button button-primary wiw-timesheet-signoff"
+                disabled="disabled"
+                title="Sign off functionality coming soon">
+            Sign Off
+        </button>
+        <p style="margin:6px 0 0;color:#666;font-size:12px;">
+            Final approval step (coming soon)
+        </p>
+    </td>
+</tr>
+
                     </tbody>
                 </table>
 
