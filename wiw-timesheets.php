@@ -43,6 +43,8 @@ require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
+// Include the data functions
+require_once plugin_dir_path( __FILE__ ) . 'includes/data-functions.php';
 
 
 /**
