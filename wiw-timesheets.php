@@ -1893,10 +1893,53 @@ public function ajax_local_update_entry() {
         $seconds = 0;
     }
 
-    $clocked_hours = round( $seconds / 3600, 2 );
+$clocked_hours = round( $seconds / 3600, 2 );
 
-    // ✅ Step 1 rule: payable_hours ALWAYS mirrors clocked_hours
-    $payable_hours = round( (float) $clocked_hours, 2 );
+// ✅ NEW: Payable hours clamp to scheduled window (when present)
+$payable_hours = $clocked_hours;
+
+try {
+    // Scheduled bounds are stored as local DATETIME strings (or NULL)
+    $sched_start_raw = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+    $sched_end_raw   = ! empty( $entry->scheduled_end )   ? (string) $entry->scheduled_end   : '';
+
+    if ( $sched_start_raw !== '' || $sched_end_raw !== '' ) {
+        $pay_in  = clone $dt_in;
+        $pay_out = clone $dt_out;
+
+        if ( $sched_start_raw !== '' ) {
+            $dt_sched_start = new DateTime( $sched_start_raw, $tz );
+            if ( $pay_in < $dt_sched_start ) {
+                $pay_in = $dt_sched_start;
+            }
+        }
+
+        if ( $sched_end_raw !== '' ) {
+            $dt_sched_end = new DateTime( $sched_end_raw, $tz );
+            if ( $pay_out > $dt_sched_end ) {
+                $pay_out = $dt_sched_end;
+            }
+        }
+
+        if ( $pay_out <= $pay_in ) {
+            $payable_hours = 0.0;
+        } else {
+            $pint = $pay_in->diff( $pay_out );
+            $psec = ( $pint->days * 86400 ) + ( $pint->h * 3600 ) + ( $pint->i * 60 ) + $pint->s;
+
+            $psec -= ( (int) $break_minutes * 60 );
+            if ( $psec < 0 ) {
+                $psec = 0;
+            }
+
+            $payable_hours = round( $psec / 3600, 2 );
+        }
+    }
+} catch ( Exception $e ) {
+    // If anything goes wrong, fall back to clocked (safe + predictable)
+    $payable_hours = $clocked_hours;
+}
+
 
     $clock_in_str  = $dt_in->format( 'Y-m-d H:i:s' );
     $clock_out_str = $dt_out->format( 'Y-m-d H:i:s' );

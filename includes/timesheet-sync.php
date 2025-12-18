@@ -86,6 +86,80 @@ trait WIW_Timesheet_Sync_Trait {
             }
         };
 
+        /**
+         * LOCAL helper: compute payable hours (clamped to scheduled_start/end when present).
+         * If scheduled bounds are missing, falls back to clocked.
+         */
+        $compute_local_payable_hours = function(
+            $clock_in_local,
+            $clock_out_local,
+            $scheduled_start_local,
+            $scheduled_end_local,
+            $break_minutes,
+            $fallback_hours
+        ) use ( $wp_timezone ) {
+            $fallback_hours = (float) $fallback_hours;
+
+            // If no actual clock range, fallback.
+            if ( empty( $clock_in_local ) || empty( $clock_out_local ) ) {
+                return round( max( 0.0, $fallback_hours ), 2 );
+            }
+
+            try {
+                $dt_in  = new DateTime( (string) $clock_in_local );
+                $dt_out = new DateTime( (string) $clock_out_local );
+
+                $dt_in->setTimezone( $wp_timezone );
+                $dt_out->setTimezone( $wp_timezone );
+
+                if ( $dt_out <= $dt_in ) {
+                    return round( max( 0.0, $fallback_hours ), 2 );
+                }
+
+                // Clamp payable start to scheduled_start if clock-in is earlier.
+                if ( ! empty( $scheduled_start_local ) ) {
+                    try {
+                        $dt_sched_start = new DateTime( (string) $scheduled_start_local );
+                        $dt_sched_start->setTimezone( $wp_timezone );
+                        if ( $dt_in < $dt_sched_start ) {
+                            $dt_in = $dt_sched_start;
+                        }
+                    } catch ( Exception $e ) {
+                        // ignore clamp if schedule parse fails
+                    }
+                }
+
+                // Clamp payable end to scheduled_end if clock-out is later.
+                if ( ! empty( $scheduled_end_local ) ) {
+                    try {
+                        $dt_sched_end = new DateTime( (string) $scheduled_end_local );
+                        $dt_sched_end->setTimezone( $wp_timezone );
+                        if ( $dt_out > $dt_sched_end ) {
+                            $dt_out = $dt_sched_end;
+                        }
+                    } catch ( Exception $e ) {
+                        // ignore clamp if schedule parse fails
+                    }
+                }
+
+                if ( $dt_out <= $dt_in ) {
+                    return 0.0;
+                }
+
+                $interval = $dt_in->diff( $dt_out );
+                $seconds  = ( $interval->days * 86400 ) + ( $interval->h * 3600 ) + ( $interval->i * 60 ) + $interval->s;
+
+                $seconds -= ( (int) $break_minutes * 60 );
+                if ( $seconds < 0 ) {
+                    $seconds = 0;
+                }
+
+                return round( $seconds / 3600, 2 );
+            } catch ( Exception $e ) {
+                return round( max( 0.0, $fallback_hours ), 2 );
+            }
+        };
+
         foreach ( $times as $time_entry ) {
             $user_id = isset( $time_entry->user_id ) ? (int) $time_entry->user_id : 0;
             if ( ! $user_id || ! isset( $user_map[ $user_id ] ) ) {
@@ -147,7 +221,6 @@ trait WIW_Timesheet_Sync_Trait {
 
             // If Sched. Hrs are 5.0 or more, break is EXACTLY 60.
             $break_enforced = ( $scheduled_hours >= 5.0 ) ? 60 : (int) $break_api_minutes;
-
 
             $fallback_clocked = (float) ( $time_entry->calculated_duration ?? 0.0 );
             $adjusted_clocked = $compute_local_clocked_hours(
@@ -261,7 +334,7 @@ trait WIW_Timesheet_Sync_Trait {
                     }
                 }
 
-                // ✅ Scheduled start/end from SHIFT (this is the real fix)
+                // ✅ Scheduled start/end from SHIFT
                 $scheduled_start_local = null;
                 $scheduled_end_local   = null;
 
@@ -301,8 +374,15 @@ trait WIW_Timesheet_Sync_Trait {
                     ? (float) $time_entry->_wiw_local_clocked_hours
                     : round( (float) ( $time_entry->calculated_duration ?? 0.0 ), 2 );
 
-                // ✅ Step 1 rule: payable_hours equals clocked_hours (for now)
-                $payable_hours_local = round( (float) $clocked_hours_local, 2 );
+                // ✅ NEW: Payable hours are clamped to scheduled window (when present).
+                $payable_hours_local = $compute_local_payable_hours(
+                    $clock_in_local,
+                    $clock_out_local,
+                    $scheduled_start_local,
+                    $scheduled_end_local,
+                    $break_minutes_local,
+                    $clocked_hours_local // fallback is the already-computed clocked hours
+                );
 
                 $entry_data = [
                     'timesheet_id'    => $header_id,
@@ -314,16 +394,13 @@ trait WIW_Timesheet_Sync_Trait {
                     'clock_in'        => $clock_in_local,
                     'clock_out'       => $clock_out_local,
 
-                    // ✅ DB columns you already added
                     'scheduled_start' => $scheduled_start_local,
                     'scheduled_end'   => $scheduled_end_local,
 
                     'break_minutes'   => (int) $break_minutes_local,
                     'scheduled_hours' => round( (float) ( $time_entry->scheduled_duration ?? 0.0 ), 2 ),
                     'clocked_hours'   => round( $clocked_hours_local, 2 ),
-
-                    // ✅ NEW DB column
-                    'payable_hours'   => $payable_hours_local,
+                    'payable_hours'   => round( $payable_hours_local, 2 ),
 
                     'status'          => 'pending',
                     'updated_at'      => $now,
