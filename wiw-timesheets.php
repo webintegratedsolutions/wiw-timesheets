@@ -43,6 +43,8 @@ require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
+// Include the client portal shortcode
+require_once WIW_PLUGIN_PATH . 'includes/shortcodes/class-wiwts-client-portal-shortcode.php';
 
 
 /**
