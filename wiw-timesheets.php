@@ -1101,43 +1101,43 @@ if ( isset( $_GET['reset_error'] ) && $_GET['reset_error'] !== '' ) : ?>
             );
 
             $format_time_range = function( $start_dt, $end_dt ) {
-    // Expect local DATETIME strings like "2025-12-15 09:55:50" (or NULL).
-    if ( empty( $start_dt ) || empty( $end_dt ) ) {
-        return 'N/A';
-    }
+                // Expect local DATETIME strings like "2025-12-15 09:55:50" (or NULL).
+                if ( empty( $start_dt ) || empty( $end_dt ) ) {
+                    return 'N/A';
+                }
 
-    $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
-    $tz        = new DateTimeZone( $tz_string );
+                $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
+                $tz        = new DateTimeZone( $tz_string );
 
-    try {
-        $dt_start = new DateTime( (string) $start_dt, $tz );
-        $dt_end   = new DateTime( (string) $end_dt,   $tz );
+                try {
+                    $dt_start = new DateTime( (string) $start_dt, $tz );
+                    $dt_end   = new DateTime( (string) $end_dt,   $tz );
 
-        // Force the exact look you asked for: "9:00am"
-        $fmt = 'g:ia';
+                    // Force the exact look you asked for: "9:00am"
+                    $fmt = 'g:ia';
 
-        return $dt_start->format( $fmt ) . ' to ' . $dt_end->format( $fmt );
-    } catch ( Exception $e ) {
-        return 'N/A';
-    }
-};
+                    return $dt_start->format( $fmt ) . ' to ' . $dt_end->format( $fmt );
+                } catch ( Exception $e ) {
+                    return 'N/A';
+                }
+            };
 
-$format_time_only = function( $dt_string ) {
-    if ( empty( $dt_string ) ) {
-        return 'N/A';
-    }
+            $format_time_only = function( $dt_string ) {
+                if ( empty( $dt_string ) ) {
+                    return 'N/A';
+                }
 
-    $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
-    $tz        = new DateTimeZone( $tz_string );
+                $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
+                $tz        = new DateTimeZone( $tz_string );
 
-    try {
-        $dt  = new DateTime( (string) $dt_string, $tz );
-        $fmt = 'g:ia';
-        return $dt->format( $fmt );
-    } catch ( Exception $e ) {
-        return 'N/A';
-    }
-};
+                try {
+                    $dt  = new DateTime( (string) $dt_string, $tz );
+                    $fmt = 'g:ia';
+                    return $dt->format( $fmt );
+                } catch ( Exception $e ) {
+                    return 'N/A';
+                }
+            };
 
 
             if ( empty( $entries ) ) : ?>
@@ -1157,6 +1157,10 @@ $format_time_only = function( $dt_string ) {
         <th width="10%">Break (min)</th>
         <th width="10%">Sched. Hrs</th>
         <th width="10%">Clocked Hrs</th>
+
+        <!-- NEW -->
+        <th width="10%">Payable Hrs</th>
+
         <th width="7%">Status</th>
         <th width="5%">Actions</th>
     </tr>
@@ -1189,6 +1193,9 @@ $format_time_only = function( $dt_string ) {
     // Clock In / Out display (no seconds)
     $clock_in_display  = $fmt( $entry->clock_in );
     $clock_out_display = $fmt( $entry->clock_out );
+
+    // Payable hours: use DB value if present, otherwise fall back to clocked_hours.
+    $payable_hours_val = isset( $entry->payable_hours ) ? (float) $entry->payable_hours : (float) $entry->clocked_hours;
     ?>
 
     <tr>
@@ -1217,6 +1224,11 @@ $format_time_only = function( $dt_string ) {
 
         <td class="wiw-local-clocked-hours">
             <?php echo esc_html( number_format( (float) $entry->clocked_hours, 2 ) ); ?>
+        </td>
+
+        <!-- NEW -->
+        <td class="wiw-local-payable-hours">
+            <?php echo esc_html( number_format( $payable_hours_val, 2 ) ); ?>
         </td>
 
         <td><?php echo esc_html( $entry->status ); ?></td>
@@ -1303,10 +1315,13 @@ jQuery(function($) {
         var $cellOut  = $row.find('.wiw-local-clock-out');
         var $cellHrs  = $row.find('.wiw-local-clocked-hours');
 
+        // NEW: Payable hrs cell (display-only for now)
+        var $cellPay  = $row.find('.wiw-local-payable-hours');
+
         var $cellBreak = $row.find('.wiw-local-break-min');
-var currentBreak = $cellBreak.data('break');
-if (currentBreak === undefined || currentBreak === null) currentBreak = 0;
-currentBreak = String(currentBreak);
+        var currentBreak = $cellBreak.data('break');
+        if (currentBreak === undefined || currentBreak === null) currentBreak = 0;
+        currentBreak = String(currentBreak);
 
         var currentIn  = $cellIn.data('time')  || '';
         var currentOut = $cellOut.data('time') || '';
@@ -1318,16 +1333,15 @@ currentBreak = String(currentBreak);
         if (!newOut) return;
 
         var newBreak = window.prompt('Enter Break minutes (0 or more)', currentBreak);
-if (newBreak === null) return;
+        if (newBreak === null) return;
 
-newBreak = String(newBreak).trim();
-if (newBreak === '') newBreak = '0';
+        newBreak = String(newBreak).trim();
+        if (newBreak === '') newBreak = '0';
 
-if (!/^\d+$/.test(newBreak)) {
-    alert('Break minutes must be a whole number (e.g., 0, 15, 30).');
-    return;
-}
-
+        if (!/^\d+$/.test(newBreak)) {
+            alert('Break minutes must be a whole number (e.g., 0, 15, 30).');
+            return;
+        }
 
         $.post(ajaxurl, {
             action: 'wiw_local_update_entry',
@@ -1336,41 +1350,44 @@ if (!/^\d+$/.test(newBreak)) {
             clock_in_time: newIn,
             clock_out_time: newOut,
             break_minutes: newBreak
-}).done(function(resp) {
-    if (!resp || !resp.success) {
-        alert((resp && resp.data && resp.data.message) ? resp.data.message : 'Update failed.');
-        return;
-    }
+        }).done(function(resp) {
+            if (!resp || !resp.success) {
+                alert((resp && resp.data && resp.data.message) ? resp.data.message : 'Update failed.');
+                return;
+            }
 
-    // Update displayed times
-    if (resp.data.clock_in_display) {
-        $cellIn.text(resp.data.clock_in_display).data('time', newIn);
-    }
+            // Update displayed times
+            if (resp.data.clock_in_display) {
+                $cellIn.text(resp.data.clock_in_display).data('time', newIn);
+            }
 
-    if (resp.data.clock_out_display) {
-        $cellOut.text(resp.data.clock_out_display).data('time', newOut);
-    }
+            if (resp.data.clock_out_display) {
+                $cellOut.text(resp.data.clock_out_display).data('time', newOut);
+            }
 
-    // ✅ Update break on success
-    if (resp.data.break_minutes_display !== undefined) {
-        $cellBreak
-            .text(resp.data.break_minutes_display)
-            .data('break', parseInt(resp.data.break_minutes_display, 10));
-    }
+            // ✅ Update break on success
+            if (resp.data.break_minutes_display !== undefined) {
+                $cellBreak
+                    .text(resp.data.break_minutes_display)
+                    .data('break', parseInt(resp.data.break_minutes_display, 10));
+            }
 
-    // Update hours
-    if (resp.data.clocked_hours_display) {
-        $cellHrs.text(resp.data.clocked_hours_display);
-    }
+            // Update hours
+            if (resp.data.clocked_hours_display) {
+                $cellHrs.text(resp.data.clocked_hours_display);
 
-    // Update header total
-    if (resp.data.header_total_clocked_display) {
-        $('#wiw-local-header-total-clocked').text(resp.data.header_total_clocked_display);
-    }
+                // NEW: For now payable == clocked (UI display)
+                $cellPay.text(resp.data.clocked_hours_display);
+            }
 
-}).fail(function() {
-    alert('AJAX error updating entry.');
-});
+            // Update header total
+            if (resp.data.header_total_clocked_display) {
+                $('#wiw-local-header-total-clocked').text(resp.data.header_total_clocked_display);
+            }
+
+        }).fail(function() {
+            alert('AJAX error updating entry.');
+        });
 
     });
 });
@@ -1412,21 +1429,38 @@ if (!/^\d+$/.test(newBreak)) {
     <th width="10%">Break (Min)</th>
     <th width="10%">Sched. Hrs</th>
     <th width="10%">Clocked Hrs</th>
+
+    <!-- NEW -->
+    <th width="10%">Payable Hrs</th>
+
     <th width="10%">Status</th>
     <th width="6%">View</th>
 </tr>
 
             </thead>
             <tbody>
-                <?php foreach ( $headers as $row ) : 
-                $break_total = (int) $wpdb->get_var(
-    $wpdb->prepare(
-        "SELECT COALESCE(SUM(break_minutes), 0) 
-         FROM {$table_timesheet_entries} 
-         WHERE timesheet_id = %d",
-        (int) $row->id
-    )
-);
+                <?php foreach ( $headers as $row ) :
+                    $break_total = (int) $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT COALESCE(SUM(break_minutes), 0) 
+                             FROM {$table_timesheet_entries} 
+                             WHERE timesheet_id = %d",
+                            (int) $row->id
+                        )
+                    );
+
+                    // NEW: total payable (falls back to total clocked if payable column not populated yet)
+                    $payable_total = $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT COALESCE(SUM(payable_hours), 0)
+                             FROM {$table_timesheet_entries}
+                             WHERE timesheet_id = %d",
+                            (int) $row->id
+                        )
+                    );
+                    if ( $payable_total === null ) {
+                        $payable_total = 0;
+                    }
 
                     $detail_url = add_query_arg(
                         array( 'timesheet_id' => (int) $row->id ),
@@ -1448,9 +1482,13 @@ if (!/^\d+$/.test(newBreak)) {
                                 <br/><small>(ID: <?php echo esc_html( $row->location_id ); ?>)</small>
                             <?php endif; ?>
                         </td>
-<td><?php echo esc_html( $break_total ); ?></td>
-<td><?php echo esc_html( number_format( (float) $row->total_scheduled_hours, 2 ) ); ?></td>
-<td><?php echo esc_html( number_format( (float) $row->total_clocked_hours, 2 ) ); ?></td>
+                        <td><?php echo esc_html( $break_total ); ?></td>
+                        <td><?php echo esc_html( number_format( (float) $row->total_scheduled_hours, 2 ) ); ?></td>
+                        <td><?php echo esc_html( number_format( (float) $row->total_clocked_hours, 2 ) ); ?></td>
+
+                        <!-- NEW -->
+                        <td><?php echo esc_html( number_format( (float) $payable_total, 2 ) ); ?></td>
+
                         <td><?php echo esc_html( $row->status ); ?></td>
                         <td>
                             <a href="<?php echo esc_url( $detail_url ); ?>" class="button button-small">View</a>
@@ -1464,8 +1502,6 @@ if (!/^\d+$/.test(newBreak)) {
     </div><!-- .wrap -->
     <?php
 }
-
-
 
 /**
  * Admin-post handler: Reset a local timesheet back to the original API data.
