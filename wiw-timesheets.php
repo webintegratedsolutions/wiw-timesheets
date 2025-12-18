@@ -1092,15 +1092,42 @@ $flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
     Edit
 </button>
 
+</td>
+</tr>
+
+<!-- ✅ Flags button moved to its own row below, aligned left -->
+<tr class="wiw-local-flags-actions-row">
+    <td style="text-align:left;">
 <button type="button"
         class="button button-small wiw-local-toggle-flags"
         data-target="<?php echo esc_attr( $flags_row_id ); ?>"
         <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>>
-    Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
+    ⚠️ Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
 </button>
+    </td>
+    <td colspan="10"></td>
+</tr>
 
-                                </td>
-                            </tr>
+<!-- ✅ Hidden flags details row toggled by the button above -->
+<tr id="<?php echo esc_attr( $flags_row_id ); ?>" style="display:none; background-color:#f9f9f9;">
+    <td colspan="11">
+        <div style="padding:10px; border:1px solid #ddd;">
+            <?php if ( empty( $row_flags ) ) : ?>
+                <em>No flags for this record.</em>
+            <?php else : ?>
+                <ul style="margin:0; padding-left:18px;">
+                    <?php foreach ( $row_flags as $fr ) : ?>
+                        <li>
+                            <strong><?php echo esc_html( $fr->flag_type ); ?></strong>
+                            — <?php echo esc_html( $fr->description ); ?>
+                            (<?php echo esc_html( $fr->flag_status ); ?>)
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
+        </div>
+    </td>
+</tr>
 
                             <tr id="<?php echo esc_attr( $flags_row_id ); ?>" style="display:none; background-color:#f9f9f9;">
                                 <td colspan="11">
