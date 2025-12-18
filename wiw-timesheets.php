@@ -938,12 +938,25 @@ class WIW_Timesheet_Manager {
                         </tr>
                         <tr>
                             <th scope="row">Totals</th>
-                            <td>
-                                Scheduled: <?php echo esc_html( number_format( (float) $header->total_scheduled_hours, 2 ) ); ?> hrs,
-                                Clocked: <span id="wiw-local-header-total-clocked">
-                                    <?php echo esc_html( number_format( (float) $header->total_clocked_hours, 2 ) ); ?>
-                                </span> hrs
-                            </td>
+<td>
+    <?php
+    // Calculate payable total directly from entries (authoritative)
+    $payable_total = (float) $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COALESCE(SUM(payable_hours), 0)
+             FROM {$table_timesheet_entries}
+             WHERE timesheet_id = %d",
+            (int) $header->id
+        )
+    );
+    ?>
+    Scheduled: <?php echo esc_html( number_format( (float) $header->total_scheduled_hours, 2 ) ); ?> hrs,
+    Clocked: <span id="wiw-local-header-total-clocked">
+        <?php echo esc_html( number_format( (float) $header->total_clocked_hours, 2 ) ); ?>
+    </span> hrs,
+    Payable: <?php echo esc_html( number_format( $payable_total, 2 ) ); ?> hrs
+</td>
+
                         </tr>
                         <tr>
                             <th scope="row">Status</th>
