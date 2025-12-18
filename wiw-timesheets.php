@@ -149,6 +149,11 @@ class WIW_Timesheet_Manager {
 
         // Keep legacy / existing action if you still use it anywhere
         add_action( 'wp_ajax_wiw_approve_timesheet', array( $this, 'handle_approve_timesheet' ) );
+
+        // === WIWTS APPROVE TIME RECORD AJAX HOOK ADD START ===
+add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve_entry' ) );
+// === WIWTS APPROVE TIME RECORD AJAX HOOK ADD END ===
+
     }
 
     /**
@@ -1113,15 +1118,57 @@ if ( ! empty( $wiw_ids ) ) {
                                     <?php echo esc_html( number_format( (float) $payable_hours_val, 2 ) ); ?>
                                 </td>
 
-                                <td><?php echo esc_html( $entry->status ); ?></td>
+                                <td class="wiw-local-status" data-status="<?php echo esc_attr( (string) $entry->status ); ?>">
+    <?php echo esc_html( (string) $entry->status ); ?>
+</td>
 
-                                <td>
+<td>
 <?php
+$entry_status = (string) ( $entry->status ?? 'pending' );
+$is_approved  = ( strtolower( $entry_status ) === 'approved' );
+
+// Flags data already prepared above
 $wiw_time_id_for_flags = (int) ( $entry->wiw_time_id ?? 0 );
 $row_flags            = isset( $flags_map[ $wiw_time_id_for_flags ] ) ? (array) $flags_map[ $wiw_time_id_for_flags ] : array();
 $flags_count          = count( $row_flags );
 $flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
-// If there are flags and NONE are active, show an affirming icon.
+?>
+
+<?php if ( ! $is_approved ) : ?>
+    <button type="button"
+            class="button button-small wiw-local-edit-entry"
+            data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
+        Edit
+    </button>
+
+    <button type="button"
+            class="button button-small wiw-local-approve-entry"
+            data-entry-id="<?php echo esc_attr( $entry->id ); ?>"
+            style="margin-top:6px;background:#46b450;border-color:#46b450;color:#fff;">
+        Approve
+    </button>
+<?php else : ?>
+    <button type="button"
+            class="button button-small wiw-local-approve-entry wiw-local-approved"
+            disabled="disabled"
+            style="margin-top:0;background:#2271b1;border-color:#2271b1;color:#fff;opacity:1;cursor:default;">
+        Approved
+    </button>
+<?php endif; ?>
+
+</td>
+                               
+</tr>
+
+<!-- ✅ Flags button moved to its own row below, aligned left -->
+<tr class="wiw-local-flags-actions-row">
+    <td style="text-align:left;">
+<?php
+// === WIWTS FLAGS ICON (ROW-SAFE) START ===
+$wiw_time_id_for_flags = (int) ( $entry->wiw_time_id ?? 0 );
+$row_flags            = isset( $flags_map[ $wiw_time_id_for_flags ] ) ? (array) $flags_map[ $wiw_time_id_for_flags ] : array();
+$flags_count          = count( $row_flags );
+
 $has_active = false;
 if ( $flags_count ) {
     foreach ( $row_flags as $fr ) {
@@ -1136,30 +1183,16 @@ $flags_icon = '🚩';
 if ( $flags_count && ! $has_active ) {
     $flags_icon = '✅';
 }
-?>
-
-<button type="button"
-        class="button button-small wiw-local-edit-entry"
-        data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
-    Edit
-</button>
-
-</td>
-</tr>
-
-<!-- ✅ Flags button moved to its own row below, aligned left -->
-<tr class="wiw-local-flags-actions-row">
-    <td style="text-align:left;">
-<?php
-// Logs row id (always exists even if no logs)
-$logs_row_id = 'wiw-local-logs-' . (int) $entry->id;
+// === WIWTS FLAGS ICON (ROW-SAFE) END ===
 ?>
 
 <button type="button"
         class="button button-small wiw-local-toggle-flags"
         data-target="<?php echo esc_attr( $flags_row_id ); ?>"
-        <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>>
-    <?php echo esc_html( $flags_icon ); ?> Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
+        <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>
+        aria-label="<?php echo esc_attr( $flags_count ? 'View flags' : 'No flags' ); ?>">
+    <?php echo esc_html( $flags_icon ); ?>
+    Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
 </button>
 
 <?php
@@ -1254,6 +1287,10 @@ $timesheet_logs = $wpdb->get_results(
 
                     <?php
                     $local_edit_nonce = wp_create_nonce( 'wiw_local_edit_entry' );
+                    // === WIWTS APPROVE TIME RECORD NONCE ADD START ===
+$local_approve_nonce = wp_create_nonce( 'wiw_local_approve_entry' );
+// === WIWTS APPROVE TIME RECORD NONCE ADD END ===
+
                     ?>
                     <script type="text/javascript">
                     jQuery(function($) {
@@ -1365,6 +1402,62 @@ $(document).on('click', '.wiw-local-toggle-logs', function(e) {
 
                         });
                     });
+
+                    // === WIWTS APPROVE TIME RECORD JS ADD START ===
+$(document).on('click', '.wiw-local-approve-entry', function(e) {
+    e.preventDefault();
+
+    var $btn = $(this);
+    if ($btn.is(':disabled') || $btn.hasClass('wiw-local-approved')) {
+        return;
+    }
+
+    var entryId = $btn.data('entry-id');
+    if (!entryId) return;
+
+    if (!window.confirm('Approve this time record? This will finalize the record until Reset from API is used.')) {
+        return;
+    }
+
+    $.post(ajaxurl, {
+        action: 'wiw_local_approve_entry',
+        security: '<?php echo esc_js( $local_approve_nonce ); ?>',
+        entry_id: entryId
+    }).done(function(resp) {
+        if (!resp || !resp.success) {
+            alert((resp && resp.data && resp.data.message) ? resp.data.message : 'Approval failed.');
+            return;
+        }
+
+        // Update UI immediately
+        var $row = $btn.closest('tr');
+        $row.find('.wiw-local-status').text('approved').attr('data-status', 'approved');
+
+        // Remove Edit button if present
+        $row.find('.wiw-local-edit-entry').remove();
+
+        // Turn Approve into disabled "Approved" (blue)
+        $btn
+            .text('Approved')
+            .addClass('wiw-local-approved')
+            .prop('disabled', true)
+            .css({
+                background: '#2271b1',
+                borderColor: '#2271b1',
+                color: '#fff',
+                opacity: 1,
+                cursor: 'default',
+                marginTop: 0
+            });
+
+        // Refresh so the Edit Logs table reflects the new "Approved Time Record" entry
+        window.location.reload();
+    }).fail(function() {
+        alert('AJAX error approving entry.');
+    });
+});
+// === WIWTS APPROVE TIME RECORD JS ADD END ===
+
                     </script>
                 <?php endif; ?>
 
@@ -2209,6 +2302,108 @@ wp_send_json_success(
     )
 );
 }
+
+// === WIWTS APPROVE TIME RECORD HANDLER ADD START ===
+public function ajax_local_approve_entry() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
+    }
+
+    check_ajax_referer( 'wiw_local_approve_entry', 'security' );
+
+    global $wpdb;
+
+    $entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+    if ( ! $entry_id ) {
+        wp_send_json_error( array( 'message' => 'Invalid entry ID.' ) );
+    }
+
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_headers = $wpdb->prefix . 'wiw_timesheets';
+
+    $entry = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$table_entries} WHERE id = %d",
+            $entry_id
+        )
+    );
+
+    if ( ! $entry ) {
+        wp_send_json_error( array( 'message' => 'Entry not found.' ) );
+    }
+
+    $old_status = (string) ( $entry->status ?? 'pending' );
+    if ( strtolower( $old_status ) === 'approved' ) {
+        wp_send_json_success(
+            array(
+                'message' => 'Already approved.',
+                'status'  => 'approved',
+            )
+        );
+    }
+
+    $timesheet_id = (int) ( $entry->timesheet_id ?? 0 );
+    if ( ! $timesheet_id ) {
+        wp_send_json_error( array( 'message' => 'Timesheet ID missing for entry.' ) );
+    }
+
+    $header = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$table_headers} WHERE id = %d",
+            $timesheet_id
+        )
+    );
+
+    if ( ! $header ) {
+        wp_send_json_error( array( 'message' => 'Timesheet header not found.' ) );
+    }
+
+    $now = current_time( 'mysql' );
+
+    $updated = $wpdb->update(
+        $table_entries,
+        array(
+            'status'     => 'approved',
+            'updated_at' => $now,
+        ),
+        array( 'id' => $entry_id ),
+        array( '%s', '%s' ),
+        array( '%d' )
+    );
+
+    if ( false === $updated ) {
+        wp_send_json_error( array( 'message' => 'Database update failed for approval.' ) );
+    }
+
+    // Log approval in edit logs
+    $current_user = wp_get_current_user();
+
+    $this->insert_local_edit_log( array(
+        'timesheet_id'           => (int) $timesheet_id,
+        'entry_id'               => (int) $entry_id,
+        'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+        'edit_type'              => 'Approved Time Record',
+        'old_value'              => (string) $old_status,
+        'new_value'              => 'approved',
+        'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
+        'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
+        'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+        'employee_id'            => (int) ( $header->employee_id ?? 0 ),
+        'employee_name'          => (string) ( $header->employee_name ?? '' ),
+        'location_id'            => (int) ( $header->location_id ?? 0 ),
+        'location_name'          => (string) ( $header->location_name ?? '' ),
+        'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
+        'created_at'             => $now,
+    ) );
+
+    wp_send_json_success(
+        array(
+            'message' => 'Time record approved.',
+            'status'  => 'approved',
+        )
+    );
+}
+// === WIWTS APPROVE TIME RECORD HANDLER ADD END ===
 
 }
 
