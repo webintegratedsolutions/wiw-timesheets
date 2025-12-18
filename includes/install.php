@@ -18,6 +18,7 @@ function wiw_timesheet_manager_install() {
 	$table_timesheets        = $wpdb->prefix . 'wiw_timesheets';
 	$table_entries           = $wpdb->prefix . 'wiw_timesheet_entries';
 	$table_edit_logs         = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+	$table_flags 			 = $wpdb->prefix . 'wiw_timesheet_flags';
 
 	// Timesheets (header)
 	$sql_timesheets = "CREATE TABLE {$table_timesheets} (
@@ -95,6 +96,19 @@ function wiw_timesheet_manager_install() {
 		KEY created_at (created_at)
 	) {$charset_collate};";
 
+	$sql_flags = "CREATE TABLE {$table_flags} (
+    id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+    wiw_time_id BIGINT(20) UNSIGNED NOT NULL,
+    flag_type CHAR(3) NOT NULL,
+    description TEXT NOT NULL,
+    flag_status VARCHAR(20) NOT NULL DEFAULT 'active',
+    PRIMARY KEY  (id),
+    KEY idx_wiw_time_id (wiw_time_id),
+    KEY idx_flag_status (flag_status),
+    KEY idx_flag_type (flag_type)
+	) {$charset_collate};";
+
+	dbDelta( $sql_flags );
 	dbDelta( $sql_timesheets );
 	dbDelta( $sql_entries );
 	dbDelta( $sql_logs );
