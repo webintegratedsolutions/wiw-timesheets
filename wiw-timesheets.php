@@ -1311,12 +1311,10 @@ jQuery(function($) {
         var $row    = $btn.closest('tr');
         var entryId = $btn.data('entry-id');
 
-        var $cellIn   = $row.find('.wiw-local-clock-in');
-        var $cellOut  = $row.find('.wiw-local-clock-out');
-        var $cellHrs  = $row.find('.wiw-local-clocked-hours');
-
-        // NEW: Payable hrs cell (display-only for now)
-        var $cellPay  = $row.find('.wiw-local-payable-hours');
+var $cellIn   = $row.find('.wiw-local-clock-in');
+var $cellOut  = $row.find('.wiw-local-clock-out');
+var $cellHrs  = $row.find('.wiw-local-clocked-hours');
+var $cellPay  = $row.find('.wiw-local-payable-hours');;
 
         var $cellBreak = $row.find('.wiw-local-break-min');
         var currentBreak = $cellBreak.data('break');
@@ -1372,13 +1370,14 @@ jQuery(function($) {
                     .data('break', parseInt(resp.data.break_minutes_display, 10));
             }
 
-            // Update hours
-            if (resp.data.clocked_hours_display) {
-                $cellHrs.text(resp.data.clocked_hours_display);
+// Update hours
+if (resp.data.clocked_hours_display) {
+    $cellHrs.text(resp.data.clocked_hours_display);
+}
 
-                // NEW: For now payable == clocked (UI display)
-                $cellPay.text(resp.data.clocked_hours_display);
-            }
+if (resp.data.payable_hours_display) {
+    $cellPay.text(resp.data.payable_hours_display);
+}
 
             // Update header total
             if (resp.data.header_total_clocked_display) {
@@ -2022,20 +2021,20 @@ try {
         ) );
     }
 
-    $updated = $wpdb->update(
-        $table_entries,
-        array(
-            'clock_in'       => $clock_in_str,
-            'clock_out'      => $clock_out_str,
-            'break_minutes'  => (int) $break_minutes,
-            'clocked_hours'  => $clocked_hours,
-            'payable_hours'  => $payable_hours, // ✅ keep in lockstep
-            'updated_at'     => $now,
-        ),
-        array( 'id' => $entry_id ),
-        array( '%s', '%s', '%d', '%f', '%f', '%s' ),
-        array( '%d' )
-    );
+$updated = $wpdb->update(
+    $table_entries,
+    array(
+        'clock_in'       => $clock_in_str,
+        'clock_out'      => $clock_out_str,
+        'break_minutes'  => (int) $break_minutes,
+        'clocked_hours'  => $clocked_hours,
+        'payable_hours'  => (float) $payable_hours,
+        'updated_at'     => $now,
+    ),
+    array( 'id' => $entry_id ),
+    array( '%s', '%s', '%d', '%f', '%f', '%s' ),
+    array( '%d' )
+);
 
     if ( false === $updated ) {
         wp_send_json_error( array( 'message' => 'Database update failed for entry.' ) );
@@ -2059,16 +2058,17 @@ try {
         array( '%d' )
     );
 
-    wp_send_json_success(
-        array(
-            'clock_in_display'             => $clock_in_display,
-            'clock_out_display'            => $clock_out_display,
-            'break_minutes_display'        => (string) (int) $break_minutes,
-            'clocked_hours_display'        => number_format( $clocked_hours, 2 ),
-            'payable_hours_display'        => number_format( $payable_hours, 2 ), // ✅ NEW
-            'header_total_clocked_display' => number_format( $total_clocked, 2 ),
-        )
-    );
+wp_send_json_success(
+    array(
+        // IMPORTANT: these are now the formatted strings for display
+        'clock_in_display'             => $clock_in_display,
+        'clock_out_display'            => $clock_out_display,
+        'break_minutes_display'        => (string) (int) $break_minutes,
+        'clocked_hours_display'        => number_format( $clocked_hours, 2 ),
+        'payable_hours_display'        => number_format( (float) $payable_hours, 2 ),
+        'header_total_clocked_display' => number_format( $total_clocked, 2 ),
+    )
+);
 }
 
 }
