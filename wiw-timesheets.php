@@ -1403,11 +1403,11 @@ $(document).on('click', '.wiw-local-toggle-logs', function(e) {
                         });
                     });
 
-                    // === WIWTS APPROVE TIME RECORD JS ADD START ===
-$(document).on('click', '.wiw-local-approve-entry', function(e) {
+// === WIWTS APPROVE TIME RECORD JS ADD START ===
+jQuery(document).on('click', '.wiw-local-approve-entry', function(e) {
     e.preventDefault();
 
-    var $btn = $(this);
+    var $btn = jQuery(this);
     if ($btn.is(':disabled') || $btn.hasClass('wiw-local-approved')) {
         return;
     }
@@ -1419,7 +1419,7 @@ $(document).on('click', '.wiw-local-approve-entry', function(e) {
         return;
     }
 
-    $.post(ajaxurl, {
+    jQuery.post(ajaxurl, {
         action: 'wiw_local_approve_entry',
         security: '<?php echo esc_js( $local_approve_nonce ); ?>',
         entry_id: entryId
@@ -1450,7 +1450,7 @@ $(document).on('click', '.wiw-local-approve-entry', function(e) {
                 marginTop: 0
             });
 
-        // Refresh so the Edit Logs table reflects the new "Approved Time Record" entry
+        // Refresh so Edit Logs table reflects the new entry
         window.location.reload();
     }).fail(function() {
         alert('AJAX error approving entry.');
