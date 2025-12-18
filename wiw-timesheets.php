@@ -996,6 +996,49 @@ if ( empty( $entry_statuses ) ) {
                                 <?php endif; ?>
                             </td>
                         </tr>
+                        <?php
+// === WIWTS SHIFTS SUMMARY ROW START ===
+$entries_count = (int) $wpdb->get_var(
+    $wpdb->prepare(
+        "SELECT COUNT(*) FROM {$table_timesheet_entries} WHERE timesheet_id = %d",
+        (int) $header->id
+    )
+);
+
+// Pull distinct shift IDs from local entries (if your entries table stores shift_id)
+$shift_ids = $wpdb->get_col(
+    $wpdb->prepare(
+        "SELECT DISTINCT wiw_shift_id
+         FROM {$table_timesheet_entries}
+         WHERE timesheet_id = %d
+           AND wiw_shift_id IS NOT NULL
+           AND wiw_shift_id <> 0
+         ORDER BY wiw_shift_id ASC",
+        (int) $header->id
+    )
+);
+
+$shift_ids = array_values( array_unique( array_filter( array_map( 'absint', (array) $shift_ids ) ) ) );
+
+$shift_ids_display = 'N/A';
+if ( ! empty( $shift_ids ) ) {
+    $shift_ids_display = implode( ', ', $shift_ids );
+}
+// === WIWTS SHIFTS SUMMARY ROW END ===
+?>
+
+<tr>
+    <th scope="row">Shifts</th>
+    <td>
+        <?php echo esc_html( $entries_count ); ?>
+        <?php if ( ! empty( $shift_ids ) ) : ?>
+            — (Shift Ids: <?php echo esc_html( $shift_ids_display ); ?>)
+        <?php else : ?>
+            — (Shift Ids: N/A)
+        <?php endif; ?>
+    </td>
+</tr>
+
                         <tr>
                             <th scope="row">Totals</th>
 <td>
