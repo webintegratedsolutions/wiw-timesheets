@@ -1002,6 +1002,30 @@ if ( ! empty( $wiw_ids ) ) {
     }
 }
 
+// ✅ Prefetch edit logs for all entries in one query (avoid N+1 queries)
+$table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+$logs_map   = array(); // [wiw_time_id] => array of log rows
+
+if ( ! empty( $wiw_ids ) ) {
+    $in_logs = implode( ',', array_map( 'absint', $wiw_ids ) );
+
+    $log_rows = $wpdb->get_results(
+        "SELECT id, wiw_time_id, edit_type, old_value, new_value, edited_by_user_login, edited_by_display_name, created_at
+         FROM {$table_logs}
+         WHERE wiw_time_id IN ({$in_logs})
+         ORDER BY wiw_time_id ASC, id DESC"
+    );
+
+    foreach ( (array) $log_rows as $lr ) {
+        $tid = (int) ( $lr->wiw_time_id ?? 0 );
+        if ( ! $tid ) { continue; }
+        if ( ! isset( $logs_map[ $tid ] ) ) {
+            $logs_map[ $tid ] = array();
+        }
+        $logs_map[ $tid ][] = $lr;
+    }
+}
+
 
                 if ( empty( $entries ) ) : ?>
                     <p>No entries found for this timesheet.</p>
@@ -1113,12 +1137,26 @@ if ( $flags_count && ! $has_active ) {
 <!-- ✅ Flags button moved to its own row below, aligned left -->
 <tr class="wiw-local-flags-actions-row">
     <td style="text-align:left;">
+<?php
+// Logs row id (always exists even if no logs)
+$logs_row_id = 'wiw-local-logs-' . (int) $entry->id;
+?>
+
 <button type="button"
         class="button button-small wiw-local-toggle-flags"
         data-target="<?php echo esc_attr( $flags_row_id ); ?>"
         <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>>
-    <?php echo esc_html( $flags_icon ); ?> Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
+    Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
 </button>
+
+<?php
+$wiw_time_id_for_logs = (int) ( $entry->wiw_time_id ?? 0 );
+$row_logs            = isset( $logs_map[ $wiw_time_id_for_logs ] ) ? (array) $logs_map[ $wiw_time_id_for_logs ] : array();
+$logs_count          = count( $row_logs );
+
+$logs_row_id         = 'wiw-local-logs-' . (int) $entry->id;
+?>
+
     </td>
     <td colspan="10"></td>
 </tr>
@@ -1148,38 +1186,6 @@ if ( $flags_count && ! $has_active ) {
         </div>
     </td>
 </tr>
-
-                            <tr id="<?php echo esc_attr( $flags_row_id ); ?>" style="display:none; background-color:#f9f9f9;">
-                                <td colspan="11">
-                                    <div style="padding:10px; border:1px solid #ddd; background:#fff;">
-                                        <strong>Flags for Time Record ID:</strong> <?php echo esc_html( (int) $entry->wiw_time_id ); ?>
-
-                                        <?php if ( empty( $row_flags ) ) : ?>
-                                            <p style="margin:8px 0 0;">No flags for this entry.</p>
-                                        <?php else : ?>
-                                            <table class="widefat striped" style="margin-top:10px;">
-                                                <thead>
-                                                    <tr>
-                                                        <th width="10%">Type</th>
-                                                        <th>Description</th>
-                                                        <th width="12%">Status</th>
-                                                        <th width="18%">Created</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <?php foreach ( $row_flags as $fr ) : ?>
-                                                        <tr>
-                                                            <td><?php echo esc_html( (string) ( $fr->flag_type ?? '' ) ); ?></td>
-                                                            <td><?php echo esc_html( (string) ( $fr->description ?? '' ) ); ?></td>
-                                                            <td><?php echo esc_html( (string) ( $fr->flag_status ?? '' ) ); ?></td>
-                                                            <td><?php echo esc_html( (string) ( $fr->created_at ?? '' ) ); ?></td>
-                                                        </tr>
-                                                    <?php endforeach; ?>
-                                                </tbody>
-                                            </table>
-                                        <?php endif; ?>
-                                    </div>
-                                </td>
                             </tr>
 
                         <?php endforeach; ?>
@@ -1187,20 +1193,76 @@ if ( $flags_count && ! $has_active ) {
                         </tbody>
                     </table>
 
+<?php
+// ✅ Unified Edit Logs table (under Daily Entries)
+$timesheet_logs = $wpdb->get_results(
+    $wpdb->prepare(
+        "SELECT id, wiw_time_id, edit_type, old_value, new_value, edited_by_user_login, edited_by_display_name, created_at
+         FROM {$table_logs}
+         WHERE timesheet_id = %d
+         ORDER BY id DESC",
+        (int) $header->id
+    )
+);
+?>
+
+<h3 style="margin-top: 30px;">📝 Edit Logs</h3>
+
+<?php if ( empty( $timesheet_logs ) ) : ?>
+    <p>No edit logs found for this timesheet.</p>
+<?php else : ?>
+    <table class="widefat fixed striped" style="margin-top: 10px;">
+        <thead>
+            <tr>
+                <th width="12%">Time Record ID</th>
+                <th width="16%">Edit Type</th>
+                <th width="18%">Old Value</th>
+                <th width="18%">New Value</th>
+                <th width="18%">Edited By</th>
+                <th width="18%">Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ( $timesheet_logs as $lr ) : ?>
+                <?php $who = (string) ( $lr->edited_by_display_name ?: $lr->edited_by_user_login ); ?>
+                <tr>
+                    <td><?php echo esc_html( (int) ( $lr->wiw_time_id ?? 0 ) ); ?></td>
+                    <td><?php echo esc_html( (string) ( $lr->edit_type ?? '' ) ); ?></td>
+                    <td><code><?php echo esc_html( (string) ( $lr->old_value ?? '' ) ); ?></code></td>
+                    <td><code><?php echo esc_html( (string) ( $lr->new_value ?? '' ) ); ?></code></td>
+                    <td><?php echo esc_html( $who ); ?></td>
+                    <td><?php echo esc_html( (string) ( $lr->created_at ?? '' ) ); ?></td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+<?php endif; ?>
+
+
                     <?php
                     $local_edit_nonce = wp_create_nonce( 'wiw_local_edit_entry' );
                     ?>
                     <script type="text/javascript">
                     jQuery(function($) {
 
-                     // Toggle flags row (the hidden <tr> immediately under the entry row)
-                        $(document).on('click', '.wiw-local-toggle-flags', function(e) {
-                            e.preventDefault();
-                            var targetId = $(this).data('target');
-                            if (targetId) {
-                                $('#' + targetId).toggle();
-                            }
-                        });
+// Toggle flags row
+$(document).on('click', '.wiw-local-toggle-flags', function(e) {
+    e.preventDefault();
+    var targetId = $(this).data('target');
+    if (targetId) {
+        $('#' + targetId).toggle();
+    }
+});
+
+// Toggle logs row
+$(document).on('click', '.wiw-local-toggle-logs', function(e) {
+    e.preventDefault();
+    var targetId = $(this).data('target');
+    if (targetId) {
+        $('#' + targetId).toggle();
+    }
+});
+
 
                         // Edit entry button handler
                         $('.wiw-local-edit-entry').on('click', function(e) {
