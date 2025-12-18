@@ -11,14 +11,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 function wiw_timesheet_manager_install() {
 	global $wpdb;
 
+	// Required for dbDelta().
 	require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
 	$charset_collate = $wpdb->get_charset_collate();
 
-	$table_timesheets        = $wpdb->prefix . 'wiw_timesheets';
-	$table_entries           = $wpdb->prefix . 'wiw_timesheet_entries';
-	$table_edit_logs         = $wpdb->prefix . 'wiw_timesheet_edit_logs';
-	$table_flags 			 = $wpdb->prefix . 'wiw_timesheet_flags';
+	$table_timesheets = $wpdb->prefix . 'wiw_timesheets';
+	$table_entries    = $wpdb->prefix . 'wiw_timesheet_entries';
+	$table_edit_logs  = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+	$table_flags      = $wpdb->prefix . 'wiw_timesheet_flags';
 
 	// Timesheets (header)
 	$sql_timesheets = "CREATE TABLE {$table_timesheets} (
@@ -40,10 +41,6 @@ function wiw_timesheet_manager_install() {
 	) {$charset_collate};";
 
 	// Timesheet entries (line items)
-	// NEW columns:
-	// - scheduled_start (DATETIME)
-	// - scheduled_end (DATETIME)
-	// - payable_hours (DECIMAL) (for now equals clocked_hours)
 	$sql_entries = "CREATE TABLE {$table_entries} (
 		id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
 		timesheet_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
@@ -57,12 +54,9 @@ function wiw_timesheet_manager_install() {
 		break_minutes INT(11) NOT NULL DEFAULT 0,
 		scheduled_hours DECIMAL(10,2) NOT NULL DEFAULT 0.00,
 		clocked_hours DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-
 		payable_hours DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-
 		scheduled_start DATETIME NULL,
 		scheduled_end DATETIME NULL,
-
 		status VARCHAR(50) NOT NULL DEFAULT 'pending',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -96,20 +90,31 @@ function wiw_timesheet_manager_install() {
 		KEY created_at (created_at)
 	) {$charset_collate};";
 
+	/**
+	 * Flags table
+	 *
+	 * Improvements:
+	 * - Adds created_at / updated_at so we can track resolution workflow later
+	 * - Adds UNIQUE(wiw_time_id, flag_type) to prevent duplicate flags per time record
+	 */
 	$sql_flags = "CREATE TABLE {$table_flags} (
-    id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-    wiw_time_id BIGINT(20) UNSIGNED NOT NULL,
-    flag_type CHAR(3) NOT NULL,
-    description TEXT NOT NULL,
-    flag_status VARCHAR(20) NOT NULL DEFAULT 'active',
-    PRIMARY KEY  (id),
-    KEY idx_wiw_time_id (wiw_time_id),
-    KEY idx_flag_status (flag_status),
-    KEY idx_flag_type (flag_type)
+		id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+		wiw_time_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+		flag_type CHAR(3) NOT NULL DEFAULT '',
+		description TEXT NOT NULL,
+		flag_status VARCHAR(20) NOT NULL DEFAULT 'active',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		PRIMARY KEY  (id),
+		UNIQUE KEY uniq_time_flag (wiw_time_id, flag_type),
+		KEY idx_wiw_time_id (wiw_time_id),
+		KEY idx_flag_status (flag_status),
+		KEY idx_flag_type (flag_type)
 	) {$charset_collate};";
 
-	dbDelta( $sql_flags );
+	// Run dbDelta for all tables.
 	dbDelta( $sql_timesheets );
 	dbDelta( $sql_entries );
 	dbDelta( $sql_logs );
+	dbDelta( $sql_flags );
 }

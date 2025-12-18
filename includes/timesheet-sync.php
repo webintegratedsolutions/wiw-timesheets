@@ -9,6 +9,117 @@ if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
 
 trait WIW_Timesheet_Sync_Trait {
 
+    // Store time flags for a given time entry.
+    private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $clock_out_local, $scheduled_start_local, $scheduled_end_local, $tz ) {
+    global $wpdb;
+
+    $wiw_time_id = (int) $wiw_time_id;
+    if ( ! $wiw_time_id ) {
+        return;
+    }
+
+    $table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
+
+    $wpdb->delete( $table_flags, array( 'wiw_time_id' => $wiw_time_id ), array( '%d' ) );
+
+    $clock_in_local        = is_string( $clock_in_local ) ? trim( $clock_in_local ) : '';
+    $clock_out_local       = is_string( $clock_out_local ) ? trim( $clock_out_local ) : '';
+    $scheduled_start_local = is_string( $scheduled_start_local ) ? trim( $scheduled_start_local ) : '';
+    $scheduled_end_local   = is_string( $scheduled_end_local ) ? trim( $scheduled_end_local ) : '';
+
+    $flags = array();
+
+    if ( $clock_in_local === '' ) {
+        $flags[] = array( 'type' => '105', 'desc' => 'Missing clock-in time' );
+    }
+    if ( $clock_out_local === '' ) {
+        $flags[] = array( 'type' => '106', 'desc' => 'Missing clock-out time' );
+    }
+
+    try {
+        $dt_sched_start = ( $scheduled_start_local !== '' ) ? new DateTime( $scheduled_start_local, $tz ) : null;
+        $dt_sched_end   = ( $scheduled_end_local !== '' )   ? new DateTime( $scheduled_end_local,   $tz ) : null;
+
+        $dt_clock_in  = ( $clock_in_local !== '' )  ? new DateTime( $clock_in_local,  $tz ) : null;
+        $dt_clock_out = ( $clock_out_local !== '' ) ? new DateTime( $clock_out_local, $tz ) : null;
+
+        if ( $dt_sched_start && $dt_clock_in ) {
+            $sched_start_ts = $dt_sched_start->getTimestamp();
+            $clock_in_ts    = $dt_clock_in->getTimestamp();
+
+            if ( $clock_in_ts < ( $sched_start_ts - ( 15 * 60 ) ) ) {
+                $flags[] = array( 'type' => '101', 'desc' => 'Clocked in more than 15 minutes before scheduled start' );
+            }
+            if ( $clock_in_ts > $sched_start_ts ) {
+                $flags[] = array( 'type' => '103', 'desc' => 'Clocked in after scheduled start' );
+            }
+        }
+
+        if ( $dt_sched_end && $dt_clock_out ) {
+            $sched_end_ts  = $dt_sched_end->getTimestamp();
+            $clock_out_ts  = $dt_clock_out->getTimestamp();
+
+            if ( $clock_out_ts < $sched_end_ts ) {
+                $flags[] = array( 'type' => '102', 'desc' => 'Clocked out before scheduled end' );
+            }
+            if ( $clock_out_ts > ( $sched_end_ts + ( 15 * 60 ) ) ) {
+                $flags[] = array( 'type' => '104', 'desc' => 'Clocked out more than 15 minutes after scheduled end' );
+            }
+        }
+    } catch ( Exception $e ) {
+        $flags = array();
+    }
+
+    if ( empty( $flags ) ) {
+        return;
+    }
+
+$now = current_time( 'mysql' );
+
+foreach ( $flags as $f ) {
+
+    // Does this flag already exist?
+    $existing_id = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT id FROM {$table_flags}
+             WHERE wiw_time_id = %d AND flag_type = %s",
+            $wiw_time_id,
+            (string) $f['type']
+        )
+    );
+
+    if ( $existing_id ) {
+        // Update existing flag (keep created_at intact)
+        $wpdb->update(
+            $table_flags,
+            array(
+                'description' => (string) $f['desc'],
+                'flag_status' => 'active',
+                'updated_at'  => $now,
+            ),
+            array( 'id' => (int) $existing_id ),
+            array( '%s', '%s', '%s' ),
+            array( '%d' )
+        );
+    } else {
+        // Insert new flag
+        $wpdb->insert(
+            $table_flags,
+            array(
+                'wiw_time_id' => (int) $wiw_time_id,
+                'flag_type'   => (string) $f['type'],
+                'description' => (string) $f['desc'],
+                'flag_status' => 'active',
+                'created_at'  => $now,
+                'updated_at'  => $now,
+            ),
+            array( '%d', '%s', '%s', '%s', '%s', '%s' )
+        );
+    }
+}
+
+}
+
     /**
      * Sync API times into local DB.
      *
@@ -365,6 +476,17 @@ trait WIW_Timesheet_Sync_Trait {
                         }
                     }
                 }
+
+                // ✅ Store flags for this time record during sync (deletes old, inserts current)
+$this->wiwts_sync_store_time_flags(
+    $wiw_time_id,
+    (string) ( $clock_in_local ?? '' ),
+    (string) ( $clock_out_local ?? '' ),
+    (string) ( $scheduled_start_local ?? '' ),
+    (string) ( $scheduled_end_local ?? '' ),
+    $wp_timezone
+);
+
 
                 $break_minutes_local = isset( $time_entry->_wiw_local_break_minutes )
                     ? (int) $time_entry->_wiw_local_break_minutes
