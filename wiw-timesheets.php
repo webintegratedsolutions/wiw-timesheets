@@ -81,7 +81,10 @@ class WIW_Timesheet_Manager {
         // 6. Reset local timesheet from API (admin-post)
         add_action( 'admin_post_wiw_reset_local_timesheet', array( $this, 'handle_reset_local_timesheet' ) );
 
-        // ✅ 7. Register additional AJAX hooks (THIS was missing)
+        // 7. Finalize local timesheet (admin-post)
+        add_action( 'admin_post_wiw_finalize_local_timesheet', array( $this, 'handle_finalize_local_timesheet' ) );
+
+        // ✅ Register additional AJAX hooks (THIS was missing)
         $this->register_ajax_hooks();
     }
 
@@ -902,20 +905,45 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                     </div>
                 <?php endif; ?>
 
-                <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: 10px 0 20px;">
-                    <input type="hidden" name="action" value="wiw_reset_local_timesheet" />
-                    <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( (int) $header->id ); ?>" />
-                    <?php wp_nonce_field( 'wiw_reset_local_timesheet', 'wiw_reset_nonce' ); ?>
-                    <button type="submit" class="button button-secondary"
-                        onclick="return confirm('Reset will discard ALL local edits for this timesheet and restore the original data from When I Work. Continue?');">
-                        Reset from API
-                    </button>
-                </form>
+<?php if ( isset( $_GET['finalize_success'] ) ) : ?>
+    <div class="notice notice-success is-dismissible"><p>✅ Timesheet signed off and finalized.</p></div>
+<?php endif; ?>
+
+<?php if ( isset( $_GET['finalize_error'] ) && $_GET['finalize_error'] !== '' ) : ?>
+    <div class="notice notice-error is-dismissible">
+        <p><strong>❌ Sign off failed:</strong> <?php echo esc_html( sanitize_text_field( wp_unslash( $_GET['finalize_error'] ) ) ); ?></p>
+    </div>
+<?php endif; ?>
+
+<?php $is_timesheet_approved = ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ); ?>
+
+<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: 10px 0 20px;">
+    <input type="hidden" name="action" value="wiw_reset_local_timesheet" />
+    <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( (int) $header->id ); ?>" />
+    <?php wp_nonce_field( 'wiw_reset_local_timesheet', 'wiw_reset_nonce' ); ?>
+
+    <?php if ( $is_timesheet_approved ) : ?>
+        <button type="button" class="button button-secondary" disabled="disabled"
+            style="opacity:0.6;cursor:not-allowed;"
+            title="This timesheet has been finalized and can no longer be reset.">
+            Timesheet Finalized
+        </button>
+    <?php else : ?>
+        <button type="submit" class="button button-secondary"
+            onclick="return confirm('Reset will discard ALL local edits for this timesheet and restore the original data from When I Work. Continue?');">
+            Reset from API
+        </button>
+    <?php endif; ?>
+</form>
+
 
                 <h2>Timesheet #<?php echo esc_html( $header->id ); ?> Details</h2>
                 <?php
 // === WIWTS SIGN-OFF ELIGIBILITY CHECK START ===
 $all_entries_approved = true;
+
+// Initially assume sign-off is enabled
+$signoff_enabled = ( $all_entries_approved && ! $is_timesheet_approved );
 
 $entry_statuses = $wpdb->get_col(
     $wpdb->prepare(
@@ -1002,27 +1030,76 @@ if ( empty( $entry_statuses ) ) {
     </td>
 </tr>
 
+<?php
+// === WIWTS SIGN OFF ENABLE CHECK (ROBUST) START ===
+$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+$is_timesheet_approved = ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' );
+
+// Count any records not approved (case-insensitive)
+$unapproved_count = (int) $wpdb->get_var(
+    $wpdb->prepare(
+        "SELECT COUNT(*)
+         FROM {$table_entries}
+         WHERE timesheet_id = %d
+           AND LOWER(COALESCE(status,'')) <> 'approved'",
+        (int) $header->id
+    )
+);
+
+// Count total records (so we don't allow sign off when there are zero rows)
+$total_count = (int) $wpdb->get_var(
+    $wpdb->prepare(
+        "SELECT COUNT(*)
+         FROM {$table_entries}
+         WHERE timesheet_id = %d",
+        (int) $header->id
+    )
+);
+
+// Enabled only if ALL daily records approved, there is at least 1 record, and header not already approved
+$signoff_enabled = ( ! $is_timesheet_approved && $total_count > 0 && $unapproved_count === 0 );
+// === WIWTS SIGN OFF ENABLE CHECK (ROBUST) END ===
+?>
+
 <tr>
     <th scope="row">Sign Off</th>
     <td>
-        <button type="button"
-                class="button button-primary wiw-timesheet-signoff"
-                <?php echo $all_entries_approved ? '' : 'disabled="disabled"'; ?>
-                style="<?php echo $all_entries_approved ? '' : 'opacity:0.6;cursor:not-allowed;'; ?>"
-                title="<?php echo $all_entries_approved
-                    ? 'All time records approved'
-                    : 'All daily records must be approved before sign off'; ?>">
-            Sign Off
-        </button>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0;">
+            <input type="hidden" name="action" value="wiw_finalize_local_timesheet" />
+            <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( (int) $header->id ); ?>" />
+            <?php wp_nonce_field( 'wiw_finalize_local_timesheet', 'wiw_finalize_nonce' ); ?>
 
-        <?php if ( ! $all_entries_approved ) : ?>
-            <p style="margin:6px 0 0;color:#666;font-size:12px;">
-                All daily records must be approved before sign off
-            </p>
-        <?php endif; ?>
+            <?php if ( $signoff_enabled ) : ?>
+                <button type="submit"
+                        class="button button-primary"
+                        onclick="return confirm('Sign off this timesheet?\n\nOnce signed off, changes can no longer be made to any time records for this timesheet week.');">
+                    Sign Off
+                </button>
+            <?php else : ?>
+                <button type="button"
+                        class="button"
+                        disabled="disabled"
+                        style="background:#ccc;border-color:#ccc;color:#666;cursor:not-allowed;opacity:1;"
+                        title="<?php
+                            echo esc_attr(
+                                $is_timesheet_approved
+                                    ? 'Timesheet already finalized'
+                                    : 'All daily records must be approved before sign off'
+                            );
+                        ?>">
+                    Sign Off
+                </button>
+            <?php endif; ?>
+
+            <?php if ( $is_timesheet_approved ) : ?>
+                <p style="margin:6px 0 0;color:#666;font-size:12px;">This timesheet has been finalized.</p>
+            <?php elseif ( ! $signoff_enabled ) : ?>
+                <p style="margin:6px 0 0;color:#666;font-size:12px;">All daily records must be approved before sign off.</p>
+            <?php endif; ?>
+        </form>
     </td>
 </tr>
-
                     </tbody>
                 </table>
 
@@ -2170,6 +2247,10 @@ public function ajax_local_update_entry() {
         wp_send_json_error( array( 'message' => 'Timesheet header not found.' ) );
     }
 
+    if ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ) {
+        wp_send_json_error( array( 'message' => 'This timesheet has been finalized. Changes are not allowed.' ), 403 );
+    }
+
     $employee_name   = (string) $header->employee_name;
     $location_id     = (int)    $header->location_id;
     $location_name   = (string) $header->location_name;
@@ -2399,6 +2480,124 @@ wp_send_json_success(
 );
 }
 
+/**
+ * Admin-post handler: Finalize (Sign Off) a local timesheet.
+ * - Requires all daily entries to be approved
+ * - Updates wp_wiw_timesheets.status from pending -> approved
+ * - Writes a log entry using the TIMESHEET ID stored into the wiw_time_id column
+ * - Prevents Reset from API and any further edits/approvals
+ */
+public function handle_finalize_local_timesheet() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( 'Permission denied.' );
+    }
+
+    if (
+        ! isset( $_POST['wiw_finalize_nonce'] ) ||
+        ! wp_verify_nonce(
+            sanitize_text_field( wp_unslash( $_POST['wiw_finalize_nonce'] ) ),
+            'wiw_finalize_local_timesheet'
+        )
+    ) {
+        wp_die( 'Security check failed.' );
+    }
+
+    global $wpdb;
+
+    $timesheet_id = isset( $_POST['timesheet_id'] ) ? absint( $_POST['timesheet_id'] ) : 0;
+
+    $redirect_base = admin_url( 'admin.php?page=wiw-local-timesheets' );
+    $redirect_back = add_query_arg( array( 'timesheet_id' => $timesheet_id ), $redirect_base );
+
+    if ( ! $timesheet_id ) {
+        wp_safe_redirect( add_query_arg( 'finalize_error', rawurlencode( 'Invalid timesheet ID.' ), $redirect_base ) );
+        exit;
+    }
+
+    $table_headers = $wpdb->prefix . 'wiw_timesheets';
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+    $header = $wpdb->get_row(
+        $wpdb->prepare( "SELECT * FROM {$table_headers} WHERE id = %d", $timesheet_id )
+    );
+
+    if ( ! $header ) {
+        wp_safe_redirect( add_query_arg( 'finalize_error', rawurlencode( 'Timesheet not found.' ), $redirect_base ) );
+        exit;
+    }
+
+    $current_status = strtolower( (string) ( $header->status ?? 'pending' ) );
+    if ( $current_status === 'approved' ) {
+        wp_safe_redirect( add_query_arg( 'finalize_success', '1', $redirect_back ) );
+        exit;
+    }
+
+    // Must have entries, and ALL must be approved
+    $statuses = $wpdb->get_col(
+        $wpdb->prepare(
+            "SELECT status
+             FROM {$table_entries}
+             WHERE timesheet_id = %d",
+            $timesheet_id
+        )
+    );
+
+    if ( empty( $statuses ) ) {
+        wp_safe_redirect( add_query_arg( 'finalize_error', rawurlencode( 'No daily records found for this timesheet.' ), $redirect_back ) );
+        exit;
+    }
+
+    foreach ( $statuses as $st ) {
+        if ( strtolower( (string) $st ) !== 'approved' ) {
+            wp_safe_redirect( add_query_arg( 'finalize_error', rawurlencode( 'All daily time records must be approved before sign off.' ), $redirect_back ) );
+            exit;
+        }
+    }
+
+    $now = current_time( 'mysql' );
+
+    $updated = $wpdb->update(
+        $table_headers,
+        array(
+            'status'     => 'approved',
+            'updated_at' => $now,
+        ),
+        array( 'id' => $timesheet_id ),
+        array( '%s', '%s' ),
+        array( '%d' )
+    );
+
+    if ( false === $updated ) {
+        wp_safe_redirect( add_query_arg( 'finalize_error', rawurlencode( 'Failed to finalize timesheet in database.' ), $redirect_back ) );
+        exit;
+    }
+
+    // Log finalize action
+    $current_user = wp_get_current_user();
+
+    // IMPORTANT: store the TIMESHEET ID in the wiw_time_id column for this log row
+    $this->insert_local_edit_log( array(
+        'timesheet_id'           => (int) $timesheet_id,
+        'entry_id'               => 0,
+        'wiw_time_id'            => (int) $timesheet_id,
+        'edit_type'              => 'Approved Time Sheet',
+        'old_value'              => (string) ( $header->status ?? 'pending' ),
+        'new_value'              => 'approved',
+        'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
+        'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
+        'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+        'employee_id'            => (int) ( $header->employee_id ?? 0 ),
+        'employee_name'          => (string) ( $header->employee_name ?? '' ),
+        'location_id'            => (int) ( $header->location_id ?? 0 ),
+        'location_name'          => (string) ( $header->location_name ?? '' ),
+        'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
+        'created_at'             => $now,
+    ) );
+
+    wp_safe_redirect( add_query_arg( 'finalize_success', '1', $redirect_back ) );
+    exit;
+}
+
 // === WIWTS APPROVE TIME RECORD HANDLER ADD START ===
 public function ajax_local_approve_entry() {
     if ( ! current_user_can( 'manage_options' ) ) {
@@ -2452,6 +2651,10 @@ public function ajax_local_approve_entry() {
 
     if ( ! $header ) {
         wp_send_json_error( array( 'message' => 'Timesheet header not found.' ) );
+    }
+
+    if ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ) {
+        wp_send_json_error( array( 'message' => 'This timesheet has been finalized. Approvals are not allowed.' ), 403 );
     }
 
     $now = current_time( 'mysql' );
