@@ -1417,9 +1417,9 @@ $(document).on('click', '.wiw-local-toggle-logs', function(e) {
     }
 
     // ✅ Force refresh so flags + edit logs update
-    setTimeout(function () {
-        window.location.reload();
-    }, 100);
+setTimeout(function () {
+    window.location.reload();
+}, 0);
 
 }).fail(function() {
                                 alert('AJAX error updating entry.');
