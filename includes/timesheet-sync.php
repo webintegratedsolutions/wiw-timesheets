@@ -145,8 +145,9 @@ trait WIW_Timesheet_Sync_Trait {
 
             $break_api_minutes = $get_break_minutes_from_api( $time_entry );
 
-            // If Sched. Hrs exceed 5, break is EXACTLY 60.
-            $break_enforced = ( $scheduled_hours > 5.0 ) ? 60 : (int) $break_api_minutes;
+            // If Sched. Hrs are 5.0 or more, break is EXACTLY 60.
+            $break_enforced = ( $scheduled_hours >= 5.0 ) ? 60 : (int) $break_api_minutes;
+
 
             $fallback_clocked = (float) ( $time_entry->calculated_duration ?? 0.0 );
             $adjusted_clocked = $compute_local_clocked_hours(
