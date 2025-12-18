@@ -1864,7 +1864,7 @@ $clock_range     = $fmt_range( $min_in,    $max_out,   ' / ' );
                                 <td><?php echo esc_html( number_format( (float) $payable_total, 2 ) ); ?></td>
                                 <td><?php echo esc_html( $row->status ); ?></td>
                                 <td>
-                                    <a href="<?php echo esc_url( $detail_url ); ?>" class="button button-small">View/Edit</a>
+                                    <a href="<?php echo esc_url( $detail_url ); ?>" class="button button-small">Open Timesheet</a>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
