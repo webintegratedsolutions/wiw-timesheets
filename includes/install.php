@@ -42,6 +42,7 @@ function wiw_timesheet_manager_install() {
 	// NEW columns:
 	// - scheduled_start (DATETIME)
 	// - scheduled_end (DATETIME)
+	// - payable_hours (DECIMAL)  <-- NEW
 	$sql_entries = "CREATE TABLE {$table_entries} (
 		id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
 		timesheet_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
@@ -58,6 +59,8 @@ function wiw_timesheet_manager_install() {
 
 		scheduled_start DATETIME NULL,
 		scheduled_end DATETIME NULL,
+
+		payable_hours DECIMAL(10,2) NOT NULL DEFAULT 0.00,
 
 		status VARCHAR(50) NOT NULL DEFAULT 'pending',
 		created_at DATETIME NOT NULL,

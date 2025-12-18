@@ -300,6 +300,9 @@ trait WIW_Timesheet_Sync_Trait {
                     ? (float) $time_entry->_wiw_local_clocked_hours
                     : round( (float) ( $time_entry->calculated_duration ?? 0.0 ), 2 );
 
+                // ✅ Step 1: Payable Hours stored in DB (same as clocked for now)
+                $payable_hours_local = (float) $clocked_hours_local;
+
                 $entry_data = [
                     'timesheet_id'    => $header_id,
                     'wiw_time_id'     => $wiw_time_id,
@@ -317,6 +320,9 @@ trait WIW_Timesheet_Sync_Trait {
                     'break_minutes'   => (int) $break_minutes_local,
                     'scheduled_hours' => round( (float) ( $time_entry->scheduled_duration ?? 0.0 ), 2 ),
                     'clocked_hours'   => round( $clocked_hours_local, 2 ),
+
+                    // ✅ NEW DB column
+                    'payable_hours'   => round( $payable_hours_local, 2 ),
 
                     'status'          => 'pending',
                     'updated_at'      => $now,
