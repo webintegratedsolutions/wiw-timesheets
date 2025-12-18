@@ -9,31 +9,17 @@ if ( ! function_exists( 'wiw_get_timesheets' ) ) {
     function wiw_get_timesheets() {
         global $wpdb;
         
-        $table_ts = $wpdb->prefix . 'wiw_timesheets'; 
-        $table_daily = $wpdb->prefix . 'wiw_daily_records';
-
+        $table_name = $wpdb->prefix . 'wiw_timesheets'; 
         $client_id = get_user_meta( get_current_user_id(), 'client_account_number', true );
-        $is_admin = current_user_can( 'manage_options' );
 
-        // If not admin and no client ID, return empty
-        if ( ! $is_admin && ! $client_id ) return [];
-
-        // This query selects the timesheet AND checks if any daily records are NOT approved
-        // can_sign_off will be 1 if total records > 0 AND unapproved records == 0
-        $sql = "
-            SELECT ts.*, 
-            (SELECT COUNT(*) FROM $table_daily WHERE timesheet_id = ts.id) as total_days,
-            (SELECT COUNT(*) FROM $table_daily WHERE timesheet_id = ts.id AND status != 'approved') as unapproved_days
-            FROM $table_ts as ts
-        ";
-
-        if ( ! $is_admin ) {
-            $sql .= $wpdb->prepare( " WHERE ts.location_id = %s", $client_id );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            if ( ! $client_id ) return [];
+            $query = $wpdb->prepare( "SELECT * FROM $table_name WHERE location_id = %s ORDER BY date DESC", $client_id );
+        } else {
+            $query = "SELECT * FROM $table_name ORDER BY date DESC";
         }
 
-        $sql .= " ORDER BY ts.date DESC";
-
-        return $wpdb->get_results( $sql );
+        return $wpdb->get_results( $query );
     }
 }
 
