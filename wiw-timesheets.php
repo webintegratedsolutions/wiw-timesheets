@@ -970,6 +970,39 @@ class WIW_Timesheet_Manager {
                     )
                 );
 
+                // ✅ Prefetch flags for all entries in one query (avoid N+1 queries)
+$table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
+$flags_map   = array(); // [wiw_time_id] => array of flag rows
+
+$wiw_ids = array();
+foreach ( (array) $entries as $e ) {
+    if ( ! empty( $e->wiw_time_id ) ) {
+        $wiw_ids[] = (int) $e->wiw_time_id;
+    }
+}
+$wiw_ids = array_values( array_unique( array_filter( $wiw_ids ) ) );
+
+if ( ! empty( $wiw_ids ) ) {
+    $in = implode( ',', array_map( 'absint', $wiw_ids ) );
+
+    $flag_rows = $wpdb->get_results(
+        "SELECT id, wiw_time_id, flag_type, description, flag_status, created_at, updated_at
+         FROM {$table_flags}
+         WHERE wiw_time_id IN ({$in})
+         ORDER BY wiw_time_id ASC, id ASC"
+    );
+
+    foreach ( (array) $flag_rows as $fr ) {
+        $tid = (int) ( $fr->wiw_time_id ?? 0 );
+        if ( ! $tid ) { continue; }
+        if ( ! isset( $flags_map[ $tid ] ) ) {
+            $flags_map[ $tid ] = array();
+        }
+        $flags_map[ $tid ][] = $fr;
+    }
+}
+
+
                 if ( empty( $entries ) ) : ?>
                     <p>No entries found for this timesheet.</p>
                 <?php else : ?>
@@ -1046,14 +1079,64 @@ class WIW_Timesheet_Manager {
                                 <td><?php echo esc_html( $entry->status ); ?></td>
 
                                 <td>
-                                    <button type="button"
-                                            class="button button-small wiw-local-edit-entry"
-                                            data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
-                                        Edit
-                                    </button>
+<?php
+$wiw_time_id_for_flags = (int) ( $entry->wiw_time_id ?? 0 );
+$row_flags            = isset( $flags_map[ $wiw_time_id_for_flags ] ) ? (array) $flags_map[ $wiw_time_id_for_flags ] : array();
+$flags_count          = count( $row_flags );
+$flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
+?>
+
+<button type="button"
+        class="button button-small wiw-local-edit-entry"
+        data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
+    Edit
+</button>
+
+<button type="button"
+        class="button button-small wiw-local-toggle-flags"
+        data-target="<?php echo esc_attr( $flags_row_id ); ?>"
+        <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>>
+    Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
+</button>
+
                                 </td>
                             </tr>
+
+                            <tr id="<?php echo esc_attr( $flags_row_id ); ?>" style="display:none; background-color:#f9f9f9;">
+                                <td colspan="11">
+                                    <div style="padding:10px; border:1px solid #ddd; background:#fff;">
+                                        <strong>Flags for Time Record ID:</strong> <?php echo esc_html( (int) $entry->wiw_time_id ); ?>
+
+                                        <?php if ( empty( $row_flags ) ) : ?>
+                                            <p style="margin:8px 0 0;">No flags for this entry.</p>
+                                        <?php else : ?>
+                                            <table class="widefat striped" style="margin-top:10px;">
+                                                <thead>
+                                                    <tr>
+                                                        <th width="10%">Type</th>
+                                                        <th>Description</th>
+                                                        <th width="12%">Status</th>
+                                                        <th width="18%">Created</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php foreach ( $row_flags as $fr ) : ?>
+                                                        <tr>
+                                                            <td><?php echo esc_html( (string) ( $fr->flag_type ?? '' ) ); ?></td>
+                                                            <td><?php echo esc_html( (string) ( $fr->description ?? '' ) ); ?></td>
+                                                            <td><?php echo esc_html( (string) ( $fr->flag_status ?? '' ) ); ?></td>
+                                                            <td><?php echo esc_html( (string) ( $fr->created_at ?? '' ) ); ?></td>
+                                                        </tr>
+                                                    <?php endforeach; ?>
+                                                </tbody>
+                                            </table>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
+
                         <?php endforeach; ?>
+
                         </tbody>
                     </table>
 
@@ -1062,6 +1145,17 @@ class WIW_Timesheet_Manager {
                     ?>
                     <script type="text/javascript">
                     jQuery(function($) {
+
+                     // Toggle flags row (the hidden <tr> immediately under the entry row)
+                        $(document).on('click', '.wiw-local-toggle-flags', function(e) {
+                            e.preventDefault();
+                            var targetId = $(this).data('target');
+                            if (targetId) {
+                                $('#' + targetId).toggle();
+                            }
+                        });
+
+                        // Edit entry button handler
                         $('.wiw-local-edit-entry').on('click', function(e) {
                             e.preventDefault();
 
