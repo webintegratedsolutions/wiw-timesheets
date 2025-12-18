@@ -1310,38 +1310,43 @@ $(document).on('click', '.wiw-local-toggle-logs', function(e) {
                                 clock_out_time: newOut,
                                 break_minutes: newBreak
                             }).done(function(resp) {
-                                if (!resp || !resp.success) {
-                                    alert((resp && resp.data && resp.data.message) ? resp.data.message : 'Update failed.');
-                                    return;
-                                }
+    if (!resp || !resp.success) {
+        alert((resp && resp.data && resp.data.message) ? resp.data.message : 'Update failed.');
+        return;
+    }
 
-                                if (resp.data.clock_in_display) {
-                                    $cellIn.text(resp.data.clock_in_display).data('time', newIn);
-                                }
+    if (resp.data.clock_in_display) {
+        $cellIn.text(resp.data.clock_in_display).data('time', newIn);
+    }
 
-                                if (resp.data.clock_out_display) {
-                                    $cellOut.text(resp.data.clock_out_display).data('time', newOut);
-                                }
+    if (resp.data.clock_out_display) {
+        $cellOut.text(resp.data.clock_out_display).data('time', newOut);
+    }
 
-                                if (resp.data.break_minutes_display !== undefined) {
-                                    $cellBreak
-                                        .text(resp.data.break_minutes_display)
-                                        .data('break', parseInt(resp.data.break_minutes_display, 10));
-                                }
+    if (resp.data.break_minutes_display !== undefined) {
+        $cellBreak
+            .text(resp.data.break_minutes_display)
+            .data('break', parseInt(resp.data.break_minutes_display, 10));
+    }
 
-                                if (resp.data.clocked_hours_display) {
-                                    $cellHrs.text(resp.data.clocked_hours_display);
-                                }
+    if (resp.data.clocked_hours_display) {
+        $cellHrs.text(resp.data.clocked_hours_display);
+    }
 
-                                if (resp.data.payable_hours_display) {
-                                    $cellPay.text(resp.data.payable_hours_display);
-                                }
+    if (resp.data.payable_hours_display) {
+        $cellPay.text(resp.data.payable_hours_display);
+    }
 
-                                if (resp.data.header_total_clocked_display) {
-                                    $('#wiw-local-header-total-clocked').text(resp.data.header_total_clocked_display);
-                                }
+    if (resp.data.header_total_clocked_display) {
+        $('#wiw-local-header-total-clocked').text(resp.data.header_total_clocked_display);
+    }
 
-                            }).fail(function() {
+    // ✅ Force refresh so flags + edit logs update
+    setTimeout(function () {
+        window.location.reload();
+    }, 300);
+
+}).fail(function() {
                                 alert('AJAX error updating entry.');
                             });
 
