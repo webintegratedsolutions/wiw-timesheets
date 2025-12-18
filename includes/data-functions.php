@@ -1,14 +1,10 @@
 <?php
-
 /**
  * Shared Data Functions for WIW Timesheets
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-/**
- * Fetch timesheets with automatic location-based scoping.
- */
 if ( ! function_exists( 'wiw_get_timesheets' ) ) {
     function wiw_get_timesheets( $args = [] ) {
         global $wpdb;
@@ -22,15 +18,17 @@ if ( ! function_exists( 'wiw_get_timesheets' ) ) {
         $params = wp_parse_args( $args, $defaults );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            $user_location = get_user_meta( get_current_user_id(), 'wiw_assigned_location', true );
+            // ✅ We fetch the 'client_account_number' which maps to the 'site_id' (e.g., 1165986)
+            $client_id = get_user_meta( get_current_user_id(), 'client_account_number', true );
             
-            if ( ! $user_location ) {
+            if ( ! $client_id ) {
                 return [];
             }
             
+            // We query the local table's location_id column using the Site ID from user meta
             $query = $wpdb->prepare(
-                "SELECT * FROM $table_name WHERE location_id = %d ORDER BY %s %s",
-                $user_location,
+                "SELECT * FROM $table_name WHERE location_id = %s ORDER BY %s %s",
+                $client_id,
                 $params['orderby'],
                 $params['order']
             );
