@@ -1798,8 +1798,8 @@ public function handle_reset_local_timesheet() {
         array( '%d' )
     );
 
-    // 6) Re-sync ONLY this header’s filtered times
-    $this->sync_timesheets_to_local_db( $filtered_times, $user_map, $wp_timezone );
+// 6) Re-sync ONLY this header’s filtered times (pass shift_map so scheduled_start/end populate)
+$this->sync_timesheets_to_local_db( $filtered_times, $user_map, $wp_timezone, $shift_map );
 
     wp_safe_redirect( add_query_arg( 'reset_success', '1', $redirect_back ) );
     exit;
