@@ -10,7 +10,7 @@ if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
 trait WIW_Timesheet_Sync_Trait {
 
     // Store time flags for a given time entry.
-    private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $clock_out_local, $scheduled_start_local, $scheduled_end_local, $tz ) {
+private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $clock_out_local, $scheduled_start_local, $scheduled_end_local, $tz ) {
     global $wpdb;
 
     $wiw_time_id = (int) $wiw_time_id;
@@ -20,22 +20,24 @@ trait WIW_Timesheet_Sync_Trait {
 
     $table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
 
-    $wpdb->delete( $table_flags, array( 'wiw_time_id' => $wiw_time_id ), array( '%d' ) );
-
+    // Normalize inputs
     $clock_in_local        = is_string( $clock_in_local ) ? trim( $clock_in_local ) : '';
     $clock_out_local       = is_string( $clock_out_local ) ? trim( $clock_out_local ) : '';
     $scheduled_start_local = is_string( $scheduled_start_local ) ? trim( $scheduled_start_local ) : '';
     $scheduled_end_local   = is_string( $scheduled_end_local ) ? trim( $scheduled_end_local ) : '';
 
-    $flags = array();
+    // Compute which flags SHOULD be active right now (by type).
+    $active_flags = array(); // ['101' => 'desc', ...]
 
+    // Missing checks first
     if ( $clock_in_local === '' ) {
-        $flags[] = array( 'type' => '105', 'desc' => 'Missing clock-in time' );
+        $active_flags['105'] = 'Missing clock-in time';
     }
     if ( $clock_out_local === '' ) {
-        $flags[] = array( 'type' => '106', 'desc' => 'Missing clock-out time' );
+        $active_flags['106'] = 'Missing clock-out time';
     }
 
+    // Only run early/late logic when scheduled bounds exist AND relevant clock value exists.
     try {
         $dt_sched_start = ( $scheduled_start_local !== '' ) ? new DateTime( $scheduled_start_local, $tz ) : null;
         $dt_sched_end   = ( $scheduled_end_local !== '' )   ? new DateTime( $scheduled_end_local,   $tz ) : null;
@@ -43,72 +45,108 @@ trait WIW_Timesheet_Sync_Trait {
         $dt_clock_in  = ( $clock_in_local !== '' )  ? new DateTime( $clock_in_local,  $tz ) : null;
         $dt_clock_out = ( $clock_out_local !== '' ) ? new DateTime( $clock_out_local, $tz ) : null;
 
+        // 101 / 103 (clock-in relative to scheduled start)
         if ( $dt_sched_start && $dt_clock_in ) {
             $sched_start_ts = $dt_sched_start->getTimestamp();
             $clock_in_ts    = $dt_clock_in->getTimestamp();
 
+            // 101: more than 15 minutes early
             if ( $clock_in_ts < ( $sched_start_ts - ( 15 * 60 ) ) ) {
-                $flags[] = array( 'type' => '101', 'desc' => 'Clocked in more than 15 minutes before scheduled start' );
+                $active_flags['101'] = 'Clocked in more than 15 minutes before scheduled start';
             }
+
+            // 103: clocked in after scheduled start
             if ( $clock_in_ts > $sched_start_ts ) {
-                $flags[] = array( 'type' => '103', 'desc' => 'Clocked in after scheduled start' );
+                $active_flags['103'] = 'Clocked in after scheduled start';
             }
         }
 
+        // 102 / 104 (clock-out relative to scheduled end)
         if ( $dt_sched_end && $dt_clock_out ) {
-            $sched_end_ts  = $dt_sched_end->getTimestamp();
-            $clock_out_ts  = $dt_clock_out->getTimestamp();
+            $sched_end_ts = $dt_sched_end->getTimestamp();
+            $clock_out_ts = $dt_clock_out->getTimestamp();
 
+            // 102: clocked out before scheduled end
             if ( $clock_out_ts < $sched_end_ts ) {
-                $flags[] = array( 'type' => '102', 'desc' => 'Clocked out before scheduled end' );
+                $active_flags['102'] = 'Clocked out before scheduled end';
             }
+
+            // 104: more than 15 minutes late
             if ( $clock_out_ts > ( $sched_end_ts + ( 15 * 60 ) ) ) {
-                $flags[] = array( 'type' => '104', 'desc' => 'Clocked out more than 15 minutes after scheduled end' );
+                $active_flags['104'] = 'Clocked out more than 15 minutes after scheduled end';
             }
         }
     } catch ( Exception $e ) {
-        $flags = array();
+        // If parsing fails, do not add early/late flags.
     }
 
-    if ( empty( $flags ) ) {
-        return;
-    }
+    $now = current_time( 'mysql' );
 
-$now = current_time( 'mysql' );
-
-foreach ( $flags as $f ) {
-
-    // Does this flag already exist?
-    $existing_id = $wpdb->get_var(
+    // Load existing flags for this time id.
+    $existing = $wpdb->get_results(
         $wpdb->prepare(
-            "SELECT id FROM {$table_flags}
-             WHERE wiw_time_id = %d AND flag_type = %s",
-            $wiw_time_id,
-            (string) $f['type']
+            "SELECT id, flag_type, flag_status
+             FROM {$table_flags}
+             WHERE wiw_time_id = %d",
+            $wiw_time_id
         )
     );
 
-    if ( $existing_id ) {
-        // Update existing flag (keep created_at intact)
+    $existing_by_type = array(); // ['101' => row]
+    foreach ( (array) $existing as $row ) {
+        $t = isset( $row->flag_type ) ? (string) $row->flag_type : '';
+        if ( $t !== '' ) {
+            $existing_by_type[ $t ] = $row;
+        }
+    }
+
+    // 1) Update existing flags: set active/resolved as needed (created_at unchanged).
+    foreach ( $existing_by_type as $type => $row ) {
+        $should_be_active = array_key_exists( (string) $type, $active_flags );
+
+        $new_status = $should_be_active ? 'active' : 'resolved';
+        $new_desc   = $should_be_active ? (string) $active_flags[ (string) $type ] : null;
+
+        $data = array(
+            'flag_status' => $new_status,
+            'updated_at'  => $now,
+        );
+        $formats = array( '%s', '%s' );
+
+        // If active, update description too (keeps wording aligned to current rules).
+        if ( $new_desc !== null ) {
+            $data['description'] = $new_desc;
+            $formats[] = '%s';
+            // Put description first for nicer SQL order (optional)
+            $data = array(
+                'description' => $new_desc,
+                'flag_status' => $new_status,
+                'updated_at'  => $now,
+            );
+            $formats = array( '%s', '%s', '%s' );
+        }
+
         $wpdb->update(
             $table_flags,
-            array(
-                'description' => (string) $f['desc'],
-                'flag_status' => 'active',
-                'updated_at'  => $now,
-            ),
-            array( 'id' => (int) $existing_id ),
-            array( '%s', '%s', '%s' ),
+            $data,
+            array( 'id' => (int) $row->id ),
+            $formats,
             array( '%d' )
         );
-    } else {
-        // Insert new flag
+    }
+
+    // 2) Insert any new flags that should be active but don't exist yet.
+    foreach ( $active_flags as $type => $desc ) {
+        if ( isset( $existing_by_type[ (string) $type ] ) ) {
+            continue;
+        }
+
         $wpdb->insert(
             $table_flags,
             array(
-                'wiw_time_id' => (int) $wiw_time_id,
-                'flag_type'   => (string) $f['type'],
-                'description' => (string) $f['desc'],
+                'wiw_time_id' => $wiw_time_id,
+                'flag_type'   => (string) $type,
+                'description' => (string) $desc,
                 'flag_status' => 'active',
                 'created_at'  => $now,
                 'updated_at'  => $now,
@@ -116,8 +154,6 @@ foreach ( $flags as $f ) {
             array( '%d', '%s', '%s', '%s', '%s', '%s' )
         );
     }
-}
-
 }
 
     /**

@@ -1117,11 +1117,16 @@ $flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
             <?php else : ?>
                 <ul style="margin:0; padding-left:18px;">
                     <?php foreach ( $row_flags as $fr ) : ?>
-                        <li>
-                            <strong><?php echo esc_html( $fr->flag_type ); ?></strong>
-                            — <?php echo esc_html( $fr->description ); ?>
-                            (<?php echo esc_html( $fr->flag_status ); ?>)
-                        </li>
+<li>
+    <strong><?php echo esc_html( (string) ( $fr->flag_type ?? '' ) ); ?></strong>
+    — <?php
+        $status = ( isset( $fr->flag_status ) && $fr->flag_status === 'resolved' ) ? 'resolved' : 'active';
+        $color  = ( $status === 'resolved' ) ? 'green' : 'orange';
+
+        echo esc_html( (string) ( $fr->description ?? '' ) )
+            . ' <span style="font-weight:600;color:' . esc_attr( $color ) . ';">(' . esc_html( $status ) . ')</span>';
+    ?>
+</li>
                     <?php endforeach; ?>
                 </ul>
             <?php endif; ?>
@@ -2047,6 +2052,23 @@ $updated = $wpdb->update(
     array( '%s', '%s', '%d', '%f', '%f', '%s' ),
     array( '%d' )
 );
+
+// ✅ IMPORTANT: Recalculate flags after any local edit so flags resolve/reactivate correctly
+try {
+    $sched_start_local = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+    $sched_end_local   = ! empty( $entry->scheduled_end )   ? (string) $entry->scheduled_end   : '';
+
+    $this->wiwts_sync_store_time_flags(
+        (int) $entry->wiw_time_id,
+        (string) $clock_in_str,
+        (string) $clock_out_str,
+        (string) $sched_start_local,
+        (string) $sched_end_local,
+        $tz
+    );
+} catch ( Exception $e ) {
+    // Do not fail the edit if flags calculation fails
+}
 
     if ( false === $updated ) {
         wp_send_json_error( array( 'message' => 'Database update failed for entry.' ) );
