@@ -1406,68 +1406,156 @@ if (resp.data.payable_hours_display) {
         return;
     }
 
-    // No specific ID selected: show list of headers
-    $headers = $wpdb->get_results(
-        "SELECT * FROM {$table_timesheets} 
-         ORDER BY week_start_date DESC, employee_name ASC, location_name ASC 
-         LIMIT 200"
-    );
+    // No specific ID selected: show list of headers (GROUPED like main dashboard)
+$headers = $wpdb->get_results(
+    "SELECT * FROM {$table_timesheets}
+     ORDER BY employee_name ASC, week_start_date DESC, location_name ASC
+     LIMIT 500"
+);
 
-    if ( empty( $headers ) ) : ?>
-        <div class="notice notice-warning">
-            <p>No local timesheets found. Visit the main WIW Timesheets Dashboard to fetch and sync data.</p>
-        </div>
-    <?php else : ?>
-        <table class="wp-list-table widefat fixed striped">
-            <thead>
-<tr>
-    <th width="6%">ID</th>
-    <th width="16%">Week of</th>
-    <th width="18%">Employee</th>
-    <th width="20%">Location</th>
-    <th width="10%">Break (Min)</th>
-    <th width="10%">Sched. Hrs</th>
-    <th width="10%">Clocked Hrs</th>
+if ( empty( $headers ) ) : ?>
+    <div class="notice notice-warning">
+        <p>No local timesheets found. Visit the main WIW Timesheets Dashboard to fetch and sync data.</p>
+    </div>
+<?php else :
 
-    <!-- NEW -->
-    <th width="10%">Payable Hrs</th>
+    // Precompute Break totals + Payable totals per timesheet_id (fast, avoids per-row queries)
+    $ids = array_map( static function( $r ) { return (int) $r->id; }, $headers );
+    $ids = array_filter( $ids );
 
-    <th width="10%">Status</th>
-    <th width="6%">View</th>
-</tr>
+    $totals_map = array(); // [timesheet_id] => ['break_total' => int, 'payable_total' => float]
+    if ( ! empty( $ids ) ) {
+        $in = implode( ',', array_map( 'absint', $ids ) );
 
-            </thead>
-            <tbody>
-                <?php foreach ( $headers as $row ) :
-                    $break_total = (int) $wpdb->get_var(
-                        $wpdb->prepare(
-                            "SELECT COALESCE(SUM(break_minutes), 0) 
-                             FROM {$table_timesheet_entries} 
-                             WHERE timesheet_id = %d",
-                            (int) $row->id
-                        )
-                    );
+        // NOTE: payable_hours column must exist; if not, MySQL will error.
+        // If you haven’t added payable_hours yet, tell me and I’ll provide a safe fallback query.
+        $rows = $wpdb->get_results(
+            "SELECT timesheet_id,
+                    COALESCE(SUM(break_minutes), 0) AS break_total,
+                    COALESCE(SUM(payable_hours), 0) AS payable_total
+             FROM {$table_timesheet_entries}
+             WHERE timesheet_id IN ({$in})
+             GROUP BY timesheet_id"
+        );
 
-                    // NEW: total payable (falls back to total clocked if payable column not populated yet)
-                    $payable_total = $wpdb->get_var(
-                        $wpdb->prepare(
-                            "SELECT COALESCE(SUM(payable_hours), 0)
-                             FROM {$table_timesheet_entries}
-                             WHERE timesheet_id = %d",
-                            (int) $row->id
-                        )
-                    );
-                    if ( $payable_total === null ) {
-                        $payable_total = 0;
-                    }
+        foreach ( (array) $rows as $t ) {
+            $tid = (int) ( $t->timesheet_id ?? 0 );
+            if ( ! $tid ) { continue; }
+            $totals_map[ $tid ] = array(
+                'break_total'   => (int) ( $t->break_total ?? 0 ),
+                'payable_total' => (float) ( $t->payable_total ?? 0 ),
+            );
+        }
+    }
+
+    // Group by Employee -> Week Start
+    $grouped = array();
+    foreach ( $headers as $row ) {
+        $emp  = (string) ( $row->employee_name ?? 'Unknown' );
+        $week = (string) ( $row->week_start_date ?? '' );
+        if ( $week === '' ) { continue; }
+
+        if ( ! isset( $grouped[ $emp ] ) ) {
+            $grouped[ $emp ] = array();
+        }
+        if ( ! isset( $grouped[ $emp ][ $week ] ) ) {
+            $grouped[ $emp ][ $week ] = array(
+                'rows' => array(),
+            );
+        }
+
+        $grouped[ $emp ][ $week ]['rows'][] = $row;
+    }
+
+    ?>
+    <table class="wp-list-table widefat fixed striped">
+        <thead>
+            <tr>
+                <th width="6%">ID</th>
+                <th width="16%">Week of</th>
+                <th width="18%">Employee</th>
+                <th width="20%">Location</th>
+                <th width="10%">Break (Min)</th>
+                <th width="10%">Sched. Hrs</th>
+                <th width="10%">Clocked Hrs</th>
+                <th width="10%">Payable Hrs</th>
+                <th width="10%">Status</th>
+                <th width="6%">View</th>
+            </tr>
+        </thead>
+
+        <tbody>
+        <?php
+        foreach ( $grouped as $employee_name => $weeks ) :
+
+            // Employee header row
+            ?>
+            <tr class="wiw-employee-header">
+                <td colspan="10" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                    👤 Employee: <?php echo esc_html( $employee_name ); ?>
+                </td>
+            </tr>
+            <?php
+
+            foreach ( $weeks as $week_start => $bundle ) :
+
+                // Sort rows by location name (consistent grouping)
+                usort( $bundle['rows'], static function( $a, $b ) {
+                    $la = (string) ( $a->location_name ?? '' );
+                    $lb = (string) ( $b->location_name ?? '' );
+                    return strcasecmp( $la, $lb );
+                } );
+
+                // Week totals (sum across all locations for this employee+week)
+                $week_end = '';
+                if ( ! empty( $bundle['rows'][0]->week_end_date ) ) {
+                    $week_end = (string) $bundle['rows'][0]->week_end_date;
+                } else {
+                    $week_end = date( 'Y-m-d', strtotime( $week_start . ' +4 days' ) );
+                }
+
+                $week_break   = 0;
+                $week_sched   = 0.0;
+                $week_clocked = 0.0;
+                $week_payable = 0.0;
+
+                foreach ( $bundle['rows'] as $r ) {
+                    $tid = (int) ( $r->id ?? 0 );
+                    $week_sched   += (float) ( $r->total_scheduled_hours ?? 0 );
+                    $week_clocked += (float) ( $r->total_clocked_hours ?? 0 );
+
+                    $week_break   += (int) ( $totals_map[ $tid ]['break_total'] ?? 0 );
+                    $week_payable += (float) ( $totals_map[ $tid ]['payable_total'] ?? 0 );
+                }
+
+                // Week header row
+                ?>
+                <tr class="wiw-period-total">
+                    <td colspan="4" style="background-color: #f0f0ff; font-weight: bold;">
+                        📅 Week of: <?php echo esc_html( $week_start ); ?> to <?php echo esc_html( $week_end ); ?>
+                    </td>
+                    <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( (int) $week_break ); ?></td>
+                    <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( number_format( (float) $week_sched, 2 ) ); ?></td>
+                    <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( number_format( (float) $week_clocked, 2 ) ); ?></td>
+                    <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( number_format( (float) $week_payable, 2 ) ); ?></td>
+                    <td colspan="2" style="background-color: #f0f0ff;"></td>
+                </tr>
+                <?php
+
+                // Location rows (each is a local timesheet header)
+                foreach ( $bundle['rows'] as $row ) :
+                    $tid = (int) ( $row->id ?? 0 );
+
+                    $break_total   = (int) ( $totals_map[ $tid ]['break_total'] ?? 0 );
+                    $payable_total = (float) ( $totals_map[ $tid ]['payable_total'] ?? 0 );
 
                     $detail_url = add_query_arg(
-                        array( 'timesheet_id' => (int) $row->id ),
+                        array( 'timesheet_id' => $tid ),
                         menu_page_url( 'wiw-local-timesheets', false )
                     );
                     ?>
                     <tr>
-                        <td><?php echo esc_html( $row->id ); ?></td>
+                        <td><?php echo esc_html( $tid ); ?></td>
                         <td>
                             <?php echo esc_html( $row->week_start_date ); ?>
                             <?php if ( ! empty( $row->week_end_date ) ) : ?>
@@ -1484,22 +1572,25 @@ if (resp.data.payable_hours_display) {
                         <td><?php echo esc_html( $break_total ); ?></td>
                         <td><?php echo esc_html( number_format( (float) $row->total_scheduled_hours, 2 ) ); ?></td>
                         <td><?php echo esc_html( number_format( (float) $row->total_clocked_hours, 2 ) ); ?></td>
-
-                        <!-- NEW -->
                         <td><?php echo esc_html( number_format( (float) $payable_total, 2 ) ); ?></td>
-
                         <td><?php echo esc_html( $row->status ); ?></td>
                         <td>
                             <a href="<?php echo esc_url( $detail_url ); ?>" class="button button-small">View</a>
                         </td>
                     </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    <?php endif; ?>
+                    <?php
+                endforeach;
 
-    </div><!-- .wrap -->
-    <?php
+            endforeach;
+
+        endforeach;
+        ?>
+        </tbody>
+    </table>
+<?php endif; ?>
+
+</div><!-- .wrap -->
+<?php
 }
 
 /**
