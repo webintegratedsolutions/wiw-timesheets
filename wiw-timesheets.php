@@ -1053,15 +1053,15 @@ if ( ! empty( $wiw_ids ) ) {
                             <tr>
                                 <th width="10%">Date</th>
                                 <th width="12%">Time Record ID</th>
-                                <th width="18%">Scheduled Start/End</th>
-                                <th width="12%">Clock In</th>
-                                <th width="12%">Clock Out</th>
+                                <th width="17%">Scheduled Start/End</th>
+                                <th width="10%">Clock In</th>
+                                <th width="10%">Clock Out</th>
                                 <th width="10%">Break (min)</th>
                                 <th width="10%">Sched. Hrs</th>
                                 <th width="10%">Clocked Hrs</th>
                                 <th width="10%">Payable Hrs</th>
-                                <th width="6%">Status</th>
-                                <th width="6%">Actions</th>
+                                <th width="7%">Status</th>
+                                <th width="10%">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1129,9 +1129,31 @@ $is_approved  = ( strtolower( $entry_status ) === 'approved' );
 
 // Flags data already prepared above
 $wiw_time_id_for_flags = (int) ( $entry->wiw_time_id ?? 0 );
+
+// Safe access to flags for this entry
 $row_flags            = isset( $flags_map[ $wiw_time_id_for_flags ] ) ? (array) $flags_map[ $wiw_time_id_for_flags ] : array();
 $flags_count          = count( $row_flags );
 $flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
+
+// === WIWTS APPROVE COLOR BY FLAGS ICON LOGIC START ===
+$has_active_flags = false;
+
+if ( $flags_count ) {
+    foreach ( $row_flags as $fr ) {
+        $status_raw = isset( $fr->flag_status ) ? (string) $fr->flag_status : '';
+        $status     = strtolower( trim( $status_raw ) );
+
+        if ( $status !== 'resolved' ) {
+            $has_active_flags = true;
+            break;
+        }
+    }
+}
+
+$approve_bg   = $has_active_flags ? '#dba617' : '#46b450';
+$approve_bord = $approve_bg;
+// === WIWTS APPROVE COLOR BY FLAGS ICON LOGIC END ===
+
 ?>
 
 <?php if ( ! $is_approved ) : ?>
@@ -1141,18 +1163,18 @@ $flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
         Edit
     </button>
 
-    <button type="button"
-            class="button button-small wiw-local-approve-entry"
-            data-entry-id="<?php echo esc_attr( $entry->id ); ?>"
-            style="margin-top:6px;background:#46b450;border-color:#46b450;color:#fff;">
-        Approve
-    </button>
+<button type="button"
+        class="button button-small wiw-local-approve-entry"
+        data-entry-id="<?php echo esc_attr( $entry->id ); ?>"
+        style="margin-top:6px;background:<?php echo esc_attr( $approve_bg ); ?>;border-color:<?php echo esc_attr( $approve_bord ); ?>;color:#fff;">
+    Approve Week
+</button>
 <?php else : ?>
     <button type="button"
             class="button button-small wiw-local-approve-entry wiw-local-approved"
             disabled="disabled"
             style="margin-top:0;background:#2271b1;border-color:#2271b1;color:#fff;opacity:1;cursor:default;">
-        Approved
+        Week Approved
     </button>
 <?php endif; ?>
 
@@ -1172,7 +1194,10 @@ $flags_count          = count( $row_flags );
 $has_active = false;
 if ( $flags_count ) {
     foreach ( $row_flags as $fr ) {
-        if ( isset( $fr->flag_status ) && $fr->flag_status !== 'resolved' ) {
+        $status_raw = isset( $fr->flag_status ) ? (string) $fr->flag_status : '';
+        $status     = strtolower( trim( $status_raw ) );
+if ( $status !== 'resolved' ) {
+
             $has_active = true;
             break;
         }
@@ -1394,7 +1419,7 @@ $(document).on('click', '.wiw-local-toggle-logs', function(e) {
     // ✅ Force refresh so flags + edit logs update
     setTimeout(function () {
         window.location.reload();
-    }, 300);
+    }, 100);
 
 }).fail(function() {
                                 alert('AJAX error updating entry.');
@@ -1415,9 +1440,31 @@ jQuery(document).on('click', '.wiw-local-approve-entry', function(e) {
     var entryId = $btn.data('entry-id');
     if (!entryId) return;
 
-    if (!window.confirm('Approve this time record? This will finalize the record until Reset from API is used.')) {
-        return;
+// Build confirmation message
+var confirmMsg = 'Approve this time record?\n\nThis will finalize the record until Reset from API is used.';
+
+// 🔎 Check for active flags in the flags details row
+var flagsRowId = 'wiw-local-flags-' + entryId;
+var $flagsRow  = jQuery('#' + flagsRowId);
+
+if ($flagsRow.length) {
+    var activeFlags = [];
+
+    $flagsRow.find('li').each(function () {
+        var text = jQuery(this).text();
+        if (text.toLowerCase().includes('(active)')) {
+            activeFlags.push('• ' + text.replace(/\s*\(active\)\s*/i, '').trim());
+        }
+    });
+
+    if (activeFlags.length) {
+        confirmMsg += '\n\n⚠️ ACTIVE FLAGS DETECTED:\n' + activeFlags.join('\n');
     }
+}
+
+if (!window.confirm(confirmMsg)) {
+    return;
+}
 
     jQuery.post(ajaxurl, {
         action: 'wiw_local_approve_entry',
