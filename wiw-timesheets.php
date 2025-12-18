@@ -1084,6 +1084,21 @@ $wiw_time_id_for_flags = (int) ( $entry->wiw_time_id ?? 0 );
 $row_flags            = isset( $flags_map[ $wiw_time_id_for_flags ] ) ? (array) $flags_map[ $wiw_time_id_for_flags ] : array();
 $flags_count          = count( $row_flags );
 $flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
+// If there are flags and NONE are active, show an affirming icon.
+$has_active = false;
+if ( $flags_count ) {
+    foreach ( $row_flags as $fr ) {
+        if ( isset( $fr->flag_status ) && $fr->flag_status !== 'resolved' ) {
+            $has_active = true;
+            break;
+        }
+    }
+}
+
+$flags_icon = '🚩';
+if ( $flags_count && ! $has_active ) {
+    $flags_icon = '✅';
+}
 ?>
 
 <button type="button"
@@ -1102,7 +1117,7 @@ $flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
         class="button button-small wiw-local-toggle-flags"
         data-target="<?php echo esc_attr( $flags_row_id ); ?>"
         <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>>
-    ⚠️ Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
+    <?php echo esc_html( $flags_icon ); ?> Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
 </button>
     </td>
     <td colspan="10"></td>
@@ -1553,9 +1568,10 @@ public function handle_reset_local_timesheet() {
         exit;
     }
 
-    $table_headers = $wpdb->prefix . 'wiw_timesheets';
-    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
-    $table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+$table_headers = $wpdb->prefix . 'wiw_timesheets';
+$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+$table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+$table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
 
     $header = $wpdb->get_row(
         $wpdb->prepare( "SELECT * FROM {$table_headers} WHERE id = %d", $timesheet_id )
@@ -1799,7 +1815,16 @@ public function handle_reset_local_timesheet() {
     }
     unset( $time_entry );
 
-    // 5) Delete entries + reset header totals/status
+    // 5) Purge flags for any WIW time IDs we are about to restore (prevents stale resolved/active flags)
+$purge_ids = array_unique( array_merge( array_keys( (array) $before_map ), array_keys( (array) $reset_map ) ) );
+$purge_ids = array_values( array_filter( array_map( 'absint', (array) $purge_ids ) ) );
+
+if ( ! empty( $purge_ids ) ) {
+    $in = implode( ',', $purge_ids );
+    $wpdb->query( "DELETE FROM {$table_flags} WHERE wiw_time_id IN ({$in})" );
+}
+
+// 6) Delete entries + reset header totals/status
     $wpdb->delete( $table_entries, array( 'timesheet_id' => $timesheet_id ), array( '%d' ) );
 
     $wpdb->update(
