@@ -35,13 +35,26 @@ if ( ! function_exists( 'wiw_render_client_portal' ) ) {
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ( $timesheets as $row ) : ?>
-                            <tr>
-                                <td style="padding: 8px; border-bottom: 1px solid #eee;"><?php echo esc_html( $row->date ); ?></td>
-                                <td style="padding: 8px; border-bottom: 1px solid #eee;"><?php echo esc_html( $row->employee_name ); ?></td>
-                                <td style="padding: 8px; border-bottom: 1px solid #eee;"><?php echo esc_html( $row->status ); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
+<?php
+// 4. Render Rows
+foreach ( $timesheets as $row ) : ?>
+    <tr>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;"><?php echo esc_html( $row->date ); ?></td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;"><?php echo esc_html( $row->employee_name ); ?></td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">
+            <?php if ( strtolower($row->status) === 'approved' ) : ?>
+                <span style="color: green; font-weight: bold;">Approved</span>
+            <?php else : ?>
+                <form method="POST" style="display:inline;">
+                    <?php wp_nonce_field( 'wiw_approve_' . $row->id, 'wiw_nonce' ); ?>
+                    <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( $row->id ); ?>">
+                    <input type="hidden" name="wiw_action" value="approve_timesheet">
+                    <button type="submit" class="button" style="cursor:pointer;">Approve</button>
+                </form>
+            <?php endif; ?>
+        </td>
+    </tr>
+<?php endforeach; 
                     </tbody>
                 </table>
             <?php endif; ?>
