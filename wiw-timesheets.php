@@ -1895,6 +1895,9 @@ public function ajax_local_update_entry() {
 
     $clocked_hours = round( $seconds / 3600, 2 );
 
+    // ✅ Step 1 rule: payable_hours ALWAYS mirrors clocked_hours
+    $payable_hours = round( (float) $clocked_hours, 2 );
+
     $clock_in_str  = $dt_in->format( 'Y-m-d H:i:s' );
     $clock_out_str = $dt_out->format( 'Y-m-d H:i:s' );
     $now           = current_time( 'mysql' );
@@ -1979,14 +1982,15 @@ public function ajax_local_update_entry() {
     $updated = $wpdb->update(
         $table_entries,
         array(
-            'clock_in'      => $clock_in_str,
-            'clock_out'     => $clock_out_str,
-            'break_minutes' => (int) $break_minutes,
-            'clocked_hours' => $clocked_hours,
-            'updated_at'    => $now,
+            'clock_in'       => $clock_in_str,
+            'clock_out'      => $clock_out_str,
+            'break_minutes'  => (int) $break_minutes,
+            'clocked_hours'  => $clocked_hours,
+            'payable_hours'  => $payable_hours, // ✅ keep in lockstep
+            'updated_at'     => $now,
         ),
         array( 'id' => $entry_id ),
-        array( '%s', '%s', '%d', '%f', '%s' ),
+        array( '%s', '%s', '%d', '%f', '%f', '%s' ),
         array( '%d' )
     );
 
@@ -2014,12 +2018,11 @@ public function ajax_local_update_entry() {
 
     wp_send_json_success(
         array(
-            // IMPORTANT: these are now the formatted strings for display
             'clock_in_display'             => $clock_in_display,
             'clock_out_display'            => $clock_out_display,
-
             'break_minutes_display'        => (string) (int) $break_minutes,
             'clocked_hours_display'        => number_format( $clocked_hours, 2 ),
+            'payable_hours_display'        => number_format( $payable_hours, 2 ), // ✅ NEW
             'header_total_clocked_display' => number_format( $total_clocked, 2 ),
         )
     );
