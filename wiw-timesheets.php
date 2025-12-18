@@ -1374,11 +1374,17 @@ $logs_row_id         = 'wiw-local-logs-' . (int) $entry->id;
 <li>
     <strong><?php echo esc_html( (string) ( $fr->flag_type ?? '' ) ); ?></strong>
     — <?php
-        $status = ( isset( $fr->flag_status ) && $fr->flag_status === 'resolved' ) ? 'resolved' : 'active';
-        $color  = ( $status === 'resolved' ) ? 'green' : 'orange';
+$status_raw = ( isset( $fr->flag_status ) && $fr->flag_status === 'resolved' ) ? 'resolved' : 'active';
 
-        echo esc_html( (string) ( $fr->description ?? '' ) )
-            . ' <span style="font-weight:600;color:' . esc_attr( $color ) . ';">(' . esc_html( $status ) . ')</span>';
+// Display label mapping
+$status_label = ( $status_raw === 'resolved' ) ? 'resolved' : 'unresolved';
+$color        = ( $status_raw === 'resolved' ) ? 'green' : 'orange';
+
+echo esc_html( (string) $fr->description ) .
+     ' <span style="font-weight:600;color:' . esc_attr( $color ) . ';">(' .
+     esc_html( $status_label ) .
+     ')</span>';
+
     ?>
 </li>
                     <?php endforeach; ?>
