@@ -913,6 +913,33 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                 </form>
 
                 <h2>Timesheet #<?php echo esc_html( $header->id ); ?> Details</h2>
+                <?php
+// === WIWTS SIGN-OFF ELIGIBILITY CHECK START ===
+$all_entries_approved = true;
+
+$entry_statuses = $wpdb->get_col(
+    $wpdb->prepare(
+        "SELECT status
+         FROM {$table_timesheet_entries}
+         WHERE timesheet_id = %d",
+        (int) $header->id
+    )
+);
+
+// If there are no entries, or any non-approved entry, disable sign off
+if ( empty( $entry_statuses ) ) {
+    $all_entries_approved = false;
+} else {
+    foreach ( $entry_statuses as $st ) {
+        if ( strtolower( (string) $st ) !== 'approved' ) {
+            $all_entries_approved = false;
+            break;
+        }
+    }
+}
+// === WIWTS SIGN-OFF ELIGIBILITY CHECK END ===
+?>
+
                 <table class="widefat striped" style="max-width: 900px;">
                     <tbody>
                         <tr>
@@ -980,13 +1007,19 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
     <td>
         <button type="button"
                 class="button button-primary wiw-timesheet-signoff"
-                disabled="disabled"
-                title="Sign off functionality coming soon">
+                <?php echo $all_entries_approved ? '' : 'disabled="disabled"'; ?>
+                style="<?php echo $all_entries_approved ? '' : 'opacity:0.6;cursor:not-allowed;'; ?>"
+                title="<?php echo $all_entries_approved
+                    ? 'All time records approved'
+                    : 'All daily records must be approved before sign off'; ?>">
             Sign Off
         </button>
-        <p style="margin:6px 0 0;color:#666;font-size:12px;">
-            Final approval step (coming soon)
-        </p>
+
+        <?php if ( ! $all_entries_approved ) : ?>
+            <p style="margin:6px 0 0;color:#666;font-size:12px;">
+                All daily records must be approved before sign off
+            </p>
+        <?php endif; ?>
     </td>
 </tr>
 
