@@ -46,6 +46,9 @@ require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 // Include the data functions
 require_once WIW_PLUGIN_PATH . 'includes/data-functions.php';
 
+// Include the shortcodes
+require_once WIW_PLUGIN_PATH . 'includes/shortcodes.php';
+
 
 /**
 * Core Plugin Class
