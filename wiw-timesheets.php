@@ -1146,7 +1146,7 @@ $logs_row_id = 'wiw-local-logs-' . (int) $entry->id;
         class="button button-small wiw-local-toggle-flags"
         data-target="<?php echo esc_attr( $flags_row_id ); ?>"
         <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>>
-    Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
+    <?php echo esc_html( $flags_icon ); ?> Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
 </button>
 
 <?php
