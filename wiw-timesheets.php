@@ -1342,8 +1342,12 @@ if ( $flags_count && ! $has_active ) {
         data-target="<?php echo esc_attr( $flags_row_id ); ?>"
         <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>
         aria-label="<?php echo esc_attr( $flags_count ? 'View flags' : 'No flags' ); ?>">
-    <?php echo esc_html( $flags_icon ); ?>
-    Flags<?php echo $flags_count ? ' (' . (int) $flags_count . ')' : ''; ?>
+    <?php if ( $flags_count ) : ?>
+        <?php echo esc_html( $flags_icon ); ?>
+        Flags (<?php echo (int) $flags_count; ?>)
+    <?php else : ?>
+        No Flags
+    <?php endif; ?>
 </button>
 
 <?php
