@@ -105,14 +105,28 @@ trait WIW_Timesheet_Helpers_Trait {
                 $dt = new DateTime( $start_utc, new DateTimeZone( 'UTC' ) );
                 $dt->setTimezone( $wp_tz );
 
-                $dayN = (int) $dt->format( 'N' );
-                $days = ( $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
+// Biweekly pay period start (Sunday) anchored to 2025-12-07.
+$anchor = new DateTime( '2025-12-07 00:00:00', $wp_tz );
 
-                if ( $days !== 0 ) {
-                    $dt->modify( "{$days} days" );
-                }
+// Find the Sunday of the current week for this entry date.
+$dayN = (int) $dt->format( 'N' ); // 1=Mon..7=Sun
+$days_back_to_sunday = ( $dayN % 7 ); // Sun(7)->0, Mon(1)->1, ...
+if ( $days_back_to_sunday !== 0 ) {
+	$dt->modify( "-{$days_back_to_sunday} days" );
+}
+$week_sunday = $dt->format( 'Y-m-d' );
 
-                $week_start = $dt->format( 'Y-m-d' );
+// Snap Sunday to the correct biweekly boundary relative to the anchor.
+$dt_sun = new DateTime( $week_sunday . ' 00:00:00', $wp_tz );
+$diff_days = (int) floor( ( $dt_sun->getTimestamp() - $anchor->getTimestamp() ) / DAY_IN_SECONDS );
+$mod = $diff_days % 14;
+if ( $mod < 0 ) {
+	$mod += 14;
+}
+$dt_sun->modify( '-' . $mod . ' days' );
+
+$week_start = $dt_sun->format( 'Y-m-d' );
+
             } catch ( Exception $e ) {
                 continue;
             }

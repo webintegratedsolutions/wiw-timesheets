@@ -43,9 +43,6 @@ require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
-// Include the client portal shortcode
-require_once WIW_PLUGIN_PATH . 'includes/shortcodes/class-wiwts-client-portal-shortcode.php';
-
 
 /**
 * Core Plugin Class
@@ -538,12 +535,12 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                             <?php
 
                             foreach ($periods as $period_start_date => $period_data) :
-                                $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
+                                $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 13 days'));
                                 $total_scheduled_hours = number_format($period_data['total_clocked_hours'] ?? 0.0, 2);
                                 ?>
                                 <tr class="wiw-period-total">
                                     <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
-                                        📅 Week of: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
+                                        📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                     </td>
                                     <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_scheduled_hours; ?></td>
                                     <td style="background-color: #f0f0ff;"></td>
@@ -2652,112 +2649,6 @@ public function handle_finalize_local_timesheet() {
     wp_safe_redirect( add_query_arg( 'finalize_success', '1', $redirect_back ) );
     exit;
 }
-
-// === WIWTS APPROVE TIME RECORD HANDLER ADD START ===
-public function ajax_local_approve_entry() {
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
-    }
-
-    check_ajax_referer( 'wiw_local_approve_entry', 'security' );
-
-    global $wpdb;
-
-    $entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
-    if ( ! $entry_id ) {
-        wp_send_json_error( array( 'message' => 'Invalid entry ID.' ) );
-    }
-
-    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
-    $table_headers = $wpdb->prefix . 'wiw_timesheets';
-
-    $entry = $wpdb->get_row(
-        $wpdb->prepare(
-            "SELECT * FROM {$table_entries} WHERE id = %d",
-            $entry_id
-        )
-    );
-
-    if ( ! $entry ) {
-        wp_send_json_error( array( 'message' => 'Entry not found.' ) );
-    }
-
-    $old_status = (string) ( $entry->status ?? 'pending' );
-    if ( strtolower( $old_status ) === 'approved' ) {
-        wp_send_json_success(
-            array(
-                'message' => 'Already approved.',
-                'status'  => 'approved',
-            )
-        );
-    }
-
-    $timesheet_id = (int) ( $entry->timesheet_id ?? 0 );
-    if ( ! $timesheet_id ) {
-        wp_send_json_error( array( 'message' => 'Timesheet ID missing for entry.' ) );
-    }
-
-    $header = $wpdb->get_row(
-        $wpdb->prepare(
-            "SELECT * FROM {$table_headers} WHERE id = %d",
-            $timesheet_id
-        )
-    );
-
-    if ( ! $header ) {
-        wp_send_json_error( array( 'message' => 'Timesheet header not found.' ) );
-    }
-
-    if ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ) {
-        wp_send_json_error( array( 'message' => 'This timesheet has been finalized. Approvals are not allowed.' ), 403 );
-    }
-
-    $now = current_time( 'mysql' );
-
-    $updated = $wpdb->update(
-        $table_entries,
-        array(
-            'status'     => 'approved',
-            'updated_at' => $now,
-        ),
-        array( 'id' => $entry_id ),
-        array( '%s', '%s' ),
-        array( '%d' )
-    );
-
-    if ( false === $updated ) {
-        wp_send_json_error( array( 'message' => 'Database update failed for approval.' ) );
-    }
-
-    // Log approval in edit logs
-    $current_user = wp_get_current_user();
-
-    $this->insert_local_edit_log( array(
-        'timesheet_id'           => (int) $timesheet_id,
-        'entry_id'               => (int) $entry_id,
-        'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
-        'edit_type'              => 'Approved Time Record',
-        'old_value'              => (string) $old_status,
-        'new_value'              => 'approved',
-        'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
-        'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
-        'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
-        'employee_id'            => (int) ( $header->employee_id ?? 0 ),
-        'employee_name'          => (string) ( $header->employee_name ?? '' ),
-        'location_id'            => (int) ( $header->location_id ?? 0 ),
-        'location_name'          => (string) ( $header->location_name ?? '' ),
-        'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
-        'created_at'             => $now,
-    ) );
-
-    wp_send_json_success(
-        array(
-            'message' => 'Time record approved.',
-            'status'  => 'approved',
-        )
-    );
-}
-// === WIWTS APPROVE TIME RECORD HANDLER ADD END ===
 
 }
 

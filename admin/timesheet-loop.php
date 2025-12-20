@@ -17,7 +17,7 @@ if ( empty( $employee_data ) ) : ?>
         </tr>
 
         <?php foreach ( $periods as $period_start_date => $period_data ) :
-            $period_end_date  = date( 'Y-m-d', strtotime( $period_start_date . ' + 4 days' ) );
+            $period_end_date = date( 'Y-m-d', strtotime( $period_start_date . ' + 13 days' ) );
             $total_clocked    = number_format( $period_data['total_clocked_hours'] ?? 0.0, 2 );
             $total_scheduled  = number_format( $period_data['total_scheduled_hours'] ?? 0.0, 2 );
             ?>
@@ -25,7 +25,7 @@ if ( empty( $employee_data ) ) : ?>
             <!-- WEEK TOTAL ROW -->
             <tr class="wiw-period-total">
                 <td colspan="5" style="background-color: #f0f0ff; font-weight: bold;">
-                    📅 Week of: <?php echo esc_html( $period_start_date ); ?> to <?php echo esc_html( $period_end_date ); ?>
+                    📅 Pay Period: <?php echo esc_html( $period_start_date ); ?> to <?php echo esc_html( $period_end_date ); ?>
                 </td>
 
                 <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( $total_scheduled ); ?></td>
