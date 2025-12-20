@@ -1619,7 +1619,7 @@ jQuery(document).on('click', '.wiw-local-approve-entry', function(e) {
     if (!entryId) return;
 
 // Build confirmation message
-var confirmMsg = 'Approve this time record?\n\nThis will finalize the record until Reset from API is used.';
+var confirmMsg = 'Approve this time record?\n\nThis will finalize the record.';
 
 // 🔎 Check for active flags in the flags details row
 var flagsRowId = 'wiw-local-flags-' + entryId;
