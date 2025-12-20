@@ -370,10 +370,10 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                                 <tr><th scope="row">Employee Name</th><td>Name retrieved from users data.</td></tr>
                                 <tr><th scope="row">Location</th><td>Assigned Location retrieved from the corresponding shift record.</td></tr>
                                 <tr><th scope="row">Scheduled Shift</th><td>Scheduled Start - End Time (local timezone). Shows N/A if no shift is linked.</td></tr>
-                                <tr><th scope="row">Hrs Scheduled</th><td>Total Scheduled Hours. Week of totals aggregate this value.</td></tr>
+                                <tr><th scope="row">Hrs Scheduled</th><td>Total Scheduled Hours. Pay period of totals aggregate this value.</td></tr>
                                 <tr><th scope="row">Clock In / Out</th><td>Actual Clock In/Out Time (local timezone). Clock Out shows Active (N/A) if the shift is open.</td></tr>
                                 <tr><th scope="row">Breaks (Min -)</th><td>Time deducted for breaks, derived from the break_hours raw data converted to minutes.</td></tr>
-                                <tr><th scope="row">Hrs Clocked</th><td>Total Clocked Hours. Week of totals aggregate this value.</td></tr>
+                                <tr><th scope="row">Hrs Clocked</th><td>Total Clocked Hours. Pay period of totals aggregate this value.</td></tr>
                                 <tr><th scope="row">Status</th><td>Approval status: Pending or Approved.</td></tr>
                                 <tr><th scope="row">Actions</th><td>Interactive options (Data and Edit/Approve).</td></tr>
                             </tbody>
@@ -1115,7 +1115,7 @@ $signoff_enabled = ( ! $is_timesheet_approved && $total_count > 0 && $unapproved
             <?php if ( $signoff_enabled ) : ?>
                 <button type="submit"
                         class="button button-primary"
-                        onclick="return confirm('Sign off this timesheet?\n\nOnce signed off, changes can no longer be made to any time records for this timesheet week.');">
+                        onclick="return confirm('Sign off this timesheet?\n\nOnce signed off, changes can no longer be made to any time records for this pay period.');">
                     Sign Off
                 </button>
             <?php else : ?>
@@ -1342,7 +1342,7 @@ $approve_bord = $approve_bg;
             class="button button-small wiw-local-approve-entry wiw-local-approved"
             disabled="disabled"
             style="margin-top:0;background:#2271b1;border-color:#2271b1;color:#fff;opacity:1;cursor:default;">
-        Week Approved
+        Pay Period Approved
     </button>
 <?php endif; ?>
 
@@ -1777,7 +1777,7 @@ $totals_map[ $tid ] = array(
                 <thead>
 <tr>
     <th width="2%">ID</th>
-    <th width="13%">Week of</th>
+    <th width="13%">Pay Period</th>
     <th width="6%">Date</th>
 
     <th width="11%">Sched. Start/End</th>
@@ -2546,6 +2546,112 @@ wp_send_json_success(
         'header_total_clocked_display' => number_format( $total_clocked, 2 ),
     )
 );
+}
+
+public function ajax_local_approve_entry() {
+    // Capability
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
+    }
+
+    // Nonce
+    check_ajax_referer( 'wiw_local_approve_entry', 'security' );
+
+    global $wpdb;
+
+    $entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+    if ( ! $entry_id ) {
+        wp_send_json_error( array( 'message' => 'Invalid entry ID.' ), 400 );
+    }
+
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_headers = $wpdb->prefix . 'wiw_timesheets';
+
+    // Load entry
+    $entry = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$table_entries} WHERE id = %d",
+            $entry_id
+        )
+    );
+
+    if ( ! $entry ) {
+        wp_send_json_error( array( 'message' => 'Entry not found.' ), 404 );
+    }
+
+    $timesheet_id = (int) ( $entry->timesheet_id ?? 0 );
+    if ( ! $timesheet_id ) {
+        wp_send_json_error( array( 'message' => 'Timesheet ID missing on entry.' ), 400 );
+    }
+
+    // Load header
+    $header = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$table_headers} WHERE id = %d",
+            $timesheet_id
+        )
+    );
+
+    if ( ! $header ) {
+        wp_send_json_error( array( 'message' => 'Timesheet header not found.' ), 404 );
+    }
+
+    // Prevent changes if finalized
+    if ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ) {
+        wp_send_json_error( array( 'message' => 'This timesheet has been finalized. Changes are not allowed.' ), 403 );
+    }
+
+    $old_status = strtolower( (string) ( $entry->status ?? 'pending' ) );
+    if ( $old_status === 'approved' ) {
+        wp_send_json_success( array( 'message' => 'Entry already approved.' ) );
+    }
+
+    $now = current_time( 'mysql' );
+
+    // Approve the entry
+    $updated = $wpdb->update(
+        $table_entries,
+        array(
+            'status'     => 'approved',
+            'updated_at' => $now,
+        ),
+        array( 'id' => $entry_id ),
+        array( '%s', '%s' ),
+        array( '%d' )
+    );
+
+    if ( false === $updated ) {
+        wp_send_json_error( array( 'message' => 'Failed to approve entry in database.' ), 500 );
+    }
+
+    // Log the approval (optional but recommended for audit trail)
+    try {
+        $current_user = wp_get_current_user();
+
+        $this->insert_local_edit_log( array(
+            'timesheet_id'           => (int) $timesheet_id,
+            'entry_id'               => (int) $entry_id,
+            'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+            'edit_type'              => 'Approved Time Record',
+            'old_value'              => (string) ( $entry->status ?? 'pending' ),
+            'new_value'              => 'approved',
+            'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
+            'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
+            'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+            'employee_id'            => (int) ( $header->employee_id ?? 0 ),
+            'employee_name'          => (string) ( $header->employee_name ?? '' ),
+            'location_id'            => (int) ( $header->location_id ?? 0 ),
+            'location_name'          => (string) ( $header->location_name ?? '' ),
+            'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
+            'created_at'             => $now,
+        ) );
+    } catch ( Exception $e ) {
+        // Do not fail approval if logging fails
+    }
+
+    wp_send_json_success( array(
+        'message' => 'Entry approved.',
+    ) );
 }
 
 /**
