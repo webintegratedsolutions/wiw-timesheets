@@ -1814,11 +1814,12 @@ $totals_map[ $tid ] = array(
                         } );
 
                         $week_end = '';
-                        if ( ! empty( $bundle['rows'][0]->week_end_date ) ) {
-                            $week_end = (string) $bundle['rows'][0]->week_end_date;
-                        } else {
-                            $week_end = date( 'Y-m-d', strtotime( $week_start . ' +4 days' ) );
-                        }
+if ( ! empty( $bundle['rows'][0]->week_end_date ) ) {
+    $week_end = (string) $bundle['rows'][0]->week_end_date;
+} else {
+    // Biweekly fallback: Sunday + 13 days (second Saturday)
+    $week_end = date( 'Y-m-d', strtotime( $week_start . ' +13 days' ) );
+}
 
                         $week_break   = 0;
                         $week_sched   = 0.0;
@@ -1835,7 +1836,7 @@ $totals_map[ $tid ] = array(
                         ?>
                         <tr class="wiw-period-total">
                             <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
-                                📅 Week of: <?php echo esc_html( $week_start ); ?> to <?php echo esc_html( $week_end ); ?>
+                                📅 Pay Period: <?php echo esc_html( $week_start ); ?> to <?php echo esc_html( $week_end ); ?>
                             </td>
                             <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( (int) $week_break ); ?></td>
                             <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( number_format( (float) $week_sched, 2 ) ); ?></td>

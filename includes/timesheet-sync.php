@@ -333,21 +333,33 @@ if ( $clock_in_ts > ( $sched_start_ts + ( 15 * 60 ) ) ) {
             $location_id   = (int) ( $time_entry->location_id ?? 0 );
             $location_name = (string) ( $time_entry->location_name ?? '' );
 
-            // Parse start time and use local date for grouping.
-            try {
-                $dt_local = new DateTime( $start_time_raw );
-                $dt_local->setTimezone( $wp_timezone );
+// Parse start time and compute BIWEEKLY pay period start (Sunday) anchored to 2025-12-07.
+try {
+    $dt_local = new DateTime( $start_time_raw );
+    $dt_local->setTimezone( $wp_timezone );
 
-                $dayN = (int) $dt_local->format( 'N' ); // 1=Mon..7=Sun
-                $days = ( $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
-                if ( $days !== 0 ) {
-                    $dt_local->modify( "{$days} days" );
-                }
+    // Anchor: 2025-12-07 is a known pay period start (Sunday).
+    $anchor = new DateTime( '2025-12-07 00:00:00', $wp_timezone );
 
-                $week_start = $dt_local->format( 'Y-m-d' );
-            } catch ( Exception $e ) {
-                continue;
-            }
+    // 1) Move dt_local back to the Sunday of its week.
+    $dayN = (int) $dt_local->format( 'N' ); // 1=Mon..7=Sun
+    $days_back_to_sunday = ( $dayN % 7 );   // Sun(7)->0, Mon(1)->1, ...
+    if ( $days_back_to_sunday !== 0 ) {
+        $dt_local->modify( "-{$days_back_to_sunday} days" );
+    }
+
+    // 2) Snap that Sunday to the correct biweekly boundary relative to the anchor.
+    $diff_days = (int) floor( ( $dt_local->getTimestamp() - $anchor->getTimestamp() ) / DAY_IN_SECONDS );
+    $mod = $diff_days % 14;
+    if ( $mod < 0 ) { $mod += 14; }
+    if ( $mod !== 0 ) {
+        $dt_local->modify( '-' . $mod . ' days' );
+    }
+
+    $week_start = $dt_local->format( 'Y-m-d' );
+} catch ( Exception $e ) {
+    continue;
+}
 
             $key = "{$user_id}|{$week_start}|{$location_id}";
 
@@ -405,7 +417,7 @@ if ( $clock_in_ts > ( $sched_start_ts + ( 15 * 60 ) ) ) {
             $location_id     = $bundle['location_id'];
             $location_name   = $bundle['location_name'];
             $week_start_date = $bundle['week_start_date'];
-            $week_end_date   = date( 'Y-m-d', strtotime( $week_start_date . ' +4 days' ) );
+            $week_end_date = date( 'Y-m-d', strtotime( $week_start_date . ' +13 days' ) );
 
             $total_clocked_hours   = round( (float) $bundle['total_clocked_hours'], 2 );
             $total_scheduled_hours = round( (float) $bundle['total_scheduled_hours'], 2 );
