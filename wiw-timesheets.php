@@ -323,7 +323,7 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                 ?>
                 <div class="notice notice-success"><p>✅ Timesheet data fetched successfully!</p></div>
 
-                <h2>Latest Timesheets (Grouped by Employee and Week of)</h2>
+                <h2>Latest Timesheets (Grouped by Employee and Pay Period)</h2>
 
                 <?php if (empty($grouped_timesheets)) : ?>
                     <p>No timesheet records found within the filtered period.</p>
@@ -502,7 +502,7 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                 ?>
                 <div class="notice notice-success"><p>✅ Shift data fetched successfully!</p></div>
 
-                <h2>Latest Shifts (Grouped by Employee and Week of)</h2>
+                <h2>Latest Shifts (Grouped by Employee and Pay Period)</h2>
 
                 <?php if (empty($grouped_shifts)) : ?>
                     <p>No shift records found within the filtered period.</p>
@@ -875,7 +875,7 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
         ?>
         <div class="wrap">
             <h1>📁 Local Timesheets (Database View)</h1>
-            <p>This page displays timesheets stored locally in WordPress, grouped by Employee, Week, and Location.</p>
+            <p>This page displays timesheets stored locally in WordPress, grouped by Employee, Pay Period, and Location.</p>
         <?php
 
         if ( $selected_id > 0 ) {
@@ -987,7 +987,7 @@ if ( empty( $entry_statuses ) ) {
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row">Week of</th>
+                            <th scope="row">Pay Period</th>
                             <td>
                                 <?php echo esc_html( $header->week_start_date ); ?>
                                 <?php if ( ! empty( $header->week_end_date ) ) : ?>
@@ -1335,7 +1335,7 @@ $approve_bord = $approve_bg;
         class="button button-small wiw-local-approve-entry"
         data-entry-id="<?php echo esc_attr( $entry->id ); ?>"
         style="margin-top:6px;background:<?php echo esc_attr( $approve_bg ); ?>;border-color:<?php echo esc_attr( $approve_bord ); ?>;color:#fff;">
-    Approve Week
+    Approve Pay Period
 </button>
 <?php else : ?>
     <button type="button"
@@ -2015,11 +2015,12 @@ $table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
         );
     }
 
-    // 2) Fetch API data for this header's week range
-    $start = (string) $header->week_start_date;
-    $end   = ! empty( $header->week_end_date )
-        ? date( 'Y-m-d', strtotime( $header->week_end_date . ' +1 day' ) )
-        : date( 'Y-m-d', strtotime( $header->week_start_date . ' +7 days' ) );
+    // 2) Fetch fresh data from API for the header's week + employee + location
+$start = (string) $header->week_start_date;
+$end   = ! empty( $header->week_end_date )
+    ? date( 'Y-m-d', strtotime( $header->week_end_date . ' +1 day' ) )
+    : date( 'Y-m-d', strtotime( $header->week_start_date . ' +14 days' ) );
+
 
     $api = WIW_API_Client::request(
         'times',
@@ -2066,21 +2067,35 @@ $table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
             continue;
         }
 
-        // Verify "Week of" matches using the same Monday logic as sync
-        try {
-            $dt_week = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
-            $dt_week->setTimezone( $wp_timezone );
+// Verify pay period start matches using the same BIWEEKLY logic as sync (Sunday-anchored)
+try {
+    $dt_week = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
+    $dt_week->setTimezone( $wp_timezone );
 
-            $dayN = (int) $dt_week->format( 'N' ); // 1=Mon..7=Sun
-            $days = ( $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
-            if ( $days !== 0 ) { $dt_week->modify( "{$days} days" ); }
+    // Anchor: 2025-12-07 is a known pay period start (Sunday).
+    $anchor = new DateTime( '2025-12-07 00:00:00', $wp_timezone );
 
-            if ( $dt_week->format( 'Y-m-d' ) !== (string) $header->week_start_date ) {
-                continue;
-            }
-        } catch ( Exception $e ) {
-            continue;
-        }
+    // 1) Move dt_week back to the Sunday of its week.
+    $dayN = (int) $dt_week->format( 'N' ); // 1=Mon..7=Sun
+    $days_back_to_sunday = ( $dayN % 7 );  // Sun(7)->0, Mon(1)->1, ...
+    if ( $days_back_to_sunday !== 0 ) {
+        $dt_week->modify( "-{$days_back_to_sunday} days" );
+    }
+
+    // 2) Snap that Sunday to the correct biweekly boundary relative to the anchor.
+    $diff_days = (int) floor( ( $dt_week->getTimestamp() - $anchor->getTimestamp() ) / DAY_IN_SECONDS );
+    $mod = $diff_days % 14;
+    if ( $mod < 0 ) { $mod += 14; }
+    if ( $mod !== 0 ) {
+        $dt_week->modify( '-' . $mod . ' days' );
+    }
+
+    if ( $dt_week->format( 'Y-m-d' ) !== (string) $header->week_start_date ) {
+        continue;
+    }
+} catch ( Exception $e ) {
+    continue;
+}
 
         $wiw_time_id = (int) ( $time_entry->id ?? 0 );
         if ( ! $wiw_time_id ) { continue; }
