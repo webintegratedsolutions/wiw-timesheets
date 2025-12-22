@@ -66,8 +66,12 @@ class WIW_Timesheet_Manager {
         add_action( 'admin_menu', array( $this, 'add_admin_menus' ) );
         add_action( 'admin_init', array( $this, 'register_settings' ) );
 
-        // 2. Add Front-end UI (Client Area) via Shortcode (Still registered, but logic is deferred)
+        // 2. Add Front-end UI (Client Area) via Shortcodes (Still registered, but logic is deferred)
         add_shortcode( 'wiw_timesheets_client', array( $this, 'render_client_ui' ) );
+
+        // NEW: Client Filter UI Shortcode
+        add_shortcode( 'wiw_timesheets_client_filter', array( $this, 'render_client_filter_ui' ) );
+
 
         // 3. Handle AJAX requests for viewing/adjusting/approving (Crucial for interaction)
         // REMOVED: add_action( 'wp_ajax_wiw_fetch_timesheets', array( $this, 'handle_fetch_timesheets' ) );
@@ -114,6 +118,8 @@ public function render_client_ui() {
     }
 
     $timesheets = $this->get_scoped_local_timesheets( $client_id );
+    $filter_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+    $filter_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
 
     $out .= '<p><strong>Timesheets found:</strong> ' . esc_html( count( $timesheets ) ) . '</p>';
 
@@ -129,12 +135,18 @@ $grouped = array();
 foreach ( $timesheets as $ts ) {
     $employee_id   = isset( $ts->employee_id ) ? (string) $ts->employee_id : '';
     $employee_name = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
+    if ( $filter_emp !== '' && (string) $employee_id !== (string) $filter_emp ) {
+        continue;
+    }
 
     $emp_key = $employee_id !== '' ? $employee_id : md5( $employee_name );
 
     $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
     $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
     $period_key = $week_start . '|' . $week_end;
+    if ( $filter_period !== '' && (string) $period_key !== (string) $filter_period ) {
+        continue;
+    }
 
     if ( ! isset( $grouped[ $emp_key ] ) ) {
         $grouped[ $emp_key ] = array(
@@ -372,10 +384,104 @@ $out .= '</details>';
     return $out;
 }
 
+/**
+ * Front-end shortcode: [wiw_timesheets_client_filter]
+ * Renders scoped dropdown filters (Employee, Pay Period) that drive the main table via query params.
+ */
+public function render_client_filter_ui() {
+    if ( ! is_user_logged_in() ) {
+        return '';
+    }
 
-    /**
-     * Fetch local timesheets from DB, scoped to client_account_number for non-admin users.
-     */
+    $current_user_id = get_current_user_id();
+    $client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+    $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
+    if ( $client_id === '' ) {
+        return '';
+    }
+
+    // Pull scoped timesheets (local header rows) to populate dropdown options.
+    $timesheets = $this->get_scoped_local_timesheets( $client_id );
+    if ( empty( $timesheets ) ) {
+        return '';
+    }
+
+    // Build Employee and Pay Period options.
+    $employees = array(); // employee_id => employee_name
+    $periods   = array(); // "start|end" => "start to end"
+
+    foreach ( $timesheets as $ts ) {
+        $eid   = isset( $ts->employee_id ) ? (string) $ts->employee_id : '';
+        $ename = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
+        if ( $eid !== '' && $ename !== '' ) {
+            $employees[ $eid ] = $ename;
+        }
+
+        $ws = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+        $we = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+        if ( $ws !== '' ) {
+            $key = $ws . '|' . $we;
+            $label = $ws . ( $we ? ' to ' . $we : '' );
+            $periods[ $key ] = $label;
+        }
+    }
+
+    // Sort options for nicer UX.
+    asort( $employees, SORT_NATURAL | SORT_FLAG_CASE );
+    uasort(
+        $periods,
+        function( $a, $b ) {
+            // Sort by the label start date desc (string compare works for YYYY-MM-DD)
+            return strcmp( $b, $a );
+        }
+    );
+
+    // Current selections from query string.
+    $selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+    $selected_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
+
+    // Preserve other query args.
+    $action_url = get_permalink();
+
+    $out  = '<div class="wiw-client-timesheets" style="margin-bottom:14px;">';
+    $out .= '<form method="get" action="' . esc_url( $action_url ) . '" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">';
+
+    $out .= '<div>';
+    $out .= '<label for="wiw_emp" style="display:block;font-weight:600;margin-bottom:4px;">Employee</label>';
+    $out .= '<select id="wiw_emp" name="wiw_emp">';
+    $out .= '<option value="">All Employees</option>';
+    foreach ( $employees as $eid => $ename ) {
+        $out .= '<option value="' . esc_attr( $eid ) . '"' . selected( $selected_emp, $eid, false ) . '>'
+            . esc_html( $ename )
+            . '</option>';
+    }
+    $out .= '</select>';
+    $out .= '</div>';
+
+    $out .= '<div>';
+    $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Pay Period</label>';
+    $out .= '<select id="wiw_period" name="wiw_period">';
+    $out .= '<option value="">All Pay Periods</option>';
+    foreach ( $periods as $pkey => $plabel ) {
+        $out .= '<option value="' . esc_attr( $pkey ) . '"' . selected( $selected_period, $pkey, false ) . '>'
+            . esc_html( $plabel )
+            . '</option>';
+    }
+    $out .= '</select>';
+    $out .= '</div>';
+
+    $out .= '<div>';
+    $out .= '<button type="submit" class="wiw-btn">Filter</button> ';
+    $out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( array( 'wiw_emp', 'wiw_period' ), $action_url ) ) . '">Reset</a>';
+    $out .= '</div>';
+
+    $out .= '</form>';
+    $out .= '</div>';
+
+    return $out;
+}
+
+
 /**
  * Fetch local timesheets from DB, always scoped to a client account number.
  * (No admin bypass; the shortcode is assumed to be used on a secure client page.)
