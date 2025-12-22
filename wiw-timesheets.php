@@ -182,12 +182,9 @@ foreach ( $grouped as $emp_group ) {
         $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
         $out .= '<thead><tr>';
         $out .= '<th>ID</th>';
-        $out .= '<th>Pay Period</th>';
         $out .= '<th>Date</th>';
         $out .= '<th>Sched. Start/End</th>';
         $out .= '<th>Clock In/Clock Out</th>';
-        $out .= '<th>Employee</th>';
-        $out .= '<th>Location</th>';
         $out .= '<th>Break (Min)</th>';
         $out .= '<th>Sched. Hrs</th>';
         $out .= '<th>Clocked Hrs</th>';
@@ -235,12 +232,9 @@ if ( empty( $daily_rows ) ) {
 
     $out .= '<tr>';
     $out .= '<td>' . esc_html( (string) $timesheet_id ) . '</td>';
-    $out .= '<td>' . esc_html( $pay_period ) . '</td>';
     $out .= '<td>N/A</td>';
     $out .= '<td>N/A</td>';
     $out .= '<td>N/A</td>';
-    $out .= '<td>' . esc_html( (string) ( $ts->employee_name ?? '' ) ) . '</td>';
-    $out .= '<td>' . esc_html( (string) ( $ts->location_name ?? '' ) ) . '</td>';
     $out .= '<td>N/A</td>';
     $out .= '<td>' . esc_html( (string) ( $ts->total_scheduled_hours ?? '0.00' ) ) . '</td>';
     $out .= '<td>' . esc_html( (string) ( $ts->total_clocked_hours ?? '0.00' ) ) . '</td>';
@@ -277,12 +271,9 @@ if ( empty( $daily_rows ) ) {
 
         $out .= '<tr>';
         $out .= '<td>' . esc_html( (string) $timesheet_id ) . '</td>';
-        $out .= '<td>' . esc_html( $pay_period ) . '</td>';
         $out .= '<td>' . esc_html( $date_display ) . '</td>';
         $out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
         $out .= '<td>' . esc_html( $clock_in_out ) . '</td>';
-        $out .= '<td>' . esc_html( (string) ( $ts->employee_name ?? '' ) ) . '</td>';
-        $out .= '<td>' . esc_html( (string) ( $ts->location_name ?? '' ) ) . '</td>';
         $out .= '<td>' . esc_html( $break_min ) . '</td>';
         $out .= '<td>' . esc_html( $sched_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
