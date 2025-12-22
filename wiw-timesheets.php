@@ -121,7 +121,61 @@ public function render_client_ui() {
     $filter_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
     $filter_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
 
-    $out .= '<p><strong>Timesheets found:</strong> ' . esc_html( count( $timesheets ) ) . '</p>';
+// Filter-aware summary (count reflects filtered results)
+$filter_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+$filter_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
+
+// Defaults
+$employee_label   = 'All Employees';
+$pay_period_label = 'All Pay Periods';
+
+// Determine employee label from data
+if ( $filter_emp !== '' ) {
+    foreach ( $timesheets as $ts_row ) {
+        if ( isset( $ts_row->employee_id ) && (string) $ts_row->employee_id === (string) $filter_emp ) {
+            $employee_label = $ts_row->employee_name ?? 'Selected Employee';
+            break;
+        }
+    }
+}
+
+// Determine pay period label
+if ( $filter_period !== '' ) {
+    $parts = explode( '|', $filter_period );
+    if ( ! empty( $parts[0] ) ) {
+        $pay_period_label = 'Pay Period ' . $parts[0] . ( ! empty( $parts[1] ) ? ' to ' . $parts[1] : '' );
+    }
+}
+
+// Count timesheets AFTER filters
+$filtered_count = 0;
+foreach ( $timesheets as $ts_row ) {
+    $row_emp_id = isset( $ts_row->employee_id ) ? (string) $ts_row->employee_id : '';
+    $row_ws     = isset( $ts_row->week_start_date ) ? (string) $ts_row->week_start_date : '';
+    $row_we     = isset( $ts_row->week_end_date ) ? (string) $ts_row->week_end_date : '';
+    $row_period = $row_ws . '|' . $row_we;
+
+    if ( $filter_emp !== '' && $row_emp_id !== (string) $filter_emp ) {
+        continue;
+    }
+    if ( $filter_period !== '' && $row_period !== (string) $filter_period ) {
+        continue;
+    }
+    $filtered_count++;
+}
+
+$timesheet_word = ( $filtered_count === 1 ) ? 'timesheet' : 'timesheets';
+
+// Output summary
+$out .= '<p class="wiw-muted" style="margin:6px 0 12px; font-size:13px; font-weight:normal;">'
+    . 'Total of '
+    . '<strong>' . esc_html( $filtered_count . ' ' . $timesheet_word . ' found' ) . '</strong>'
+    . ' for '
+    . esc_html( $employee_label )
+    . ' and '
+    . esc_html( $pay_period_label )
+    . '.'
+    . '</p>';
 
     if ( empty( $timesheets ) ) {
         $out .= '<p>No timesheets found for your account.</p>';
