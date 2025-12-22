@@ -254,7 +254,7 @@ if ( empty( $daily_rows ) ) {
     $out .= '<td>' . esc_html( (string) ( $ts->total_clocked_hours ?? '0.00' ) ) . '</td>';
     $out .= '<td>N/A</td>';
     $out .= '<td>' . esc_html( (string) ( $ts->status ?? '' ) ) . '</td>';
-    $out .= '<td><span style="color:#666;">N/A</span></td>';
+    $out .= '<td><span class="wiw-muted">N/A</span></td>';
     $out .= '</tr>';
 
 } else {
@@ -292,7 +292,61 @@ if ( empty( $daily_rows ) ) {
         $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $status ) . '</td>';
-        $out .= '<td><span style="color:#666;">View</span></td>';
+$dr_id        = isset( $dr->id ) ? (string) absint( $dr->id ) : '';
+$wiw_time_id  = isset( $dr->wiw_time_id ) ? (string) $dr->wiw_time_id : '';
+$wiw_shift_id = isset( $dr->wiw_shift_id ) ? (string) $dr->wiw_shift_id : '';
+
+$raw_sched_start = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
+$raw_sched_end   = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
+$raw_clock_in    = isset( $dr->clock_in ) ? (string) $dr->clock_in : '';
+$raw_clock_out   = isset( $dr->clock_out ) ? (string) $dr->clock_out : '';
+
+$fmt_sched_range = $this->wiw_format_time_range_local( $raw_sched_start, $raw_sched_end );
+$fmt_clock_range = $this->wiw_format_time_range_local( $raw_clock_in, $raw_clock_out );
+
+$detail_rows = array(
+    'Timesheet ID'              => (string) $timesheet_id,
+    'Daily Record ID'           => $dr_id,
+    'WIW Time ID'               => $wiw_time_id,
+    'WIW Shift ID'              => $wiw_shift_id,
+    'Shift Date'                => $date_display,
+    'Scheduled Start/End (fmt)' => $fmt_sched_range,
+    'Scheduled Start (raw)'     => $raw_sched_start !== '' ? $raw_sched_start : 'N/A',
+    'Scheduled End (raw)'       => $raw_sched_end !== '' ? $raw_sched_end : 'N/A',
+    'Clock In/Out (fmt)'        => $fmt_clock_range,
+    'Clock In (raw)'            => $raw_clock_in !== '' ? $raw_clock_in : 'N/A',
+    'Clock Out (raw)'           => $raw_clock_out !== '' ? $raw_clock_out : 'N/A',
+    'Break (Min)'               => $break_min,
+    'Sched. Hrs'                => $sched_hrs,
+    'Clocked Hrs'               => $clocked_hrs,
+    'Payable Hrs'               => $payable_hrs,
+    'Status'                    => $status,
+);
+
+$details_html  = '<details>';
+$details_html .= '<summary><span class="wiw-btn secondary">View</span></summary>';
+$details_html .= '<div style="margin-top:8px; padding:10px; border:1px solid #ccd0d4; background:#fff;">';
+$details_html .= '<table style="width:100%; border-collapse:collapse;">';
+
+foreach ( $detail_rows as $label => $value ) {
+    $details_html .= '<tr>';
+    $details_html .= '<th style="text-align:left; padding:6px 8px; width:220px; border-top:1px solid #eee;">' . esc_html( $label ) . '</th>';
+    $details_html .= '<td style="padding:6px 8px; border-top:1px solid #eee;">' . esc_html( (string) $value ) . '</td>';
+    $details_html .= '</tr>';
+}
+
+$details_html .= '</table>';
+$details_html .= '</div>';
+$details_html .= '</details>';
+
+$actions_html  = '<div style="display:flex;flex-direction:column;gap:6px;">';
+$actions_html .= '<a href="#" class="wiw-btn secondary" onclick="return false;" aria-disabled="true">Edit</a>';
+$actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="true">Approve</a>';
+$actions_html .= '</div>';
+
+$out .= '<td>' . $actions_html . '</td>';
+
+
         $out .= '</tr>';
     }
 }
