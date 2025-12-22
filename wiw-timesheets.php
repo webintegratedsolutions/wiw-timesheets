@@ -406,25 +406,53 @@ public function render_client_filter_ui() {
         return '';
     }
 
-    // Build Employee and Pay Period options.
-    $employees = array(); // employee_id => employee_name
-    $periods   = array(); // "start|end" => "start to end"
+// Current selections from query string (used to dynamically repopulate options).
+$selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+$selected_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
 
-    foreach ( $timesheets as $ts ) {
-        $eid   = isset( $ts->employee_id ) ? (string) $ts->employee_id : '';
-        $ename = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
-        if ( $eid !== '' && $ename !== '' ) {
+// Build dynamic option sets based on selection.
+// - If employee selected: show only periods that exist for that employee.
+// - If period selected: show only employees that exist for that period.
+// - If both selected: show intersection.
+$employees = array(); // employee_id => employee_name
+$periods   = array(); // "start|end" => "start to end"
+
+foreach ( $timesheets as $ts ) {
+    $eid   = isset( $ts->employee_id ) ? (string) $ts->employee_id : '';
+    $ename = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
+
+    $ws = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+    $we = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+    $pkey = ( $ws !== '' ) ? ( $ws . '|' . $we ) : '';
+
+    // Filter logic for option generation:
+    // If a pay period is selected, only include rows that match it (for employee option set).
+    if ( $selected_period !== '' && $pkey !== $selected_period ) {
+        // This row doesn't belong to the selected period.
+        // Still allow period option generation below if employee is selected only.
+        // We'll handle that by not adding employees for non-matching periods.
+    }
+
+    // If an employee is selected, only include rows that match it (for period option set).
+    if ( $selected_emp !== '' && $eid !== $selected_emp ) {
+        // Same concept: don't add periods for other employees.
+    }
+
+    // Add employee option only if it matches selected period (when selected).
+    if ( $eid !== '' && $ename !== '' ) {
+        if ( $selected_period === '' || $pkey === $selected_period ) {
             $employees[ $eid ] = $ename;
         }
+    }
 
-        $ws = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
-        $we = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
-        if ( $ws !== '' ) {
-            $key = $ws . '|' . $we;
-            $label = $ws . ( $we ? ' to ' . $we : '' );
-            $periods[ $key ] = $label;
+    // Add period option only if it matches selected employee (when selected).
+    if ( $pkey !== '' ) {
+        $plabel = $ws . ( $we ? ' to ' . $we : '' );
+        if ( $selected_emp === '' || $eid === $selected_emp ) {
+            $periods[ $pkey ] = $plabel;
         }
     }
+}
 
     // Sort options for nicer UX.
     asort( $employees, SORT_NATURAL | SORT_FLAG_CASE );
@@ -435,10 +463,6 @@ public function render_client_filter_ui() {
             return strcmp( $b, $a );
         }
     );
-
-    // Current selections from query string.
-    $selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
-    $selected_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
 
     // Preserve other query args.
     $action_url = get_permalink();
