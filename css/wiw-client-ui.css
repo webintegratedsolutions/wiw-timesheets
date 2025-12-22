@@ -1,0 +1,74 @@
+/* WIW Timesheets Client UI (front-end) */
+
+.wiw-client-timesheets {
+  margin: 20px 0;
+}
+
+.wiw-client-timesheets h2,
+.wiw-client-timesheets h3 {
+  margin: 18px 0 10px;
+}
+
+.wiw-client-timesheets table.wp-list-table {
+  border-collapse: collapse;
+  width: 100%;
+  background: #fff;
+  border: 1px solid #ccd0d4;
+}
+
+.wiw-client-timesheets table.wp-list-table thead th {
+  background: #f6f7f7;
+  border-bottom: 1px solid #ccd0d4;
+  padding: 10px 8px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.wiw-client-timesheets table.wp-list-table tbody td {
+  border-top: 1px solid #e5e5e5;
+  padding: 10px 8px;
+  vertical-align: top;
+}
+
+.wiw-client-timesheets table.wp-list-table.striped tbody tr:nth-child(odd),
+.wiw-client-timesheets table.wp-list-table.striped > tbody > :nth-child(odd) {
+  background-color: #f6f7f7;
+}
+
+.wiw-client-timesheets .wiw-muted {
+  color: #666;
+}
+
+.wiw-client-timesheets .wiw-btn {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 3px;
+  border: 1px solid #2271b1;
+  background: #2271b1;
+  color: #fff;
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.wiw-client-timesheets .wiw-btn:hover,
+.wiw-client-timesheets .wiw-btn:focus {
+  background: #135e96;
+  border-color: #135e96;
+  color: #fff;
+  text-decoration: none;
+}
+
+.wiw-client-timesheets .wiw-btn.secondary {
+  background: #f6f7f7;
+  border-color: #8c8f94;
+  color: #2c3338;
+}
+
+.wiw-client-timesheets .wiw-btn.secondary:hover,
+.wiw-client-timesheets .wiw-btn.secondary:focus {
+  background: #e5e5e5;
+  border-color: #787c82;
+  color: #2c3338;
+}

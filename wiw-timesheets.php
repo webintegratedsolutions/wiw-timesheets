@@ -28,6 +28,9 @@ require_once WIW_PLUGIN_PATH . 'includes/wheniwork.php';
 // Include the admin enqueue file for styles/scripts
 require_once WIW_PLUGIN_PATH . 'includes/admin-enqueue.php';
 
+// Include the front-end enqueue file for client UI styles
+require_once WIW_PLUGIN_PATH . 'includes/frontend-enqueue.php';
+
 // Include the installation file for DB setup
 require_once WIW_PLUGIN_PATH . 'includes/install.php';
 
