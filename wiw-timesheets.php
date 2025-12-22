@@ -106,7 +106,6 @@ public function render_client_ui() {
 
     // Always show the client account number for now (debug).
     $out  = '<div class="wiw-client-timesheets">';
-    $out .= '<p><strong>Client Account Number:</strong> ' . esc_html( $client_id !== '' ? $client_id : '(empty)' ) . '</p>';
 
     if ( $client_id === '' ) {
         $out .= '<p>No client account number found on your user profile.</p>';
