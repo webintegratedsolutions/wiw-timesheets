@@ -177,11 +177,23 @@ foreach ( $grouped as $emp_group ) {
     foreach ( $periods as $period ) {
         $pay_period_label = trim( (string) $period['week_start'] ) . ( $period['week_end'] ? ' to ' . trim( (string) $period['week_end'] ) : '' );
 
-        $out .= '<h3 style="margin:12px 0 8px;">Pay Period: ' . esc_html( $pay_period_label ) . '</h3>';
+// Each Employee + Pay Period corresponds to a single Timesheet ID.
+$timesheet_id_for_period = '';
+if ( ! empty( $period['rows'] ) && isset( $period['rows'][0]->id ) ) {
+    $timesheet_id_for_period = (string) absint( $period['rows'][0]->id );
+}
+
+$ts_label = $timesheet_id_for_period !== ''
+    ? ' | Timesheet #' . $timesheet_id_for_period
+    : '';
+
+$out .= '<h3 style="margin:12px 0 8px;">Pay Period: '
+    . esc_html( $pay_period_label . $ts_label )
+    . '</h3>';
+
 
         $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
         $out .= '<thead><tr>';
-        $out .= '<th>ID</th>';
         $out .= '<th>Date</th>';
         $out .= '<th>Sched. Start/End</th>';
         $out .= '<th>Clock In/Clock Out</th>';
@@ -231,7 +243,6 @@ if ( empty( $daily_rows ) ) {
     $pay_period = $week_start . ( $week_end ? ' to ' . $week_end : '' );
 
     $out .= '<tr>';
-    $out .= '<td>' . esc_html( (string) $timesheet_id ) . '</td>';
     $out .= '<td>N/A</td>';
     $out .= '<td>N/A</td>';
     $out .= '<td>N/A</td>';
@@ -270,7 +281,6 @@ if ( empty( $daily_rows ) ) {
         $status = isset( $dr->status ) ? (string) $dr->status : (string) ( $ts->status ?? '' );
 
         $out .= '<tr>';
-        $out .= '<td>' . esc_html( (string) $timesheet_id ) . '</td>';
         $out .= '<td>' . esc_html( $date_display ) . '</td>';
         $out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
         $out .= '<td>' . esc_html( $clock_in_out ) . '</td>';
