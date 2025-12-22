@@ -194,7 +194,7 @@ $out .= '<h3 style="margin:12px 0 8px;">Pay Period: '
 
         $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
         $out .= '<thead><tr>';
-        $out .= '<th>Date</th>';
+        $out .= '<th>Shift Date</th>';
         $out .= '<th>Sched. Start/End</th>';
         $out .= '<th>Clock In/Clock Out</th>';
         $out .= '<th>Break (Min)</th>';
