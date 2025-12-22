@@ -204,6 +204,59 @@ $ts_label = $timesheet_id_for_period !== ''
 $out .= '<h3 style="margin:12px 0 8px;">🗓️ Pay Period: '
     . esc_html( $pay_period_label . $ts_label )
     . '</h3>';
+// Timesheet Details (shown between Pay Period header and the table)
+$ts_header = ! empty( $period['rows'] ) ? $period['rows'][0] : null;
+
+$ts_status  = ( $ts_header && isset( $ts_header->status ) ) ? (string) $ts_header->status : '';
+$ts_created = ( $ts_header && isset( $ts_header->created_at ) ) ? (string) $ts_header->created_at : '';
+$ts_updated = ( $ts_header && isset( $ts_header->updated_at ) ) ? (string) $ts_header->updated_at : '';
+
+$ts_total_sched  = ( $ts_header && isset( $ts_header->total_scheduled_hours ) ) ? (string) $ts_header->total_scheduled_hours : '0.00';
+$ts_total_clock  = ( $ts_header && isset( $ts_header->total_clocked_hours ) ) ? (string) $ts_header->total_clocked_hours : '0.00';
+
+// Optional: sum payable hours from daily records view/table (matches backend data where available).
+$ts_total_payable = '0.00';
+if ( $timesheet_id_for_period !== '' ) {
+	global $wpdb;
+	$table_daily = $wpdb->prefix . 'wiw_daily_records';
+	$sum_payable = $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT SUM(payable_hours) FROM {$table_daily} WHERE timesheet_id = %d AND location_id = %s",
+			absint( $timesheet_id_for_period ),
+			$client_id
+		)
+	);
+	if ( $sum_payable !== null && $sum_payable !== '' ) {
+		$ts_total_payable = (string) $sum_payable;
+	}
+}
+
+// Build Actions buttons (nonfunctional for now).
+$actions_html  = '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+$actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="true">Sign Off</a>';
+$actions_html .= '<a href="#" class="wiw-btn secondary" onclick="return false;" aria-disabled="true">Reset</a>';
+$actions_html .= '</div>';
+
+$out .= '<table class="wp-list-table widefat fixed striped" style="margin:8px 0 14px;">';
+$out .= '<tbody>';
+
+$out .= '<tr><th style="width:180px;">Totals</th><td>'
+	. 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
+	. 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
+	. 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
+	. '</td></tr>';
+
+$out .= '<tr><th>Status</th><td>' . esc_html( $ts_status !== '' ? $ts_status : 'N/A' ) . '</td></tr>';
+
+$out .= '<tr><th>Created/Updated</th><td>'
+	. esc_html( $ts_created !== '' ? $ts_created : 'N/A' )
+	. ' / '
+	. esc_html( $ts_updated !== '' ? $ts_updated : 'N/A' )
+	. '</td></tr>';
+
+$out .= '<tr><th>Actions</th><td>' . $actions_html . '</td></tr>';
+
+$out .= '</tbody></table>';
 
         $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
         $out .= '<thead><tr>';
@@ -501,6 +554,8 @@ foreach ( $timesheets as $ts ) {
 
     $out .= '</form>';
     $out .= '</div>';
+
+    $out .= '<hr style="margin:40px 0;" />';
 
     return $out;
 }
