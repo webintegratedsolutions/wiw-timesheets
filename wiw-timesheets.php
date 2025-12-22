@@ -260,11 +260,12 @@ if ( empty( $daily_rows ) ) {
 
         $sched_start = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
         $sched_end   = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
-        $sched_start_end = ( $sched_start && $sched_end ) ? ( $sched_start . ' - ' . $sched_end ) : 'N/A';
+        $sched_start_end = $this->wiw_format_time_range_local( $sched_start, $sched_end );
 
         $clock_in  = isset( $dr->clock_in ) ? (string) $dr->clock_in : '';
         $clock_out = isset( $dr->clock_out ) ? (string) $dr->clock_out : '';
-        $clock_in_out = ( $clock_in || $clock_out ) ? ( trim( $clock_in ) . ' - ' . trim( $clock_out ) ) : 'N/A';
+        $clock_in_out = $this->wiw_format_time_range_local( $clock_in, $clock_out );
+
 
         $break_min = isset( $dr->break_minutes ) ? (string) $dr->break_minutes : '0';
 
@@ -364,6 +365,57 @@ private function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_
 
     return $wpdb->get_results( $prepared );
 }
+
+    /**
+     * Format a DATETIME string into the site's local time + WP time format.
+     * Returns '' if input is empty/invalid.
+     */
+    private function wiw_format_time_local( $datetime_str ) {
+        $datetime_str = is_scalar( $datetime_str ) ? trim( (string) $datetime_str ) : '';
+        if ( $datetime_str === '' ) {
+            return '';
+        }
+
+        try {
+            $wp_timezone_string = get_option( 'timezone_string' );
+            if ( empty( $wp_timezone_string ) ) {
+                $wp_timezone_string = 'UTC';
+            }
+            $wp_tz = new DateTimeZone( $wp_timezone_string );
+
+            // Stored values in your local tables are already local DATETIME (no TZ info).
+            $dt = new DateTime( $datetime_str, $wp_tz );
+            $dt->setTimezone( $wp_tz );
+
+            $time_format = get_option( 'time_format' );
+            if ( empty( $time_format ) ) {
+                $time_format = 'g:i A';
+            }
+
+            return $dt->format( $time_format );
+        } catch ( Exception $e ) {
+            return '';
+        }
+    }
+
+    /**
+     * Format a start/end DATETIME range for display.
+     * If end is missing, shows "Active (N/A)" (admin-style).
+     */
+    private function wiw_format_time_range_local( $start_datetime, $end_datetime ) {
+        $start = $this->wiw_format_time_local( $start_datetime );
+        $end   = $this->wiw_format_time_local( $end_datetime );
+
+        if ( $start !== '' && $end !== '' ) {
+            return $start . ' - ' . $end;
+        }
+
+        if ( $start !== '' && $end === '' ) {
+            return $start . ' - Active (N/A)';
+        }
+
+        return 'N/A';
+    }
 
 
     /**
