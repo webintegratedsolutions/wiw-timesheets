@@ -121,27 +121,129 @@ public function render_client_ui() {
         return $out;
     }
 
-    // Minimal output (still tiny): show first few record IDs + dates.
-    $out .= '<ul>';
-    $limit = 10;
-    $i = 0;
-    foreach ( $timesheets as $ts ) {
-        $i++;
-$week_start = $ts->week_start_date ?? '';
-$week_end   = $ts->week_end_date ?? '';
+// Group by Employee -> Pay Period (Week Start/End).
+$grouped = array();
 
-$out .= '<li>#' . esc_html( $ts->id )
-    . ' — Week: ' . esc_html( $week_start )
-    . ( $week_end ? ' to ' . esc_html( $week_end ) : '' )
-    . ' — Status: ' . esc_html( $ts->status ?? '' )
-    . '</li>';
+foreach ( $timesheets as $ts ) {
+    $employee_id   = isset( $ts->employee_id ) ? (string) $ts->employee_id : '';
+    $employee_name = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
 
-        if ( $i >= $limit ) {
-            break;
-        }
+    $emp_key = $employee_id !== '' ? $employee_id : md5( $employee_name );
+
+    $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+    $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+    $period_key = $week_start . '|' . $week_end;
+
+    if ( ! isset( $grouped[ $emp_key ] ) ) {
+        $grouped[ $emp_key ] = array(
+            'employee_id'   => $employee_id,
+            'employee_name' => $employee_name,
+            'periods'       => array(),
+        );
     }
-    $out .= '</ul>';
-    $out .= '</div>';
+
+    if ( ! isset( $grouped[ $emp_key ]['periods'][ $period_key ] ) ) {
+        $grouped[ $emp_key ]['periods'][ $period_key ] = array(
+            'week_start' => $week_start,
+            'week_end'   => $week_end,
+            'rows'       => array(),
+        );
+    }
+
+    $grouped[ $emp_key ]['periods'][ $period_key ]['rows'][] = $ts;
+}
+
+// Sort employees by name.
+uasort(
+    $grouped,
+    function( $a, $b ) {
+        return strcasecmp( (string) $a['employee_name'], (string) $b['employee_name'] );
+    }
+);
+
+// Render grouped tables.
+foreach ( $grouped as $emp_group ) {
+    $out .= '<h2 style="margin-top:24px;">Employee: ' . esc_html( $emp_group['employee_name'] ) . '</h2>';
+
+    // Sort pay periods newest first by week_start.
+    $periods = $emp_group['periods'];
+    uasort(
+        $periods,
+        function( $a, $b ) {
+            return strcmp( (string) $b['week_start'], (string) $a['week_start'] );
+        }
+    );
+
+    foreach ( $periods as $period ) {
+        $pay_period_label = trim( (string) $period['week_start'] ) . ( $period['week_end'] ? ' to ' . trim( (string) $period['week_end'] ) : '' );
+
+        $out .= '<h3 style="margin:12px 0 8px;">Pay Period: ' . esc_html( $pay_period_label ) . '</h3>';
+
+        $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
+        $out .= '<thead><tr>';
+        $out .= '<th>ID</th>';
+        $out .= '<th>Pay Period</th>';
+        $out .= '<th>Date</th>';
+        $out .= '<th>Sched. Start/End</th>';
+        $out .= '<th>Clock In/Clock Out</th>';
+        $out .= '<th>Employee</th>';
+        $out .= '<th>Location</th>';
+        $out .= '<th>Break (Min)</th>';
+        $out .= '<th>Sched. Hrs</th>';
+        $out .= '<th>Clocked Hrs</th>';
+        $out .= '<th>Payable Hrs</th>';
+        $out .= '<th>Status</th>';
+        $out .= '<th>Actions</th>';
+        $out .= '</tr></thead>';
+
+        $out .= '<tbody>';
+
+        foreach ( $period['rows'] as $ts ) {
+            $id = isset( $ts->id ) ? (string) $ts->id : '';
+
+            // These exist in wp_wiw_timesheets:
+            $employee_name = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
+            $location_name = isset( $ts->location_name ) ? (string) $ts->location_name : '';
+            $status        = isset( $ts->status ) ? (string) $ts->status : '';
+
+            $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+            $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+
+            $sched_hrs   = isset( $ts->total_scheduled_hours ) ? (string) $ts->total_scheduled_hours : '0.00';
+            $clocked_hrs = isset( $ts->total_clocked_hours ) ? (string) $ts->total_clocked_hours : '0.00';
+
+            // These come from daily records (not available yet on this install):
+            $sched_start_end = 'N/A';
+            $clock_in_out    = 'N/A';
+            $break_min       = 'N/A';
+            $payable_hrs     = 'N/A';
+
+            // Date column: at timesheet level we only have week_start_date; use that for now.
+            $date_display = $week_start;
+
+            // Actions: placeholder for now (we’ll wire details once daily records exist).
+            $actions_html = '<span style="color:#666;">N/A</span>';
+
+            $out .= '<tr>';
+            $out .= '<td>' . esc_html( $id ) . '</td>';
+            $out .= '<td>' . esc_html( $week_start . ( $week_end ? ' to ' . $week_end : '' ) ) . '</td>';
+            $out .= '<td>' . esc_html( $date_display ) . '</td>';
+            $out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
+            $out .= '<td>' . esc_html( $clock_in_out ) . '</td>';
+            $out .= '<td>' . esc_html( $employee_name ) . '</td>';
+            $out .= '<td>' . esc_html( $location_name ) . '</td>';
+            $out .= '<td>' . esc_html( $break_min ) . '</td>';
+            $out .= '<td>' . esc_html( $sched_hrs ) . '</td>';
+            $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
+            $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
+            $out .= '<td>' . esc_html( $status ) . '</td>';
+            $out .= '<td>' . $actions_html . '</td>';
+            $out .= '</tr>';
+        }
+
+        $out .= '</tbody></table>';
+    }
+}
 
     return $out;
 }
