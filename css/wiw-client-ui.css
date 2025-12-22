@@ -72,3 +72,27 @@
   border-color: #787c82;
   color: #2c3338;
 }
+
+/* Legend / Reference (Client UI) */
+.wiw-client-timesheets .wiw-legend {
+  border: 1px solid #ccd0d4;
+  background: #fff;
+  padding: 10px;
+  margin-top: 10px;
+}
+
+.wiw-client-timesheets .wiw-legend summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px;
+  background: #f6f7f7;
+  margin: -10px -10px 10px;
+}
+
+.wiw-client-timesheets .wiw-legend table.wp-list-table {
+  margin-top: 0;
+}
+
+.wiw-client-timesheets .wiw-legend th.field-col {
+  width: 220px;
+}

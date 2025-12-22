@@ -346,14 +346,14 @@ $out .= '<td>' . $actions_html . '</td>';
 
 // Expandable legend/reference (shown once below all tables).
 $out .= '<hr style="margin:24px 0;" />';
-$out .= '<details style="border: 1px solid #ccd0d4; background: #fff; padding: 10px; margin-top: 10px;">';
-$out .= '<summary style="cursor: pointer; font-weight: 600; padding: 8px; background: #f6f7f7; margin: -10px -10px 10px;">';
+$out .= '<details class="wiw-legend">';
+$out .= '<summary>';
 $out .= '💡 Click to Expand: Field Reference Legend';
 $out .= '</summary>';
 
 $out .= '<div style="padding-top: 8px;">';
-$out .= '<table class="wp-list-table widefat fixed striped" style="margin-top: 0;">';
-$out .= '<thead><tr><th style="width:220px;">Field</th><th>Description</th></tr></thead>';
+$out .= '<table class="wp-list-table widefat fixed striped">';
+$out .= '<thead><tr><th class="field-col">Field</th><th>Description</th></tr></thead>';
 $out .= '<tbody>';
 
 $out .= '<tr><td><strong>Shift Date</strong></td><td>The date of the shift entry. This corresponds to the specific day the time record applies to within the pay period.</td></tr>';
