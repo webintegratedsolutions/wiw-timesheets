@@ -292,17 +292,6 @@ if ( empty( $daily_rows ) ) {
         $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $status ) . '</td>';
-$dr_id        = isset( $dr->id ) ? (string) absint( $dr->id ) : '';
-$wiw_time_id  = isset( $dr->wiw_time_id ) ? (string) $dr->wiw_time_id : '';
-$wiw_shift_id = isset( $dr->wiw_shift_id ) ? (string) $dr->wiw_shift_id : '';
-
-$raw_sched_start = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
-$raw_sched_end   = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
-$raw_clock_in    = isset( $dr->clock_in ) ? (string) $dr->clock_in : '';
-$raw_clock_out   = isset( $dr->clock_out ) ? (string) $dr->clock_out : '';
-
-$fmt_sched_range = $this->wiw_format_time_range_local( $raw_sched_start, $raw_sched_end );
-$fmt_clock_range = $this->wiw_format_time_range_local( $raw_clock_in, $raw_clock_out );
 
 $detail_rows = array(
     'Timesheet ID'              => (string) $timesheet_id,
