@@ -166,7 +166,7 @@ uasort(
 
 // Render grouped tables.
 foreach ( $grouped as $emp_group ) {
-    $out .= '<h2 style="margin-top:24px;">Employee: ' . esc_html( $emp_group['employee_name'] ) . '</h2>';
+    $out .= '<h2 style="margin-top:24px;">👤 Employee: ' . esc_html( $emp_group['employee_name'] ) . '</h2>';
 
     // Sort pay periods newest first by week_start.
     $periods = $emp_group['periods'];
@@ -190,10 +190,9 @@ $ts_label = $timesheet_id_for_period !== ''
     ? ' | Timesheet #' . $timesheet_id_for_period
     : '';
 
-$out .= '<h3 style="margin:12px 0 8px;">Pay Period: '
+$out .= '<h3 style="margin:12px 0 8px;">🗓️ Pay Period: '
     . esc_html( $pay_period_label . $ts_label )
     . '</h3>';
-
 
         $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
         $out .= '<thead><tr>';
