@@ -81,6 +81,38 @@
   margin-top: 10px;
 }
 
+/* Timesheet Details block (between Pay Period header and table) */
+.wiw-client-timesheets table.wiw-timesheet-details {
+  font-size: 13px; /* slightly smaller than main table */
+}
+
+.wiw-client-timesheets table.wiw-timesheet-details tbody tr:first-child th,
+.wiw-client-timesheets table.wiw-timesheet-details tbody tr:first-child td {
+  border-top: none;
+}
+
+.wiw-client-timesheets table.wiw-timesheet-details th,
+.wiw-client-timesheets table.wiw-timesheet-details td {
+  padding: 8px 10px;
+  vertical-align: top;
+  border-top: 1px solid #e5e5e5;
+}
+
+.wiw-client-timesheets table.wiw-timesheet-details th {
+  font-weight: 600;
+  width: 180px;
+}
+
+.wiw-client-timesheets table.wiw-timesheet-details td strong {
+  font-weight: 600;
+}
+
+/* Location row: remove bold emphasis */
+.wiw-client-timesheets table.wiw-timesheet-details .wiw-location-name {
+  font-weight: normal;
+}
+
+
 .wiw-client-timesheets .wiw-legend summary {
   cursor: pointer;
   font-weight: 600;

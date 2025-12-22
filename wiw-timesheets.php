@@ -237,7 +237,7 @@ $actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disab
 $actions_html .= '<a href="#" class="wiw-btn secondary" onclick="return false;" aria-disabled="true">Reset</a>';
 $actions_html .= '</div>';
 
-$out .= '<table class="wp-list-table widefat fixed striped" style="margin:8px 0 14px;">';
+$out .= '<table class="wp-list-table widefat fixed striped wiw-timesheet-details" style="margin:8px 0 14px;">';
 $out .= '<tbody>';
 
 // Created/Updated (formatted like admin: WP timezone + date/time format)
@@ -257,7 +257,6 @@ $out .= '<tr><th style="width:180px;">Created/Updated</th><td>'
     . '</td></tr>';
 
 $out .= '<tr><th>Location</th><td>'
-    . '<strong>' . esc_html( $loc_name ) . '</strong><br>'
     . '<span class="wiw-muted">' . esc_html( $loc_address ) . '</span>'
     . '</td></tr>';
 
