@@ -87,6 +87,101 @@ class WIW_Timesheet_Manager {
         $this->register_ajax_hooks();
     }
 
+
+    /**
+     * Front-end shortcode: [wiw_timesheets_client]
+     * Minimal client UI for now (Step 1): shows scoped record count.
+     */
+public function render_client_ui() {
+    if ( ! is_user_logged_in() ) {
+        return '<p>You must be logged in to view timesheets.</p>';
+    }
+
+    $current_user_id = get_current_user_id();
+    $client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+    $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
+
+    // Always show the client account number for now (debug).
+    $out  = '<div class="wiw-client-timesheets">';
+    $out .= '<p><strong>Client Account Number:</strong> ' . esc_html( $client_id !== '' ? $client_id : '(empty)' ) . '</p>';
+
+    if ( $client_id === '' ) {
+        $out .= '<p>No client account number found on your user profile.</p>';
+        $out .= '</div>';
+        return $out;
+    }
+
+    $timesheets = $this->get_scoped_local_timesheets( $client_id );
+
+    $out .= '<p><strong>Timesheets found:</strong> ' . esc_html( count( $timesheets ) ) . '</p>';
+
+    if ( empty( $timesheets ) ) {
+        $out .= '<p>No timesheets found for your account.</p>';
+        $out .= '</div>';
+        return $out;
+    }
+
+    // Minimal output (still tiny): show first few record IDs + dates.
+    $out .= '<ul>';
+    $limit = 10;
+    $i = 0;
+    foreach ( $timesheets as $ts ) {
+        $i++;
+$week_start = $ts->week_start_date ?? '';
+$week_end   = $ts->week_end_date ?? '';
+
+$out .= '<li>#' . esc_html( $ts->id )
+    . ' — Week: ' . esc_html( $week_start )
+    . ( $week_end ? ' to ' . esc_html( $week_end ) : '' )
+    . ' — Status: ' . esc_html( $ts->status ?? '' )
+    . '</li>';
+
+        if ( $i >= $limit ) {
+            break;
+        }
+    }
+    $out .= '</ul>';
+    $out .= '</div>';
+
+    return $out;
+}
+
+
+    /**
+     * Fetch local timesheets from DB, scoped to client_account_number for non-admin users.
+     */
+/**
+ * Fetch local timesheets from DB, always scoped to a client account number.
+ * (No admin bypass; the shortcode is assumed to be used on a secure client page.)
+ */
+private function get_scoped_local_timesheets( $client_id ) {
+    global $wpdb;
+
+    $table_ts    = $wpdb->prefix . 'wiw_timesheets';
+    $table_daily = $wpdb->prefix . 'wiw_daily_records';
+
+    $client_id = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+    if ( $client_id === '' ) {
+        return array();
+    }
+
+$sql = "
+    SELECT ts.*,
+           0 AS daily_record_count
+    FROM {$table_ts} ts
+    WHERE ts.location_id = %s
+    ORDER BY ts.week_start_date DESC, ts.id DESC
+";
+
+    $prepared = $wpdb->prepare( $sql, $client_id );
+
+$results = $wpdb->get_results( $prepared );
+
+return $results;
+
+}
+
+
     /**
      * Normalize a local DATETIME string to minute precision (YYYY-mm-dd HH:ii).
      * The UI edits HH:MM, while the WIW API may include seconds. We treat
