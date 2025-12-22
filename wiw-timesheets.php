@@ -240,19 +240,34 @@ $actions_html .= '</div>';
 $out .= '<table class="wp-list-table widefat fixed striped" style="margin:8px 0 14px;">';
 $out .= '<tbody>';
 
-$out .= '<tr><th style="width:180px;">Totals</th><td>'
-	. 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
-	. 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
-	. 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
-	. '</td></tr>';
+// Created/Updated (formatted like admin: WP timezone + date/time format)
+$created_display = $this->wiw_format_datetime_local_pretty( $ts_created );
+$updated_display = $this->wiw_format_datetime_local_pretty( $ts_updated );
+
+// Location (Name + Address), matching admin Locations page
+$ts_location_id = ( $ts_header && isset( $ts_header->location_id ) ) ? (string) $ts_header->location_id : (string) $client_id;
+$loc            = $this->wiw_get_location_name_address_by_id( $ts_location_id );
+$loc_name       = isset( $loc['name'] ) ? (string) $loc['name'] : 'N/A';
+$loc_address    = isset( $loc['address'] ) ? (string) $loc['address'] : 'N/A';
+
+$out .= '<tr><th style="width:180px;">Created/Updated</th><td>'
+    . esc_html( $created_display )
+    . ' / '
+    . esc_html( $updated_display )
+    . '</td></tr>';
+
+$out .= '<tr><th>Location</th><td>'
+    . '<strong>' . esc_html( $loc_name ) . '</strong><br>'
+    . '<span class="wiw-muted">' . esc_html( $loc_address ) . '</span>'
+    . '</td></tr>';
+
+$out .= '<tr><th>Totals</th><td>'
+    . 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
+    . 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
+    . 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
+    . '</td></tr>';
 
 $out .= '<tr><th>Status</th><td>' . esc_html( $ts_status !== '' ? $ts_status : 'N/A' ) . '</td></tr>';
-
-$out .= '<tr><th>Created/Updated</th><td>'
-	. esc_html( $ts_created !== '' ? $ts_created : 'N/A' )
-	. ' / '
-	. esc_html( $ts_updated !== '' ? $ts_updated : 'N/A' )
-	. '</td></tr>';
 
 $out .= '<tr><th>Actions</th><td>' . $actions_html . '</td></tr>';
 
@@ -672,6 +687,90 @@ private function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_
         return 'N/A';
     }
 
+/**
+ * Format a local DATETIME string using WP timezone + date/time formats.
+ * Example output: "December 22, 2025 9:22 AM"
+ */
+private function wiw_format_datetime_local_pretty( $datetime_str ) {
+    $datetime_str = is_scalar( $datetime_str ) ? trim( (string) $datetime_str ) : '';
+    if ( $datetime_str === '' ) {
+        return 'N/A';
+    }
+
+    try {
+        $wp_timezone_string = get_option( 'timezone_string' );
+        if ( empty( $wp_timezone_string ) ) {
+            $wp_timezone_string = 'UTC';
+        }
+        $wp_tz = new DateTimeZone( $wp_timezone_string );
+
+        // Stored values are local DATETIME in DB (no TZ info), treat as WP local.
+        $dt = new DateTime( $datetime_str, $wp_tz );
+        $dt->setTimezone( $wp_tz );
+
+        $date_format = get_option( 'date_format' );
+        if ( empty( $date_format ) ) {
+            $date_format = 'F j, Y';
+        }
+
+        $time_format = get_option( 'time_format' );
+        if ( empty( $time_format ) ) {
+            $time_format = 'g:i A';
+        }
+
+        return $dt->format( $date_format . ' ' . $time_format );
+    } catch ( Exception $e ) {
+        return 'N/A';
+    }
+}
+
+/**
+ * Fetch a location (site) name + address by location_id, matching admin Locations formatting.
+ * Uses fetch_locations_data() and maps sites by ID.
+ */
+private function wiw_get_location_name_address_by_id( $location_id ) {
+    $location_id = is_scalar( $location_id ) ? trim( (string) $location_id ) : '';
+    if ( $location_id === '' ) {
+        return array( 'name' => 'N/A', 'address' => 'N/A' );
+    }
+
+    // Cache per request to avoid repeated API calls.
+    if ( ! isset( $this->wiw_site_map ) || ! is_array( $this->wiw_site_map ) ) {
+        $this->wiw_site_map = array();
+
+        $locations_data = $this->fetch_locations_data();
+        if ( ! is_wp_error( $locations_data ) ) {
+            $sites = isset( $locations_data->sites ) ? $locations_data->sites : array();
+            foreach ( $sites as $site ) {
+                if ( isset( $site->id ) ) {
+                    $this->wiw_site_map[ (string) $site->id ] = $site;
+                }
+            }
+        }
+    }
+
+    $site = isset( $this->wiw_site_map[ $location_id ] ) ? $this->wiw_site_map[ $location_id ] : null;
+
+    if ( ! $site ) {
+        return array( 'name' => 'N/A', 'address' => 'N/A' );
+    }
+
+    $name = isset( $site->name ) ? (string) $site->name : 'N/A';
+
+    // Match admin Locations address formatting in admin_locations_page().
+    $address = trim(
+        ( $site->address ?? '' ) .
+        ( ! empty( $site->address ) && ! empty( $site->city ) ? ', ' : '' ) .
+        ( $site->city ?? '' ) .
+        ( ! empty( $site->city ) && ! empty( $site->zip_code ) ? ' ' : '' ) .
+        ( $site->zip_code ?? '' )
+    );
+    if ( $address === '' ) {
+        $address = 'Address Not Provided';
+    }
+
+    return array( 'name' => $name, 'address' => $address );
+}
 
     /**
      * Normalize a local DATETIME string to minute precision (YYYY-mm-dd HH:ii).
