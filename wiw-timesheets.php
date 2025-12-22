@@ -224,21 +224,74 @@ foreach ( $grouped as $emp_group ) {
             // Actions: placeholder for now (we’ll wire details once daily records exist).
             $actions_html = '<span style="color:#666;">N/A</span>';
 
-            $out .= '<tr>';
-            $out .= '<td>' . esc_html( $id ) . '</td>';
-            $out .= '<td>' . esc_html( $week_start . ( $week_end ? ' to ' . $week_end : '' ) ) . '</td>';
-            $out .= '<td>' . esc_html( $date_display ) . '</td>';
-            $out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
-            $out .= '<td>' . esc_html( $clock_in_out ) . '</td>';
-            $out .= '<td>' . esc_html( $employee_name ) . '</td>';
-            $out .= '<td>' . esc_html( $location_name ) . '</td>';
-            $out .= '<td>' . esc_html( $break_min ) . '</td>';
-            $out .= '<td>' . esc_html( $sched_hrs ) . '</td>';
-            $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
-            $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
-            $out .= '<td>' . esc_html( $status ) . '</td>';
-            $out .= '<td>' . $actions_html . '</td>';
-            $out .= '</tr>';
+$timesheet_id = isset( $ts->id ) ? absint( $ts->id ) : 0;
+$daily_rows   = $this->get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id );
+
+// If no daily rows exist, still show a single summary row using the timesheet header.
+if ( empty( $daily_rows ) ) {
+    $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+    $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+    $pay_period = $week_start . ( $week_end ? ' to ' . $week_end : '' );
+
+    $out .= '<tr>';
+    $out .= '<td>' . esc_html( (string) $timesheet_id ) . '</td>';
+    $out .= '<td>' . esc_html( $pay_period ) . '</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>' . esc_html( (string) ( $ts->employee_name ?? '' ) ) . '</td>';
+    $out .= '<td>' . esc_html( (string) ( $ts->location_name ?? '' ) ) . '</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>' . esc_html( (string) ( $ts->total_scheduled_hours ?? '0.00' ) ) . '</td>';
+    $out .= '<td>' . esc_html( (string) ( $ts->total_clocked_hours ?? '0.00' ) ) . '</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>' . esc_html( (string) ( $ts->status ?? '' ) ) . '</td>';
+    $out .= '<td><span style="color:#666;">N/A</span></td>';
+    $out .= '</tr>';
+
+} else {
+    // Render one row per daily record (matches Local Timesheets view behavior).
+    foreach ( $daily_rows as $dr ) {
+        $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+        $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+        $pay_period = $week_start . ( $week_end ? ' to ' . $week_end : '' );
+
+        $date_display = isset( $dr->date ) ? (string) $dr->date : 'N/A';
+
+        $sched_start = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
+        $sched_end   = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
+        $sched_start_end = ( $sched_start && $sched_end ) ? ( $sched_start . ' - ' . $sched_end ) : 'N/A';
+
+        $clock_in  = isset( $dr->clock_in ) ? (string) $dr->clock_in : '';
+        $clock_out = isset( $dr->clock_out ) ? (string) $dr->clock_out : '';
+        $clock_in_out = ( $clock_in || $clock_out ) ? ( trim( $clock_in ) . ' - ' . trim( $clock_out ) ) : 'N/A';
+
+        $break_min = isset( $dr->break_minutes ) ? (string) $dr->break_minutes : '0';
+
+        $sched_hrs   = isset( $dr->scheduled_hours ) ? (string) $dr->scheduled_hours : '0.00';
+        $clocked_hrs = isset( $dr->clocked_hours ) ? (string) $dr->clocked_hours : '0.00';
+        $payable_hrs = isset( $dr->payable_hours ) ? (string) $dr->payable_hours : '0.00';
+
+        $status = isset( $dr->status ) ? (string) $dr->status : (string) ( $ts->status ?? '' );
+
+        $out .= '<tr>';
+        $out .= '<td>' . esc_html( (string) $timesheet_id ) . '</td>';
+        $out .= '<td>' . esc_html( $pay_period ) . '</td>';
+        $out .= '<td>' . esc_html( $date_display ) . '</td>';
+        $out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
+        $out .= '<td>' . esc_html( $clock_in_out ) . '</td>';
+        $out .= '<td>' . esc_html( (string) ( $ts->employee_name ?? '' ) ) . '</td>';
+        $out .= '<td>' . esc_html( (string) ( $ts->location_name ?? '' ) ) . '</td>';
+        $out .= '<td>' . esc_html( $break_min ) . '</td>';
+        $out .= '<td>' . esc_html( $sched_hrs ) . '</td>';
+        $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
+        $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
+        $out .= '<td>' . esc_html( $status ) . '</td>';
+        $out .= '<td><span style="color:#666;">View</span></td>';
+        $out .= '</tr>';
+    }
+}
+
         }
 
         $out .= '</tbody></table>';
@@ -281,6 +334,35 @@ $results = $wpdb->get_results( $prepared );
 
 return $results;
 
+}
+
+/**
+ * Fetch daily records for a given timesheet ID from the compatibility table/view.
+ * Scoped by location_id to ensure client isolation.
+ */
+private function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id ) {
+    global $wpdb;
+
+    $table_daily = $wpdb->prefix . 'wiw_daily_records';
+
+    $client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+    $timesheet_id = absint( $timesheet_id );
+
+    if ( $client_id === '' || $timesheet_id <= 0 ) {
+        return array();
+    }
+
+    $sql = "
+        SELECT *
+        FROM {$table_daily}
+        WHERE timesheet_id = %d
+          AND location_id = %s
+        ORDER BY date ASC, id ASC
+    ";
+
+    $prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+
+    return $wpdb->get_results( $prepared );
 }
 
 
