@@ -344,6 +344,31 @@ $out .= '<td>' . $actions_html . '</td>';
     }
 }
 
+// Expandable legend/reference (shown once below all tables).
+$out .= '<hr style="margin:24px 0;" />';
+$out .= '<details style="border: 1px solid #ccd0d4; background: #fff; padding: 10px; margin-top: 10px;">';
+$out .= '<summary style="cursor: pointer; font-weight: 600; padding: 8px; background: #f6f7f7; margin: -10px -10px 10px;">';
+$out .= '💡 Click to Expand: Field Reference Legend';
+$out .= '</summary>';
+
+$out .= '<div style="padding-top: 8px;">';
+$out .= '<table class="wp-list-table widefat fixed striped" style="margin-top: 0;">';
+$out .= '<thead><tr><th style="width:220px;">Field</th><th>Description</th></tr></thead>';
+$out .= '<tbody>';
+
+$out .= '<tr><td><strong>Shift Date</strong></td><td>The date of the shift entry. This corresponds to the specific day the time record applies to within the pay period.</td></tr>';
+$out .= '<tr><td><strong>Sched. Start/End</strong></td><td>The scheduled shift start and end time (local time). If the shift schedule is not available, this will show <em>N/A</em>.</td></tr>';
+$out .= '<tr><td><strong>Clock In/Clock Out</strong></td><td>The actual clock-in and clock-out time recorded (local time). If the shift is still active and has no clock-out, it shows <em>Active (N/A)</em>.</td></tr>';
+$out .= '<tr><td><strong>Break (Min)</strong></td><td>Total break time deducted, shown in minutes.</td></tr>';
+$out .= '<tr><td><strong>Sched. Hrs</strong></td><td>Total scheduled hours for the shift entry.</td></tr>';
+$out .= '<tr><td><strong>Clocked Hrs</strong></td><td>Total hours actually worked for the shift entry, based on clock-in/clock-out minus breaks.</td></tr>';
+$out .= '<tr><td><strong>Payable Hrs</strong></td><td>Total hours payable for the shift entry. This is typically the clocked hours after break deductions and any business rules applied.</td></tr>';
+$out .= '<tr><td><strong>Status</strong></td><td>The approval status of the entry (for example: <em>pending</em> or <em>approved</em>).</td></tr>';
+
+$out .= '</tbody></table>';
+$out .= '</div>';
+$out .= '</details>';
+
     return $out;
 }
 
