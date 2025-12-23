@@ -532,9 +532,20 @@ $out .= '<td>' . $actions_html . '</td>';
         			$oldv  = isset( $lg->old_value ) ? (string) $lg->old_value : '';
         			$newv  = isset( $lg->new_value ) ? (string) $lg->new_value : '';
 
-        			// Match admin-style minute precision if the value looks like a datetime.
-        			$oldv_disp = $this->normalize_datetime_to_minute( $oldv );
-        			$newv_disp = $this->normalize_datetime_to_minute( $newv );
+// Client-friendly display: show time only (12-hour) when value is a datetime.
+$oldv_norm = $this->normalize_datetime_to_minute( $oldv );
+$newv_norm = $this->normalize_datetime_to_minute( $newv );
+
+$oldv_disp = $oldv_norm;
+$newv_disp = $newv_norm;
+
+if ( preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $oldv_norm ) ) {
+	$oldv_disp = date_i18n( 'g:i a', strtotime( $oldv_norm ) );
+}
+
+if ( preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $newv_norm ) ) {
+	$newv_disp = date_i18n( 'g:i a', strtotime( $newv_norm ) );
+}
 
         			$who = '';
         			if ( ! empty( $lg->edited_by_display_name ) ) {
