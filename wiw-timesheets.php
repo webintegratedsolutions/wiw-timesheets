@@ -703,10 +703,13 @@ if (rawOut.trim() !== "" && outVal === "") {
     return;
   }
 
-  var ok = window.confirm(
+var displayIn  = (inVal && inVal !== "") ? inVal : "N/A";
+var displayOut = (outVal && outVal !== "") ? outVal : "N/A";
+
+var ok = window.confirm(
   "Confirm Save?\n\n" +
-  "Clock In: " + inVal + "\n" +
-  "Clock Out: " + outVal + "\n" +
+  "Clock In: " + displayIn + "\n" +
+  "Clock Out: " + displayOut + "\n" +
   "Break (Min): " + breakVal + "\n\n" +
   "Click OK to save, or Cancel to discard changes."
 );
