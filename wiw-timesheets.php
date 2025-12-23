@@ -328,16 +328,16 @@ $out .= '</tbody></table>';
 
         $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
         $out .= '<thead><tr>';
-        $out .= '<th>Shift Date</th>';
-        $out .= '<th>Sched. Start/End</th>';
-        $out .= '<th>Clock In/Clock Out</th>';
-        $out .= '<th>Break (Min)</th>';
-        $out .= '<th>Sched. Hrs</th>';
-        $out .= '<th>Clocked Hrs</th>';
-        $out .= '<th>Payable Hrs</th>';
-        $out .= '<th>Status</th>';
-        $out .= '<th>Actions</th>';
-        $out .= '</tr></thead>';
+$out .= '<th>Shift Date</th>';
+$out .= '<th>Sched. Start/End</th>';
+$out .= '<th>Clock In</th>';
+$out .= '<th>Clock Out</th>';
+$out .= '<th>Break (Min)</th>';
+$out .= '<th>Sched. Hrs</th>';
+$out .= '<th>Clocked Hrs</th>';
+$out .= '<th>Payable Hrs</th>';
+$out .= '<th>Status</th>';
+$out .= '<th>Actions</th>';
 
         $out .= '<tbody>';
 
@@ -416,9 +416,31 @@ if ( empty( $daily_rows ) ) {
 
         $out .= '<tr>';
         $out .= '<td>' . esc_html( $date_display ) . '</td>';
-        $out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
-        $out .= '<td>' . esc_html( $clock_in_out ) . '</td>';
-        $out .= '<td>' . esc_html( $break_min ) . '</td>';
+$out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
+
+// Raw HH:MM for edit inputs (local DATETIME -> HH:MM)
+$clock_in_raw  = ( $clock_in && strlen( (string) $clock_in ) >= 16 ) ? substr( (string) $clock_in, 11, 5 ) : '';
+$clock_out_raw = ( $clock_out && strlen( (string) $clock_out ) >= 16 ) ? substr( (string) $clock_out, 11, 5 ) : '';
+
+// Display values (existing helper formatting)
+$clock_in_display  = $this->wiw_format_time_local( $clock_in );
+$clock_out_display = $this->wiw_format_time_local( $clock_out );
+
+$out .= '<td class="wiw-client-cell-clock-in" data-orig="' . esc_attr( $clock_in_raw ) . '">'
+    . '<span class="wiw-client-view">' . esc_html( $clock_in_display !== '' ? $clock_in_display : 'N/A' ) . '</span>'
+    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr( $clock_in_raw ) . '" style="display:none; width:80px;" />'
+    . '</td>';
+
+$out .= '<td class="wiw-client-cell-clock-out" data-orig="' . esc_attr( $clock_out_raw ) . '">'
+    . '<span class="wiw-client-view">' . esc_html( $clock_out_display !== '' ? $clock_out_display : 'N/A' ) . '</span>'
+    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr( $clock_out_raw ) . '" style="display:none; width:80px;" />'
+    . '</td>';
+
+$out .= '<td class="wiw-client-cell-break" data-orig="' . esc_attr( (string) $break_min ) . '">'
+    . '<span class="wiw-client-view">' . esc_html( (string) $break_min ) . '</span>'
+    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="0" value="' . esc_attr( (string) $break_min ) . '" style="display:none; width:70px;" />'
+    . '</td>';
+
         $out .= '<td>' . esc_html( $sched_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
@@ -459,10 +481,12 @@ $details_html .= '</table>';
 $details_html .= '</div>';
 $details_html .= '</details>';
 
-$actions_html  = '<div style="display:flex;flex-direction:column;gap:6px;">';
-$actions_html .= '<a href="#" class="wiw-btn secondary" onclick="return false;" aria-disabled="true">Edit</a>';
-$actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="true">Approve</a>';
+$actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
+$actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;">Save</button>';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
 $actions_html .= '</div>';
+
 
 $out .= '<td>' . $actions_html . '</td>';
 
@@ -491,7 +515,8 @@ $out .= '<tbody>';
 
 $out .= '<tr><td><strong>Shift Date</strong></td><td>The date of the shift entry. This corresponds to the specific day the time record applies to within the pay period.</td></tr>';
 $out .= '<tr><td><strong>Sched. Start/End</strong></td><td>The scheduled shift start and end time (local time). If the shift schedule is not available, this will show <em>N/A</em>.</td></tr>';
-$out .= '<tr><td><strong>Clock In/Clock Out</strong></td><td>The actual clock-in and clock-out time recorded (local time). If the shift is still active and has no clock-out, it shows <em>Active (N/A)</em>.</td></tr>';
+$out .= '<tr><td><strong>Clock In</strong></td><td>The clock-in time for the shift entry (if available).</td></tr>';
+$out .= '<tr><td><strong>Clock Out</strong></td><td>The clock-out time for the shift entry (if available). If missing, it may indicate an active shift.</td></tr>';
 $out .= '<tr><td><strong>Break (Min)</strong></td><td>Total break time deducted, shown in minutes.</td></tr>';
 $out .= '<tr><td><strong>Sched. Hrs</strong></td><td>Total scheduled hours for the shift entry.</td></tr>';
 $out .= '<tr><td><strong>Clocked Hrs</strong></td><td>Total hours actually worked for the shift entry, based on clock-in/clock-out minus breaks.</td></tr>';
@@ -502,7 +527,116 @@ $out .= '</tbody></table>';
 $out .= '</div>';
 $out .= '</details>';
 
-    return $out;
+/**
+ * Client UI inline edit behavior (UI only — no persistence yet)
+ */
+$out .= '<script>
+(function(){
+  function closestRow(el){
+    while(el && el.tagName && el.tagName.toLowerCase() !== "tr"){ el = el.parentNode; }
+    return el;
+  }
+
+  function setEditing(row, isEditing){
+    var inputs = row.querySelectorAll("input.wiw-client-edit");
+    var views  = row.querySelectorAll("span.wiw-client-view");
+
+    for (var i=0;i<inputs.length;i++){ inputs[i].style.display = isEditing ? "" : "none"; }
+    for (var j=0;j<views.length;j++){ views[j].style.display = isEditing ? "none" : ""; }
+
+    var editBtn   = row.querySelector(".wiw-client-edit-btn");
+    var saveBtn   = row.querySelector(".wiw-client-save-btn");
+    var cancelBtn = row.querySelector(".wiw-client-cancel-btn");
+
+    if (editBtn)   editBtn.style.display   = isEditing ? "none" : "";
+    if (saveBtn)   saveBtn.style.display   = isEditing ? "" : "none";
+    if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
+  }
+
+  function updateViewFromInputs(row){
+    // Update the visible spans from current input values (no validation/persistence yet)
+    var cellIn    = row.querySelector("td.wiw-client-cell-clock-in");
+    var cellOut   = row.querySelector("td.wiw-client-cell-clock-out");
+    var cellBreak = row.querySelector("td.wiw-client-cell-break");
+
+    if (cellIn){
+      var inInput = cellIn.querySelector("input.wiw-client-edit");
+      var inView  = cellIn.querySelector("span.wiw-client-view");
+      if (inInput && inView){ inView.textContent = inInput.value ? inInput.value : "N/A"; }
+    }
+    if (cellOut){
+      var outInput = cellOut.querySelector("input.wiw-client-edit");
+      var outView  = cellOut.querySelector("span.wiw-client-view");
+      if (outInput && outView){ outView.textContent = outInput.value ? outInput.value : "N/A"; }
+    }
+    if (cellBreak){
+      var bInput = cellBreak.querySelector("input.wiw-client-edit");
+      var bView  = cellBreak.querySelector("span.wiw-client-view");
+      if (bInput && bView){ bView.textContent = bInput.value ? bInput.value : "0"; }
+    }
+  }
+
+  function restoreOriginal(row){
+    var cells = [
+      row.querySelector("td.wiw-client-cell-clock-in"),
+      row.querySelector("td.wiw-client-cell-clock-out"),
+      row.querySelector("td.wiw-client-cell-break")
+    ];
+
+    for (var i=0;i<cells.length;i++){
+      var cell = cells[i];
+      if (!cell) continue;
+
+      var orig = cell.getAttribute("data-orig") || "";
+      var input = cell.querySelector("input.wiw-client-edit");
+      var view  = cell.querySelector("span.wiw-client-view");
+
+      if (input) input.value = orig;
+
+      if (view){
+        if (cell.classList.contains("wiw-client-cell-break")){
+          view.textContent = orig ? orig : "0";
+        } else {
+          view.textContent = orig ? orig : "N/A";
+        }
+      }
+    }
+  }
+
+  document.addEventListener("click", function(e){
+    var t = e.target;
+
+    if (t && t.classList && t.classList.contains("wiw-client-edit-btn")){
+      e.preventDefault();
+      var row = closestRow(t);
+      if (!row) return;
+      setEditing(row, true);
+      return;
+    }
+
+    if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")){
+      e.preventDefault();
+      var row2 = closestRow(t);
+      if (!row2) return;
+      restoreOriginal(row2);
+      setEditing(row2, false);
+      return;
+    }
+
+    if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
+      e.preventDefault();
+      var row3 = closestRow(t);
+      if (!row3) return;
+      updateViewFromInputs(row3);
+      setEditing(row3, false);
+      return;
+    }
+  });
+})();
+</script>';
+
+return $out;
+
 }
 
 /**
