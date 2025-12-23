@@ -113,6 +113,8 @@ public function render_client_ui() {
 
     // Always show the client account number for now (debug).
     $out  = '<div class="wiw-client-timesheets">';
+    $out .= '<div id="wiwts-client-ajax" data-ajax-url="' . esc_attr( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '"></div>';
+
 
     if ( $client_id === '' ) {
         $out .= '<p>No client account number found on your user profile.</p>';
@@ -630,30 +632,82 @@ if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
   e.preventDefault();
 
   var row = closestRow(t);
-  if (!row) {
-    alert("Save clicked but row not found");
+  if (!row) { alert("Save clicked but row not found"); return; }
+
+  var cfg = document.getElementById("wiwts-client-ajax");
+  if (!cfg) { alert("Missing AJAX config"); return; }
+
+  var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
+  var nonce = cfg.getAttribute("data-nonce") || "";
+  if (!ajaxUrl || !nonce) { alert("Missing AJAX url/nonce"); return; }
+
+  var entryId = t.getAttribute("data-entry-id") || "";
+  if (!entryId) { alert("Missing Entry ID"); return; }
+
+  var inEl = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
+  var outEl = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
+  var breakEl = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
+
+  var inVal = inEl ? (inEl.value || "").trim() : "";
+  var outVal = outEl ? (outEl.value || "").trim() : "";
+  var breakVal = breakEl ? (breakEl.value || "").trim() : "0";
+  if (breakVal === "") breakVal = "0";
+
+  if (!/^\d{2}:\d{2}$/.test(inVal) || !/^\d{2}:\d{2}$/.test(outVal)) {
+    alert("Clock In/Out must be HH:MM (24-hour)");
+    return;
+  }
+  if (!/^\d+$/.test(breakVal)) {
+    alert("Break (Min) must be a whole number");
     return;
   }
 
-  var entryId = t.getAttribute("data-entry-id");
+  var ok = window.confirm(
+  "Confirm Save?\n\n" +
+  "Clock In: " + inVal + "\n" +
+  "Clock Out: " + outVal + "\n" +
+  "Break (Min): " + breakVal + "\n\n" +
+  "Click OK to save, or Cancel to discard changes."
+);
 
-  var cellIn = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
-  var cellOut = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
-  var cellBreak = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
+if (!ok) {
+  return;
+}
 
-  var inVal = cellIn ? cellIn.value : "";
-  var outVal = cellOut ? cellOut.value : "";
-  var breakVal = cellBreak ? cellBreak.value : "";
 
-  alert(
-    "SAVE BUTTON WORKS\n\n" +
-    "Entry ID: " + entryId + "\n" +
-    "Clock In: " + inVal + "\n" +
-    "Clock Out: " + outVal + "\n" +
-    "Break (Min): " + breakVal
-  );
+  var body = new URLSearchParams();
+  body.append("action", "wiw_client_update_entry");
+  body.append("security", nonce);
+  body.append("entry_id", entryId);
+  body.append("clock_in_time", inVal);
+  body.append("clock_out_time", outVal);
+  body.append("break_minutes", breakVal);
+
+  fetch(ajaxUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+    body: body.toString()
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(resp){
+  if (!resp || !resp.success) {
+    var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Save failed";
+    alert(msg);
+    return;
+  }
+
+  var newTotal = (resp && resp.data && resp.data.total_clocked_hours !== undefined)
+    ? resp.data.total_clocked_hours
+    : "";
+
+  alert("Saved successfully.\n\nNew Total Clocked Hours: " + newTotal);
 
   window.location.reload();
+})
+  .catch(function(){
+    alert("AJAX error saving entry");
+  });
+
   return;
 }
 
@@ -2253,6 +2307,168 @@ wp_send_json_success(
     )
 );
 }
+
+public function ajax_client_update_entry() {
+	if ( ! is_user_logged_in() ) {
+		wp_send_json_error( array( 'message' => 'Not logged in.' ), 403 );
+	}
+
+	check_ajax_referer( 'wiw_local_edit_entry', 'security' );
+
+	global $wpdb;
+
+	$entry_id       = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+	$clock_in_time  = isset( $_POST['clock_in_time'] ) ? sanitize_text_field( wp_unslash( $_POST['clock_in_time'] ) ) : '';
+	$clock_out_time = isset( $_POST['clock_out_time'] ) ? sanitize_text_field( wp_unslash( $_POST['clock_out_time'] ) ) : '';
+	$break_minutes  = isset( $_POST['break_minutes'] ) ? absint( $_POST['break_minutes'] ) : 0;
+
+	if ( ! $entry_id ) {
+		wp_send_json_error( array( 'message' => 'Missing entry_id.' ), 400 );
+	}
+
+	if ( ! preg_match( '/^\d{2}:\d{2}$/', $clock_in_time ) || ! preg_match( '/^\d{2}:\d{2}$/', $clock_out_time ) ) {
+		wp_send_json_error( array( 'message' => 'Clock In/Out must be HH:MM format.' ), 400 );
+	}
+
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+	$table_headers = $wpdb->prefix . 'wiw_timesheets';
+
+	$entry = $wpdb->get_row(
+		$wpdb->prepare(
+			"SELECT * FROM {$table_entries} WHERE id = %d",
+			$entry_id
+		)
+	);
+
+	if ( ! $entry ) {
+		wp_send_json_error( array( 'message' => 'Entry not found.' ), 404 );
+	}
+
+	$timesheet_id = isset( $entry->timesheet_id ) ? absint( $entry->timesheet_id ) : 0;
+	$date         = isset( $entry->date ) ? (string) $entry->date : '';
+
+	if ( ! $timesheet_id ) {
+		wp_send_json_error( array( 'message' => 'Entry is missing timesheet_id.' ), 400 );
+	}
+	if ( $date === '' ) {
+		wp_send_json_error( array( 'message' => 'Entry is missing date.' ), 400 );
+	}
+
+	// Build local datetimes based on entry date.
+	$tz_string = get_option( 'timezone_string' );
+	if ( empty( $tz_string ) ) {
+		$tz_string = 'UTC';
+	}
+	$tz = new DateTimeZone( $tz_string );
+
+	try {
+		$dt_in  = new DateTime( $date . ' ' . $clock_in_time . ':00', $tz );
+		$dt_out = new DateTime( $date . ' ' . $clock_out_time . ':00', $tz );
+	} catch ( Exception $e ) {
+		wp_send_json_error( array( 'message' => 'Invalid time values.' ), 400 );
+	}
+
+	if ( $dt_out <= $dt_in ) {
+		wp_send_json_error( array( 'message' => 'Clock Out must be after Clock In.' ), 400 );
+	}
+
+	$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
+	if ( $break_minutes < 0 ) {
+		$break_minutes = 0;
+	}
+	if ( $break_minutes > $total_minutes ) {
+		$break_minutes = $total_minutes;
+	}
+
+	$clocked_minutes = max( 0, $total_minutes - $break_minutes );
+	$clocked_hours   = round( $clocked_minutes / 60, 2 );
+
+	// Payable hours: clamp to scheduled window if scheduled_start/end exist.
+	$payable_hours = $clocked_hours;
+
+	try {
+		$sched_start_raw = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+		$sched_end_raw   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+		if ( $sched_start_raw !== '' || $sched_end_raw !== '' ) {
+			$pay_in  = clone $dt_in;
+			$pay_out = clone $dt_out;
+
+			if ( $sched_start_raw !== '' ) {
+				$sched_start_dt = new DateTime( $sched_start_raw, $tz );
+				if ( $pay_in < $sched_start_dt ) {
+					$pay_in = $sched_start_dt;
+				}
+			}
+			if ( $sched_end_raw !== '' ) {
+				$sched_end_dt = new DateTime( $sched_end_raw, $tz );
+				if ( $pay_out > $sched_end_dt ) {
+					$pay_out = $sched_end_dt;
+				}
+			}
+
+			if ( $pay_out > $pay_in ) {
+				$pay_total_minutes = (int) round( ( $pay_out->getTimestamp() - $pay_in->getTimestamp() ) / 60 );
+				$pay_minutes       = max( 0, $pay_total_minutes - $break_minutes );
+				$payable_hours     = round( $pay_minutes / 60, 2 );
+			} else {
+				$payable_hours = 0.00;
+			}
+		}
+	} catch ( Exception $e ) {
+		$payable_hours = $clocked_hours;
+	}
+
+	$clock_in_local  = $dt_in->format( 'Y-m-d H:i:s' );
+	$clock_out_local = $dt_out->format( 'Y-m-d H:i:s' );
+
+	$updated = $wpdb->update(
+		$table_entries,
+		array(
+			'clock_in'      => $clock_in_local,
+			'clock_out'     => $clock_out_local,
+			'break_minutes' => (int) $break_minutes,
+			'clocked_hours' => (float) $clocked_hours,
+			'payable_hours' => (float) $payable_hours,
+			'updated_at'    => current_time( 'mysql' ),
+		),
+		array( 'id' => $entry_id ),
+		array( '%s', '%s', '%d', '%f', '%f', '%s' ),
+		array( '%d' )
+	);
+
+	if ( $updated === false ) {
+		wp_send_json_error( array( 'message' => 'Database update failed.' ), 500 );
+	}
+
+	// Keep header totals in sync.
+	$total_clocked = (float) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COALESCE(SUM(clocked_hours), 0) FROM {$table_entries} WHERE timesheet_id = %d",
+			$timesheet_id
+		)
+	);
+
+	$wpdb->update(
+		$table_headers,
+		array(
+			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+			'updated_at'          => current_time( 'mysql' ),
+		),
+		array( 'id' => $timesheet_id ),
+		array( '%f', '%s' ),
+		array( '%d' )
+	);
+
+	wp_send_json_success(
+	array(
+		'message'             => 'Saved.',
+		'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+	)
+);
+
+}
+
 
 public function ajax_local_approve_entry() {
     // Capability
