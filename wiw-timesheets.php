@@ -2514,6 +2514,102 @@ public function ajax_client_update_entry() {
 		'updated_at'    => current_time( 'mysql' ),
 	);
 
+    // --- LOGGING (match backend admin behavior) ---
+$now          = current_time( 'mysql' );
+$current_user = wp_get_current_user();
+$edited_by_login = (string) ( $current_user->user_login ?? '' );
+
+// Load header (for employee/location/week fields in logs).
+$header = $wpdb->get_row(
+	$wpdb->prepare(
+		"SELECT * FROM {$table_headers} WHERE id = %d",
+		$timesheet_id
+	)
+);
+
+$employee_id     = (int) ( $header->employee_id ?? 0 );
+$employee_name   = (string) ( $header->employee_name ?? '' );
+$location_id     = (int) ( $header->location_id ?? ( $entry->location_id ?? 0 ) );
+$location_name   = (string) ( $header->location_name ?? ( $entry->location_name ?? '' ) );
+$week_start_date = (string) ( $header->week_start_date ?? '' );
+
+// Old values (from DB)
+$old_clock_in_raw  = (string) ( $entry->clock_in  ? $entry->clock_in  : '' );
+$old_clock_out_raw = (string) ( $entry->clock_out ? $entry->clock_out : '' );
+
+$old_clock_in_norm  = $this->normalize_datetime_to_minute( $old_clock_in_raw );
+$old_clock_out_norm = $this->normalize_datetime_to_minute( $old_clock_out_raw );
+
+// New values (what we are about to store)
+$new_clock_in_raw  = isset( $update_data['clock_in'] )  ? (string) $update_data['clock_in']  : $old_clock_in_raw;
+$new_clock_out_raw = isset( $update_data['clock_out'] ) ? (string) $update_data['clock_out'] : $old_clock_out_raw;
+
+$new_clock_in_norm  = $this->normalize_datetime_to_minute( $new_clock_in_raw );
+$new_clock_out_norm = $this->normalize_datetime_to_minute( $new_clock_out_raw );
+
+$old_break = (int) $entry->break_minutes;
+$new_break = (int) $break_minutes;
+
+if ( $old_clock_in_norm !== $new_clock_in_norm ) {
+	$this->insert_local_edit_log( array(
+		'timesheet_id'           => $timesheet_id,
+		'entry_id'               => $entry_id,
+		'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+		'edit_type'              => 'Clock in',
+		'old_value'              => $old_clock_in_norm,
+		'new_value'              => $new_clock_in_norm,
+		'edited_by_user_id'      => get_current_user_id(),
+		'edited_by_user_login'   => $edited_by_login,
+		'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+		'employee_id'            => $employee_id,
+		'employee_name'          => $employee_name,
+		'location_id'            => $location_id,
+		'location_name'          => $location_name,
+		'week_start_date'        => $week_start_date,
+		'created_at'             => $now,
+	) );
+}
+
+if ( $old_clock_out_norm !== $new_clock_out_norm ) {
+	$this->insert_local_edit_log( array(
+		'timesheet_id'           => $timesheet_id,
+		'entry_id'               => $entry_id,
+		'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+		'edit_type'              => 'Clock out',
+		'old_value'              => $old_clock_out_norm,
+		'new_value'              => $new_clock_out_norm,
+		'edited_by_user_id'      => get_current_user_id(),
+		'edited_by_user_login'   => $edited_by_login,
+		'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+		'employee_id'            => $employee_id,
+		'employee_name'          => $employee_name,
+		'location_id'            => $location_id,
+		'location_name'          => $location_name,
+		'week_start_date'        => $week_start_date,
+		'created_at'             => $now,
+	) );
+}
+
+if ( $old_break !== $new_break ) {
+	$this->insert_local_edit_log( array(
+		'timesheet_id'           => $timesheet_id,
+		'entry_id'               => $entry_id,
+		'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+		'edit_type'              => 'Break Mins',
+		'old_value'              => (string) $old_break,
+		'new_value'              => (string) $new_break,
+		'edited_by_user_id'      => get_current_user_id(),
+		'edited_by_user_login'   => $edited_by_login,
+		'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+		'employee_id'            => $employee_id,
+		'employee_name'          => $employee_name,
+		'location_id'            => $location_id,
+		'location_name'          => $location_name,
+		'week_start_date'        => $week_start_date,
+		'created_at'             => $now,
+	) );
+}
+
 	$updated = $wpdb->update(
 		$table_entries,
 		$update_data,
