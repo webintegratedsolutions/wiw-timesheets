@@ -515,13 +515,13 @@ $out .= '<td>' . $actions_html . '</td>';
         	if ( empty( $edit_logs ) ) {
         		$out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
         	} else {
-        		$out .= '<table class="wp-list-table widefat fixed striped">';
+        		$out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
         		$out .= '<thead><tr>';
-        		$out .= '<th style="width:160px;">When</th>';
-        		$out .= '<th style="width:120px;">Field</th>';
+        		$out .= '<th>When</th>';
+        		$out .= '<th>Field</th>';
         		$out .= '<th>Old</th>';
         		$out .= '<th>New</th>';
-        		$out .= '<th style="width:200px;">Edited By</th>';
+        		$out .= '<th>Edited By</th>';
         		$out .= '</tr></thead>';
         		$out .= '<tbody>';
 
@@ -567,7 +567,9 @@ if ( preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $newv_norm ) ) {
         	}
 
         	$out .= '</div>';
-        	$out .= '</details>';
+$out .= '</details>';
+$out .= '<hr class="wiw-edit-logs-separator" />';
+
         }
 
     }

@@ -128,3 +128,16 @@
 .wiw-client-timesheets .wiw-legend th.field-col {
   width: 220px;
 }
+
+/* Edit Logs spacing */
+.wiw-edit-logs-table th,
+.wiw-edit-logs-table td {
+	padding: 10px 12px;
+	vertical-align: middle;
+}
+
+.wiw-edit-logs-separator {
+	margin: 24px 0;
+	border: 0;
+	border-top: 1px solid #ccd0d4;
+}
