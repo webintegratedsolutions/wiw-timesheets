@@ -81,6 +81,9 @@ class WIW_Timesheet_Manager {
         // 4. NEW: AJAX for local entry hours update (Local Timesheets view)
         add_action( 'wp_ajax_wiw_local_update_entry', array( $this, 'ajax_local_update_entry' ) );
 
+        // NEW: AJAX for client entry hours update (Client UI)
+        add_action( 'wp_ajax_wiw_client_update_entry', array( $this, 'ajax_client_update_entry' ) );
+
         // 5. Login handler
         add_action( 'admin_post_wiw_login_handler', 'wiwts_handle_wiw_login' );
 
@@ -483,7 +486,7 @@ $details_html .= '</details>';
 
 $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
-$actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;">Save</button>';
+$actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
 $actions_html .= '</div>';
 
@@ -623,14 +626,37 @@ $out .= '<script>
       return;
     }
 
-    if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
-      e.preventDefault();
-      var row3 = closestRow(t);
-      if (!row3) return;
-      updateViewFromInputs(row3);
-      setEditing(row3, false);
-      return;
-    }
+if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
+  e.preventDefault();
+
+  var row = closestRow(t);
+  if (!row) {
+    alert("Save clicked but row not found");
+    return;
+  }
+
+  var entryId = t.getAttribute("data-entry-id");
+
+  var cellIn = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
+  var cellOut = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
+  var cellBreak = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
+
+  var inVal = cellIn ? cellIn.value : "";
+  var outVal = cellOut ? cellOut.value : "";
+  var breakVal = cellBreak ? cellBreak.value : "";
+
+  alert(
+    "SAVE BUTTON WORKS\n\n" +
+    "Entry ID: " + entryId + "\n" +
+    "Clock In: " + inVal + "\n" +
+    "Clock Out: " + outVal + "\n" +
+    "Break (Min): " + breakVal
+  );
+
+  window.location.reload();
+  return;
+}
+
   });
 })();
 </script>';
