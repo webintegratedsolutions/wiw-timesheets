@@ -503,8 +503,65 @@ $out .= '<td>' . $actions_html . '</td>';
         }
 
         $out .= '</tbody></table>';
+
+        // Expandable edit logs (per-timesheet, shown under each daily table when that timesheet is open).
+        if ( isset( $timesheet_id_for_period ) && $timesheet_id_for_period !== '' ) {
+        	$edit_logs = $this->get_scoped_edit_logs_for_timesheet( $client_id, absint( $timesheet_id_for_period ) );
+
+        	$out .= '<details class="wiw-edit-logs" style="margin:12px 0 22px;">';
+        	$out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
+        	$out .= '<div style="padding-top:8px;">';
+
+        	if ( empty( $edit_logs ) ) {
+        		$out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
+        	} else {
+        		$out .= '<table class="wp-list-table widefat fixed striped">';
+        		$out .= '<thead><tr>';
+        		$out .= '<th style="width:160px;">When</th>';
+        		$out .= '<th style="width:120px;">Field</th>';
+        		$out .= '<th>Old</th>';
+        		$out .= '<th>New</th>';
+        		$out .= '<th style="width:200px;">Edited By</th>';
+        		$out .= '</tr></thead>';
+        		$out .= '<tbody>';
+
+        		foreach ( $edit_logs as $lg ) {
+        			$when = isset( $lg->created_at ) ? $this->wiw_format_datetime_local_pretty( (string) $lg->created_at ) : '';
+
+        			$field = isset( $lg->edit_type ) ? (string) $lg->edit_type : '';
+        			$oldv  = isset( $lg->old_value ) ? (string) $lg->old_value : '';
+        			$newv  = isset( $lg->new_value ) ? (string) $lg->new_value : '';
+
+        			// Match admin-style minute precision if the value looks like a datetime.
+        			$oldv_disp = $this->normalize_datetime_to_minute( $oldv );
+        			$newv_disp = $this->normalize_datetime_to_minute( $newv );
+
+        			$who = '';
+        			if ( ! empty( $lg->edited_by_display_name ) ) {
+        				$who = (string) $lg->edited_by_display_name;
+        			} elseif ( ! empty( $lg->edited_by_user_login ) ) {
+        				$who = (string) $lg->edited_by_user_login;
+        			}
+
+        			$out .= '<tr>';
+        			$out .= '<td>' . esc_html( $when !== '' ? $when : 'N/A' ) . '</td>';
+        			$out .= '<td><strong>' . esc_html( $field !== '' ? $field : 'N/A' ) . '</strong></td>';
+        			$out .= '<td>' . esc_html( $oldv_disp !== '' ? $oldv_disp : 'N/A' ) . '</td>';
+        			$out .= '<td>' . esc_html( $newv_disp !== '' ? $newv_disp : 'N/A' ) . '</td>';
+        			$out .= '<td>' . esc_html( $who !== '' ? $who : 'N/A' ) . '</td>';
+        			$out .= '</tr>';
+        		}
+
+        		$out .= '</tbody></table>';
+        	}
+
+        	$out .= '</div>';
+        	$out .= '</details>';
+        }
+
     }
 }
+
 
 // Expandable legend/reference (shown once below all tables).
 $out .= '<hr style="margin:24px 0;" />';
@@ -1033,6 +1090,39 @@ private function wiw_format_datetime_local_pretty( $datetime_str ) {
     } catch ( Exception $e ) {
         return 'N/A';
     }
+}
+
+/**
+ * Fetch edit logs for a given timesheet ID.
+ * Scoped by location_id to ensure client isolation.
+ */
+private function get_scoped_edit_logs_for_timesheet( $client_id, $timesheet_id ) {
+	global $wpdb;
+
+	$table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+	$table_ts   = $wpdb->prefix . 'wiw_timesheets';
+
+	$client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+	$timesheet_id = absint( $timesheet_id );
+
+	if ( $client_id === '' || $timesheet_id <= 0 ) {
+		return array();
+	}
+
+	// Join to timesheets to enforce location scope.
+	$sql = "
+		SELECT l.*
+		FROM {$table_logs} l
+		INNER JOIN {$table_ts} ts ON ts.id = l.timesheet_id
+		WHERE l.timesheet_id = %d
+		  AND ts.location_id = %s
+		ORDER BY l.created_at DESC, l.id DESC
+		LIMIT 200
+	";
+
+	$prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+
+	return $wpdb->get_results( $prepared );
 }
 
 /**
