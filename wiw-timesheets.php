@@ -653,10 +653,51 @@ if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
   var breakVal = breakEl ? (breakEl.value || "").trim() : "0";
   if (breakVal === "") breakVal = "0";
 
-  if (!/^\d{2}:\d{2}$/.test(inVal) || !/^\d{2}:\d{2}$/.test(outVal)) {
-    alert("Clock In/Out must be HH:MM (24-hour)");
-    return;
+// Allow N/A (blank) times.
+// Also accept 12-hour input like "8:04 am" and convert to 24-hour "08:04".
+function normalizeTime(val) {
+  val = (val || "").trim().toLowerCase();
+  if (val === "") return "";
+
+  // Already HH:MM (24-hour)
+  if (/^\d{2}:\d{2}$/.test(val)) return val;
+
+  // Accept H:MM am/pm or HH:MM am/pm
+  var m = val.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/);
+  if (!m) return "";
+
+  var h = parseInt(m[1], 10);
+  var mm = m[2];
+  var ap = m[3];
+
+  if (isNaN(h) || h < 1 || h > 12) return "";
+
+  if (ap === "am") {
+    if (h === 12) h = 0;
+  } else { // pm
+    if (h !== 12) h = h + 12;
   }
+
+  var hh = String(h).padStart(2, "0");
+  return hh + ":" + mm;
+}
+
+var rawIn = inVal;
+var rawOut = outVal;
+
+inVal = normalizeTime(inVal);
+outVal = normalizeTime(outVal);
+
+// If the user typed something non-empty but we could not normalize it, stop the save.
+if (rawIn.trim() !== "" && inVal === "") {
+  alert("Clock In/Out must be HH:MM (24-hour)");
+  return;
+}
+if (rawOut.trim() !== "" && outVal === "") {
+  alert("Clock In/Out must be HH:MM (24-hour)");
+  return;
+}
+
   if (!/^\d+$/.test(breakVal)) {
     alert("Break (Min) must be a whole number");
     return;
@@ -1884,8 +1925,8 @@ try {
         $break_minutes = (int) ( $time_entry->break ?? 0 );
 
         $reset_map[ $wiw_time_id ] = array(
-            'clock_in'      => $clock_in_local,
-            'clock_out'     => $clock_out_local,
+// Only overwrite clock_in/clock_out if we have valid new times
+// Otherwise keep existing DB values (N/A stays N/A)
             'break_minutes' => $break_minutes,
         );
 
@@ -2326,10 +2367,6 @@ public function ajax_client_update_entry() {
 		wp_send_json_error( array( 'message' => 'Missing entry_id.' ), 400 );
 	}
 
-	if ( ! preg_match( '/^\d{2}:\d{2}$/', $clock_in_time ) || ! preg_match( '/^\d{2}:\d{2}$/', $clock_out_time ) ) {
-		wp_send_json_error( array( 'message' => 'Clock In/Out must be HH:MM format.' ), 400 );
-	}
-
 	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 	$table_headers = $wpdb->prefix . 'wiw_timesheets';
 
@@ -2354,84 +2391,129 @@ public function ajax_client_update_entry() {
 		wp_send_json_error( array( 'message' => 'Entry is missing date.' ), 400 );
 	}
 
-	// Build local datetimes based on entry date.
+	// Timezone
 	$tz_string = get_option( 'timezone_string' );
 	if ( empty( $tz_string ) ) {
 		$tz_string = 'UTC';
 	}
 	$tz = new DateTimeZone( $tz_string );
 
-	try {
-		$dt_in  = new DateTime( $date . ' ' . $clock_in_time . ':00', $tz );
-		$dt_out = new DateTime( $date . ' ' . $clock_out_time . ':00', $tz );
-	} catch ( Exception $e ) {
-		wp_send_json_error( array( 'message' => 'Invalid time values.' ), 400 );
+	// Normalize input: allow blank (N/A). Only accept HH:MM when non-blank.
+	$in_blank  = ( trim( $clock_in_time ) === '' );
+	$out_blank = ( trim( $clock_out_time ) === '' );
+
+	$in_valid  = ( ! $in_blank && preg_match( '/^\d{2}:\d{2}$/', $clock_in_time ) );
+	$out_valid = ( ! $out_blank && preg_match( '/^\d{2}:\d{2}$/', $clock_out_time ) );
+
+	if ( ( ! $in_blank && ! $in_valid ) || ( ! $out_blank && ! $out_valid ) ) {
+		wp_send_json_error( array( 'message' => 'Clock In/Out must be HH:MM (24-hour).' ), 400 );
 	}
 
-	if ( $dt_out <= $dt_in ) {
-		wp_send_json_error( array( 'message' => 'Clock Out must be after Clock In.' ), 400 );
-	}
+	// Build new datetime values (NULL when blank to preserve N/A).
+	$new_clock_in  = null;
+	$new_clock_out = null;
 
-	$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
-	if ( $break_minutes < 0 ) {
-		$break_minutes = 0;
-	}
-	if ( $break_minutes > $total_minutes ) {
-		$break_minutes = $total_minutes;
-	}
-
-	$clocked_minutes = max( 0, $total_minutes - $break_minutes );
-	$clocked_hours   = round( $clocked_minutes / 60, 2 );
-
-	// Payable hours: clamp to scheduled window if scheduled_start/end exist.
-	$payable_hours = $clocked_hours;
-
-	try {
-		$sched_start_raw = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
-		$sched_end_raw   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
-
-		if ( $sched_start_raw !== '' || $sched_end_raw !== '' ) {
-			$pay_in  = clone $dt_in;
-			$pay_out = clone $dt_out;
-
-			if ( $sched_start_raw !== '' ) {
-				$sched_start_dt = new DateTime( $sched_start_raw, $tz );
-				if ( $pay_in < $sched_start_dt ) {
-					$pay_in = $sched_start_dt;
-				}
-			}
-			if ( $sched_end_raw !== '' ) {
-				$sched_end_dt = new DateTime( $sched_end_raw, $tz );
-				if ( $pay_out > $sched_end_dt ) {
-					$pay_out = $sched_end_dt;
-				}
-			}
-
-			if ( $pay_out > $pay_in ) {
-				$pay_total_minutes = (int) round( ( $pay_out->getTimestamp() - $pay_in->getTimestamp() ) / 60 );
-				$pay_minutes       = max( 0, $pay_total_minutes - $break_minutes );
-				$payable_hours     = round( $pay_minutes / 60, 2 );
-			} else {
-				$payable_hours = 0.00;
-			}
+	if ( $in_valid ) {
+		try {
+			$new_clock_in = ( new DateTime( $date . ' ' . $clock_in_time . ':00', $tz ) )->format( 'Y-m-d H:i:s' );
+		} catch ( Exception $e ) {
+			wp_send_json_error( array( 'message' => 'Invalid Clock In value.' ), 400 );
 		}
-	} catch ( Exception $e ) {
-		$payable_hours = $clocked_hours;
 	}
 
-	$clock_in_local  = $dt_in->format( 'Y-m-d H:i:s' );
-	$clock_out_local = $dt_out->format( 'Y-m-d H:i:s' );
+	if ( $out_valid ) {
+		try {
+			$new_clock_out = ( new DateTime( $date . ' ' . $clock_out_time . ':00', $tz ) )->format( 'Y-m-d H:i:s' );
+		} catch ( Exception $e ) {
+			wp_send_json_error( array( 'message' => 'Invalid Clock Out value.' ), 400 );
+		}
+	}
+
+	// If BOTH are provided, enforce ordering.
+	if ( $in_valid && $out_valid ) {
+		try {
+			$dt_in  = new DateTime( $new_clock_in, $tz );
+			$dt_out = new DateTime( $new_clock_out, $tz );
+			if ( $dt_out <= $dt_in ) {
+				wp_send_json_error( array( 'message' => 'Clock Out must be after Clock In.' ), 400 );
+			}
+		} catch ( Exception $e ) {
+			wp_send_json_error( array( 'message' => 'Invalid time entries.' ), 400 );
+		}
+	}
+
+	// Compute hours only when BOTH times exist; otherwise 0.
+	$clocked_hours  = 0.00;
+	$payable_hours  = 0.00;
+
+	if ( $in_valid && $out_valid ) {
+		$dt_in  = new DateTime( $new_clock_in, $tz );
+		$dt_out = new DateTime( $new_clock_out, $tz );
+
+		$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
+
+		if ( $break_minutes < 0 ) {
+			$break_minutes = 0;
+		}
+		if ( $break_minutes > $total_minutes ) {
+			$break_minutes = $total_minutes;
+		}
+
+		$clocked_minutes = max( 0, $total_minutes - $break_minutes );
+		$clocked_hours   = round( $clocked_minutes / 60, 2 );
+
+		// Payable hours: clamp to scheduled window if present.
+		$payable_hours = $clocked_hours;
+
+		try {
+			$sched_start_raw = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+			$sched_end_raw   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+			if ( $sched_start_raw !== '' || $sched_end_raw !== '' ) {
+				$pay_in  = clone $dt_in;
+				$pay_out = clone $dt_out;
+
+				if ( $sched_start_raw !== '' ) {
+					$sched_start_dt = new DateTime( $sched_start_raw, $tz );
+					if ( $pay_in < $sched_start_dt ) {
+						$pay_in = $sched_start_dt;
+					}
+				}
+				if ( $sched_end_raw !== '' ) {
+					$sched_end_dt = new DateTime( $sched_end_raw, $tz );
+					if ( $pay_out > $sched_end_dt ) {
+						$pay_out = $sched_end_dt;
+					}
+				}
+
+				if ( $pay_out > $pay_in ) {
+					$pay_total_minutes = (int) round( ( $pay_out->getTimestamp() - $pay_in->getTimestamp() ) / 60 );
+					$pay_minutes       = max( 0, $pay_total_minutes - $break_minutes );
+					$payable_hours     = round( $pay_minutes / 60, 2 );
+				} else {
+					$payable_hours = 0.00;
+				}
+			}
+		} catch ( Exception $e ) {
+			$payable_hours = $clocked_hours;
+		}
+	}
+
+	// Update entry row:
+	// - If blank => store NULL (N/A)
+	// - If valid => store new datetime
+	$update_data = array(
+		'clock_in'      => $in_blank ? null : $new_clock_in,
+		'clock_out'     => $out_blank ? null : $new_clock_out,
+		'break_minutes' => (int) $break_minutes,
+		'clocked_hours' => (float) $clocked_hours,
+		'payable_hours' => (float) $payable_hours,
+		'updated_at'    => current_time( 'mysql' ),
+	);
 
 	$updated = $wpdb->update(
 		$table_entries,
-		array(
-			'clock_in'      => $clock_in_local,
-			'clock_out'     => $clock_out_local,
-			'break_minutes' => (int) $break_minutes,
-			'clocked_hours' => (float) $clocked_hours,
-			'payable_hours' => (float) $payable_hours,
-			'updated_at'    => current_time( 'mysql' ),
-		),
+		$update_data,
 		array( 'id' => $entry_id ),
 		array( '%s', '%s', '%d', '%f', '%f', '%s' ),
 		array( '%d' )
@@ -2441,7 +2523,7 @@ public function ajax_client_update_entry() {
 		wp_send_json_error( array( 'message' => 'Database update failed.' ), 500 );
 	}
 
-	// Keep header totals in sync.
+	// Keep header totals in sync (sum stored clocked_hours).
 	$total_clocked = (float) $wpdb->get_var(
 		$wpdb->prepare(
 			"SELECT COALESCE(SUM(clocked_hours), 0) FROM {$table_entries} WHERE timesheet_id = %d",
@@ -2461,14 +2543,12 @@ public function ajax_client_update_entry() {
 	);
 
 	wp_send_json_success(
-	array(
-		'message'             => 'Saved.',
-		'total_clocked_hours' => (float) round( $total_clocked, 2 ),
-	)
-);
-
+		array(
+			'message'             => 'Saved.',
+			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+		)
+	);
 }
-
 
 public function ajax_local_approve_entry() {
     // Capability
