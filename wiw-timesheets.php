@@ -2622,6 +2622,26 @@ if ( $old_break !== $new_break ) {
 		wp_send_json_error( array( 'message' => 'Database update failed.' ), 500 );
 	}
 
+	// ✅ IMPORTANT: Recalculate flags after any client edit so flags resolve/reactivate correctly
+	try {
+		$clock_in_str  = ! empty( $update_data['clock_in'] ) ? (string) $update_data['clock_in'] : (string) ( $entry->clock_in ?? '' );
+		$clock_out_str = ! empty( $update_data['clock_out'] ) ? (string) $update_data['clock_out'] : (string) ( $entry->clock_out ?? '' );
+
+		$sched_start_local = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+		$sched_end_local   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+		$this->wiwts_sync_store_time_flags(
+			(int) ( $entry->wiw_time_id ?? 0 ),
+			(string) $clock_in_str,
+			(string) $clock_out_str,
+			(string) $sched_start_local,
+			(string) $sched_end_local,
+			$tz
+		);
+	} catch ( Exception $e ) {
+		// Do not fail the edit if flags calculation fails
+	}
+
 	// Keep header totals in sync (sum stored clocked_hours).
 	$total_clocked = (float) $wpdb->get_var(
 		$wpdb->prepare(
