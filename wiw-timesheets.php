@@ -568,6 +568,71 @@ if ( preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $newv_norm ) ) {
 
         	$out .= '</div>';
 $out .= '</details>';
+// Expandable flags (per-timesheet, shown under each daily table when that timesheet is open).
+$flags = $this->get_scoped_flags_for_timesheet( $client_id, absint( $timesheet_id_for_period ) );
+
+$has_unresolved_flags = false;
+if ( ! empty( $flags ) ) {
+	foreach ( $flags as $fg ) {
+		$status = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+		if ( $status !== 'resolved' ) {
+			$has_unresolved_flags = true;
+			break;
+		}
+	}
+}
+
+$flag_icon = $has_unresolved_flags ? '🟠' : '🟢';
+$flag_count = is_array( $flags ) ? count( $flags ) : 0;
+
+$out .= '<details class="wiw-flags" style="margin:12px 0 22px;">';
+$out .= '<summary>' . $flag_icon . ' Click to Expand: Flags</summary>';
+$out .= '<div style="padding-top:8px;">';
+
+if ( empty( $flags ) ) {
+	$out .= '<p class="description" style="margin:0;">No flags found for this timesheet.</p>';
+} else {
+	// Border wrapper (requested).
+	$out .= '<div style="border:1px solid #ccd0d4; border-radius:4px; overflow:hidden; background:#fff;">';
+	$out .= '<table class="wp-list-table widefat fixed striped" style="margin:0;">';
+	$out .= '<thead><tr>';
+	$out .= '<th style="width:110px;">Type</th>';
+	$out .= '<th>Description</th>';
+	$out .= '<th style="width:120px;">Status</th>';
+	$out .= '<th style="width:170px;">Updated</th>';
+	$out .= '</tr></thead>';
+	$out .= '<tbody>';
+
+	foreach ( $flags as $fg ) {
+		$type   = isset( $fg->flag_type ) ? (string) $fg->flag_type : '';
+		$desc   = isset( $fg->description ) ? (string) $fg->description : '';
+		$status = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+
+		$updated_raw = isset( $fg->updated_at ) ? (string) $fg->updated_at : '';
+		$updated     = $updated_raw !== '' ? $this->wiw_format_datetime_local_pretty( $updated_raw ) : 'N/A';
+
+		// Orange for unresolved, green for resolved (requested).
+		$row_style = ( $status === 'resolved' )
+			? 'background:#dff0d8;'
+			: 'background:#fff3cd;';
+
+		// Equal spacing on rows (requested).
+		$cell_style = 'style="padding:10px 10px; vertical-align:top;"';
+
+		$out .= '<tr style="' . esc_attr( $row_style ) . '">';
+		$out .= '<td ' . $cell_style . '><strong>' . esc_html( $type !== '' ? $type : 'N/A' ) . '</strong></td>';
+		$out .= '<td ' . $cell_style . '>' . esc_html( $desc !== '' ? $desc : 'N/A' ) . '</td>';
+		$out .= '<td ' . $cell_style . '>' . esc_html( $status !== '' ? $status : 'N/A' ) . '</td>';
+		$out .= '<td ' . $cell_style . '>' . esc_html( $updated ) . '</td>';
+		$out .= '</tr>';
+	}
+
+	$out .= '</tbody></table>';
+	$out .= '</div>';
+}
+
+$out .= '</div>';
+$out .= '</details>';
 $out .= '<hr class="wiw-edit-logs-separator" />';
 
         }
@@ -1131,6 +1196,43 @@ private function get_scoped_edit_logs_for_timesheet( $client_id, $timesheet_id )
 		  AND ts.location_id = %s
 		ORDER BY l.created_at DESC, l.id DESC
 		LIMIT 200
+	";
+
+	$prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+
+	return $wpdb->get_results( $prepared );
+}
+
+/**
+ * Fetch flags for a given timesheet ID.
+ * Scoped by location_id to ensure client isolation.
+ *
+ * Flags table is keyed by wiw_time_id, so we join to daily records to
+ * get only flags that belong to this timesheet.
+ */
+private function get_scoped_flags_for_timesheet( $client_id, $timesheet_id ) {
+	global $wpdb;
+
+	$table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
+	$table_daily = $wpdb->prefix . 'wiw_daily_records';
+
+	$client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+	$timesheet_id = absint( $timesheet_id );
+
+	if ( $client_id === '' || $timesheet_id <= 0 ) {
+		return array();
+	}
+
+	$sql = "
+		SELECT f.*
+		FROM {$table_flags} f
+		INNER JOIN {$table_daily} d ON d.wiw_time_id = f.wiw_time_id
+		WHERE d.timesheet_id = %d
+		  AND d.location_id = %s
+		ORDER BY
+			CASE WHEN f.flag_status = 'resolved' THEN 1 ELSE 0 END ASC,
+			f.updated_at DESC,
+			f.id DESC
 	";
 
 	$prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
