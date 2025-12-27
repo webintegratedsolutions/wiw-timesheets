@@ -302,6 +302,7 @@ $actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disab
 $actions_html .= '<a href="#" class="wiw-btn secondary" onclick="return false;" aria-disabled="true">Reset</a>';
 $actions_html .= '</div>';
 
+if ( current_user_can( 'manage_options' ) ) {
 $out .= '<table class="wp-list-table widefat fixed striped wiw-timesheet-details" style="margin:8px 0 14px;">';
 $out .= '<tbody>';
 
@@ -336,6 +337,7 @@ $out .= '<tr><th>Status</th><td>' . esc_html( $ts_status !== '' ? $ts_status : '
 $out .= '<tr><th>Actions</th><td>' . $actions_html . '</td></tr>';
 
 $out .= '</tbody></table>';
+}
 
         $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
         $out .= '<thead><tr>';
