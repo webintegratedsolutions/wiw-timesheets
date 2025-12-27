@@ -486,10 +486,45 @@ $details_html .= '</div>';
 $details_html .= '</details>';
 
 $approve_disabled = ( strtolower( (string) $status ) === 'approved' ) ? ' disabled="disabled"' : '';
+// Unresolved flags (use the same Description text shown in the expandable Flags table).
+// Cached by Timesheet ID to avoid repeated queries per row.
+static $wiwts_client_flags_unresolved_cache = array();
+
+$tid_for_flags = isset( $timesheet_id ) ? absint( $timesheet_id ) : 0;
+
+if ( $tid_for_flags > 0 && ! array_key_exists( $tid_for_flags, $wiwts_client_flags_unresolved_cache ) ) {
+    $unresolved_descs = array();
+
+    $flags_for_ts = $this->get_scoped_flags_for_timesheet( $client_id, $tid_for_flags );
+    if ( ! empty( $flags_for_ts ) ) {
+        foreach ( $flags_for_ts as $fg ) {
+            $fg_status = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+            if ( $fg_status === 'resolved' ) {
+                continue;
+            }
+
+            // IMPORTANT: match the expandable table's "Description" column exactly.
+            $fg_desc = isset( $fg->description ) ? (string) $fg->description : '';
+            $fg_desc = trim( $fg_desc );
+
+            if ( $fg_desc !== '' ) {
+                $unresolved_descs[] = $fg_desc;
+            }
+        }
+    }
+
+    $wiwts_client_flags_unresolved_cache[ $tid_for_flags ] = $unresolved_descs;
+}
+
+$unresolved_flags_attr = '';
+if ( $tid_for_flags > 0 && ! empty( $wiwts_client_flags_unresolved_cache[ $tid_for_flags ] ) ) {
+    // Use a safe delimiter; JS will split this into bullet lines.
+    $unresolved_flags_attr = ' data-unresolved-flags="' . esc_attr( implode( '||', $wiwts_client_flags_unresolved_cache[ $tid_for_flags ] ) ) . '"';
+}
 
 $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
-$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $approve_disabled . '>Approve</button>';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_disabled . '>Approve</button>';
 $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
 $actions_html .= '</div>';
@@ -771,7 +806,22 @@ if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
 
   if (t.disabled) { return; }
 
-  if (!confirm("Approve this entry?")) { return; }
+  var flagsRaw = t.getAttribute("data-unresolved-flags") || "";
+var msg = "Approve this entry?";
+
+if (flagsRaw) {
+  var parts = flagsRaw.split("||").map(function(s){ return (s || "").trim(); }).filter(Boolean);
+  if (parts.length) {
+    msg = "This entry has unresolved flags:\n\n";
+    parts.forEach(function(line){
+      msg += "• " + line + "\n";
+    });
+    msg += "\nApprove this entry?";
+  }
+}
+
+if (!confirm(msg)) { return; }
+
 
   var row = closestRow(t);
   if (!row) { alert("Approve clicked but row not found"); return; }
