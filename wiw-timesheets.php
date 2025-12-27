@@ -113,8 +113,7 @@ public function render_client_ui() {
 
     // Always show the client account number for now (debug).
     $out  = '<div class="wiw-client-timesheets">';
-    $out .= '<div id="wiwts-client-ajax" data-ajax-url="' . esc_attr( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '"></div>';
-
+    $out .= '<div id="wiwts-client-ajax" data-ajax-url="' . esc_attr( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '" data-nonce-approve="' . esc_attr( wp_create_nonce( 'wiw_local_approve_entry' ) ) . '"></div>';
 
     if ( $client_id === '' ) {
         $out .= '<p>No client account number found on your user profile.</p>';
@@ -449,7 +448,7 @@ $out .= '<td class="wiw-client-cell-break" data-orig="' . esc_attr( (string) $br
         $out .= '<td>' . esc_html( $sched_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
-        $out .= '<td>' . esc_html( $status ) . '</td>';
+        $out .= '<td class="wiw-client-cell-status">' . esc_html( $status ) . '</td>';
 
 $detail_rows = array(
     'Timesheet ID'              => (string) $timesheet_id,
@@ -486,11 +485,15 @@ $details_html .= '</table>';
 $details_html .= '</div>';
 $details_html .= '</details>';
 
+$approve_disabled = ( strtolower( (string) $status ) === 'approved' ) ? ' disabled="disabled"' : '';
+
 $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $approve_disabled . '>Approve</button>';
 $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
 $actions_html .= '</div>';
+
 
 
 $out .= '<td>' . $actions_html . '</td>';
@@ -762,6 +765,55 @@ $out .= '<script>
       setEditing(row2, false);
       return;
     }
+
+if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
+  e.preventDefault();
+
+  if (t.disabled) { return; }
+
+  if (!confirm("Approve this entry?")) { return; }
+
+  var row = closestRow(t);
+  if (!row) { alert("Approve clicked but row not found"); return; }
+
+  var cfg = document.getElementById("wiwts-client-ajax");
+  if (!cfg) { alert("Missing AJAX config"); return; }
+
+  var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
+  var nonceA  = cfg.getAttribute("data-nonce-approve") || "";
+  if (!ajaxUrl || !nonceA) { alert("Missing AJAX url/approve nonce"); return; }
+
+  var entryId = t.getAttribute("data-entry-id") || "";
+  if (!entryId) { alert("Missing Entry ID"); return; }
+
+  var form = new FormData();
+  form.append("action", "wiw_local_approve_entry");
+  form.append("security", nonceA);
+  form.append("entry_id", entryId);
+
+  fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (!data || !data.success){
+        var msg = (data && data.data && data.data.message) ? data.data.message : "Approve failed.";
+        alert(msg);
+        return;
+      }
+
+      // Update the Status cell in the row.
+      var statusCell = row.querySelector("td.wiw-client-cell-status");
+      if (statusCell) statusCell.textContent = "approved";
+
+      // Disable the approve button after success.
+      t.disabled = true;
+    })
+    .catch(function(err){
+      console.error(err);
+      alert("Approve failed (network error).");
+    });
+
+  return;
+}
 
 if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
   e.preventDefault();
@@ -2874,11 +2926,42 @@ if ( $old_break !== $new_break ) {
 	);
 }
 
-public function ajax_local_approve_entry() {
-    // Capability
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
+    /**
+     * Legacy/compat approve handler.
+     *
+     * Some older JS/actions still call:
+     *  - wiw_approve_single_timesheet
+     *  - wiw_approve_timesheet
+     *  - wiw_approve_timesheet_period
+     *
+     * We approve locally only (DB status update), so route to the local approver.
+     */
+    public function handle_approve_timesheet() {
+        // Delegate to the local single-entry approve endpoint.
+        // This expects: action=wiw_local_approve_entry and nonce=wiw_local_approve_entry
+        // BUT the DB-update logic is correct here, so we reuse it.
+        $this->ajax_local_approve_entry();
     }
+
+
+public function ajax_local_approve_entry() {
+
+    // Capability (local-only approve)
+    // Admins always allowed. Clients allowed if they have a client account number on their profile.
+    if ( ! is_user_logged_in() ) {
+        wp_send_json_error( array( 'message' => 'Not logged in.' ), 401 );
+    }
+
+    if ( ! current_user_can( 'manage_options' ) ) {
+        $current_user_id = get_current_user_id();
+        $client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+        $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
+
+        if ( $client_id === '' ) {
+            wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
+        }
+    }
+
 
     // Nonce
     check_ajax_referer( 'wiw_local_approve_entry', 'security' );
