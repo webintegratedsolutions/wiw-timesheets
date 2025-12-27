@@ -340,7 +340,6 @@ $out .= '<th>Break (Min)</th>';
 $out .= '<th>Sched. Hrs</th>';
 $out .= '<th>Clocked Hrs</th>';
 $out .= '<th>Payable Hrs</th>';
-$out .= '<th>Status</th>';
 $out .= '<th>Actions</th>';
 
         $out .= '<tbody>';
@@ -449,7 +448,6 @@ $out .= '<td class="wiw-client-cell-break" data-orig="' . esc_attr( (string) $br
         $out .= '<td>' . esc_html( $sched_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
         $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
-        $out .= '<td class="wiw-client-cell-status">' . esc_html( $status ) . '</td>';
 
 $detail_rows = array(
     'Timesheet ID'              => (string) $timesheet_id,
