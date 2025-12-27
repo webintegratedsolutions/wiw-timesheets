@@ -416,7 +416,8 @@ if ( empty( $daily_rows ) ) {
         $clocked_hrs = isset( $dr->clocked_hours ) ? (string) $dr->clocked_hours : '0.00';
         $payable_hrs = isset( $dr->payable_hours ) ? (string) $dr->payable_hours : '0.00';
 
-        $status = isset( $dr->status ) ? (string) $dr->status : (string) ( $ts->status ?? '' );
+        $status_raw = isset( $dr->status ) ? (string) $dr->status : '';
+        $status     = strtolower( trim( $status_raw ) );
 
         $out .= '<tr>';
         $out .= '<td>' . esc_html( $date_display ) . '</td>';
@@ -485,7 +486,10 @@ $details_html .= '</table>';
 $details_html .= '</div>';
 $details_html .= '</details>';
 
-$approve_disabled = ( strtolower( (string) $status ) === 'approved' ) ? ' disabled="disabled"' : '';
+$is_approved      = ( strtolower( (string) $status ) === 'approved' );
+$approve_disabled = $is_approved ? ' disabled="disabled"' : '';
+$approve_label    = $is_approved ? 'Approved' : 'Approve';
+
 // Unresolved flags (use the same Description text shown in the expandable Flags table).
 // Cached by Timesheet ID to avoid repeated queries per row.
 static $wiwts_client_flags_unresolved_cache = array();
@@ -523,8 +527,10 @@ if ( $tid_for_flags > 0 && ! empty( $wiwts_client_flags_unresolved_cache[ $tid_f
 }
 
 $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
-$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
-$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_disabled . '>Approve</button>';
+if ( ! $is_approved ) {
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
+}
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
 $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
 $actions_html .= '</div>';
@@ -855,7 +861,16 @@ if (!confirm(msg)) { return; }
       if (statusCell) statusCell.textContent = "approved";
 
       // Disable the approve button after success.
+            // Mark approved in UI.
+      t.textContent = "Approved";
       t.disabled = true;
+
+      // Hide Edit button for this row.
+      var editBtn = row.querySelector("button.wiw-client-edit-btn");
+      if (editBtn) {
+        editBtn.style.display = "none";
+      }
+
     })
     .catch(function(err){
       console.error(err);

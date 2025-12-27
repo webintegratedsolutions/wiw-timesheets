@@ -73,6 +73,26 @@
   color: #2c3338;
 }
 
+/* Disabled approve button: no hover, no pointer, muted color */
+.wiw-btn.wiw-client-approve-btn:disabled,
+.wiw-btn.wiw-client-approve-btn[disabled] {
+    background-color: #e0e0e0 !important;
+    color: #777 !important;
+    border-color: #ccc !important;
+    cursor: not-allowed !important;
+    opacity: 1 !important; /* prevent fade flicker */
+}
+
+/* Kill hover/focus/active effects when disabled */
+.wiw-btn.wiw-client-approve-btn:disabled:hover,
+.wiw-btn.wiw-client-approve-btn:disabled:focus,
+.wiw-btn.wiw-client-approve-btn:disabled:active {
+    background-color: #e0e0e0 !important;
+    color: #777 !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
 /* Legend / Reference (Client UI) */
 .wiw-client-timesheets .wiw-legend {
   border: 1px solid #ccd0d4;
