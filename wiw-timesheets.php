@@ -560,7 +560,7 @@ $out .= '<td>' . $actions_html . '</td>';
         		$out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
         		$out .= '<thead><tr>';
         		$out .= '<th>When</th>';
-        		$out .= '<th>Field</th>';
+        		$out .= '<th>Modified</th>';
         		$out .= '<th>Old</th>';
         		$out .= '<th>New</th>';
         		$out .= '<th>Edited By</th>';
@@ -641,7 +641,7 @@ if ( empty( $flags ) ) {
 	$out .= '<th style="width:110px;">Type</th>';
 	$out .= '<th>Description</th>';
 	$out .= '<th style="width:120px;">Status</th>';
-	$out .= '<th style="width:170px;">Updated</th>';
+	$out .= '<th style="width:220px;">Updated</th>';
 	$out .= '</tr></thead>';
 	$out .= '<tbody>';
 
