@@ -266,9 +266,16 @@ $ts_label = $timesheet_id_for_period !== ''
     ? ' | Timesheet #' . $timesheet_id_for_period
     : '';
 
-$out .= '<h3 style="margin:12px 0 8px;">🗓️ Pay Period: '
-    . esc_html( $pay_period_label . $ts_label )
-    . '</h3>';
+if ( current_user_can( 'manage_options' ) ) {
+    $out .= '<h3 style="margin:12px 0 8px;">🗓️ Pay Period: '
+        . esc_html( $pay_period_label . $ts_label )
+        . '</h3>';
+} else {
+    $out .= '<h3 style="margin:12px 0 8px;">🗓️ Shifts from: '
+        . esc_html( $pay_period_label )
+        . '</h3>';
+}
+
 // Timesheet Details (shown between Pay Period header and the table)
 $ts_header = ! empty( $period['rows'] ) ? $period['rows'][0] : null;
 
