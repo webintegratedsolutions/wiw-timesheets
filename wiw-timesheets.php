@@ -566,6 +566,7 @@ $out .= '<td>' . $actions_html . '</td>';
         if ( isset( $timesheet_id_for_period ) && $timesheet_id_for_period !== '' ) {
         	$edit_logs = $this->get_scoped_edit_logs_for_timesheet( $client_id, absint( $timesheet_id_for_period ) );
 
+            if ( current_user_can( 'manage_options' ) ) {
         	$out .= '<details class="wiw-edit-logs" style="margin:12px 0 22px;">';
         	$out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
         	$out .= '<div style="padding-top:8px;">';
@@ -626,6 +627,7 @@ if ( preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $newv_norm ) ) {
 
         	$out .= '</div>';
 $out .= '</details>';
+}
 // Expandable flags (per-timesheet, shown under each daily table when that timesheet is open).
 $flags = $this->get_scoped_flags_for_timesheet( $client_id, absint( $timesheet_id_for_period ) );
 
