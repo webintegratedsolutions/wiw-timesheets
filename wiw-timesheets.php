@@ -744,13 +744,19 @@ $out .= '<script>
     for (var i=0;i<inputs.length;i++){ inputs[i].style.display = isEditing ? "" : "none"; }
     for (var j=0;j<views.length;j++){ views[j].style.display = isEditing ? "none" : ""; }
 
-    var editBtn   = row.querySelector(".wiw-client-edit-btn");
-    var saveBtn   = row.querySelector(".wiw-client-save-btn");
-    var cancelBtn = row.querySelector(".wiw-client-cancel-btn");
+   var editBtn    = row.querySelector(".wiw-client-edit-btn");
+    var saveBtn    = row.querySelector(".wiw-client-save-btn");
+    var cancelBtn  = row.querySelector(".wiw-client-cancel-btn");
+    var approveBtn = row.querySelector(".wiw-client-approve-btn");
 
     if (editBtn)   editBtn.style.display   = isEditing ? "none" : "";
     if (saveBtn)   saveBtn.style.display   = isEditing ? "" : "none";
     if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
+
+    // Universal: hide Approve during edit mode, restore after.
+    if (approveBtn) {
+        approveBtn.style.display = isEditing ? "none" : "";
+    }
   }
 
   function updateViewFromInputs(row){
