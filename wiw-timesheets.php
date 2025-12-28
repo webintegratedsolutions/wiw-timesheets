@@ -1128,9 +1128,17 @@ foreach ( $timesheets as $ts ) {
     $out .= '</div>';
 
     $out .= '<div>';
+if ( current_user_can( 'manage_options' ) ) {
     $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Pay Period</label>';
+} else {
+    $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Shifts from:</label>';
+}
     $out .= '<select id="wiw_period" name="wiw_period">';
+if ( current_user_can( 'manage_options' ) ) {
     $out .= '<option value="">All Pay Periods</option>';
+} else {
+    $out .= '<option value="">Anytime</option>';
+}
     foreach ( $periods as $pkey => $plabel ) {
         $out .= '<option value="' . esc_attr( $pkey ) . '"' . selected( $selected_period, $pkey, false ) . '>'
             . esc_html( $plabel )
