@@ -546,6 +546,7 @@ if ( ! $is_approved ) {
 }
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
 $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" style="display:none;">Reset</button>';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
 $actions_html .= '</div>';
 
@@ -744,19 +745,22 @@ $out .= '<script>
     for (var i=0;i<inputs.length;i++){ inputs[i].style.display = isEditing ? "" : "none"; }
     for (var j=0;j<views.length;j++){ views[j].style.display = isEditing ? "none" : ""; }
 
-   var editBtn    = row.querySelector(".wiw-client-edit-btn");
+    var editBtn    = row.querySelector(".wiw-client-edit-btn");
     var saveBtn    = row.querySelector(".wiw-client-save-btn");
+    var resetBtn   = row.querySelector(".wiw-client-reset-btn");
     var cancelBtn  = row.querySelector(".wiw-client-cancel-btn");
     var approveBtn = row.querySelector(".wiw-client-approve-btn");
 
     if (editBtn)   editBtn.style.display   = isEditing ? "none" : "";
     if (saveBtn)   saveBtn.style.display   = isEditing ? "" : "none";
+    if (resetBtn)  resetBtn.style.display  = isEditing ? "" : "none";
     if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
 
     // Universal: hide Approve during edit mode, restore after.
     if (approveBtn) {
         approveBtn.style.display = isEditing ? "none" : "";
     }
+
   }
 
   function updateViewFromInputs(row){
@@ -819,6 +823,12 @@ $out .= '<script>
       setEditing(row, true);
       return;
     }
+
+    if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
+  e.preventDefault();
+  // Non-functional placeholder for now
+  return;
+}
 
     if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")){
       e.preventDefault();
