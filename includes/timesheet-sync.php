@@ -574,7 +574,8 @@ $this->wiwts_sync_store_time_flags(
                     'scheduled_end'   => $scheduled_end_local,
 
                     'break_minutes'   => (int) $break_minutes_local,
-                    'scheduled_hours' => round( (float) ( $time_entry->scheduled_duration ?? 0.0 ), 2 ),
+                    'scheduled_hours' => round( max( 0, (float) ( $time_entry->scheduled_duration ?? 0.0 ) - ( (int) $break_minutes_local / 60 ) ), 2 ),
+
                     'clocked_hours'   => round( $clocked_hours_local, 2 ),
                     'payable_hours'   => round( $payable_hours_local, 2 ),
 
