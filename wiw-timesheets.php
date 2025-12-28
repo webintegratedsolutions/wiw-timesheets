@@ -84,6 +84,9 @@ class WIW_Timesheet_Manager {
         // NEW: AJAX for client entry hours update (Client UI)
         add_action( 'wp_ajax_wiw_client_update_entry', array( $this, 'ajax_client_update_entry' ) );
 
+        // NEW: AJAX for client entry reset (Client UI)
+        add_action( 'wp_ajax_wiw_client_reset_entry_from_api', array( $this, 'ajax_client_reset_entry_from_api' ) );
+
         // 5. Login handler
         add_action( 'admin_post_wiw_login_handler', 'wiwts_handle_wiw_login' );
 
@@ -120,7 +123,7 @@ public function render_client_ui() {
 
     $out  = '<div class="wiw-client-timesheets">';
     $out .= '<div class="wiw-client-role-indicator" style="margin:0 0 10px 0;font-size:13px;color:#555;">Logged in as: <strong>' . esc_html( $current_user_role_label ) . '</strong></div>';
-    $out .= '<div id="wiwts-client-ajax" data-ajax-url="' . esc_attr( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '" data-nonce-approve="' . esc_attr( wp_create_nonce( 'wiw_local_approve_entry' ) ) . '"></div>';
+    $out .= '<div id="wiwts-client-ajax" data-ajax-url="' . esc_attr( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '" data-nonce-approve="' . esc_attr( wp_create_nonce( 'wiw_local_approve_entry' ) ) . '" data-nonce-reset="' . esc_attr( wp_create_nonce( 'wiw_client_reset_entry_from_api' ) ) . '"></div>';
 
     if ( $client_id === '' ) {
         $out .= '<p>No client account number found on your user profile.</p>';
@@ -824,9 +827,44 @@ $out .= '<script>
       return;
     }
 
-    if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
+if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
   e.preventDefault();
-  // Non-functional placeholder for now
+
+  var row = closestRow(t);
+  if (!row) { alert("Row not found."); return; }
+
+  var cfg = document.getElementById("wiwts-client-ajax");
+  if (!cfg) { alert("Missing AJAX config."); return; }
+
+  var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
+  var nonceR  = cfg.getAttribute("data-nonce-reset") || "";
+
+  if (!ajaxUrl || !nonceR) { alert("Missing reset AJAX settings."); return; }
+
+  // Use the Save buttons entry id (it already exists on every row)
+  var saveBtn = row.querySelector(".wiw-client-save-btn");
+  var entryId = saveBtn ? (saveBtn.getAttribute("data-entry-id") || "") : "";
+
+  var form = new FormData();
+  form.append("action", "wiw_client_reset_entry_from_api");
+  form.append("security", nonceR);
+  form.append("entry_id", entryId);
+
+  fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if (!data || !data.success){
+        var msg = (data && data.data && data.data.message) ? data.data.message : "Reset failed.";
+        alert(msg);
+        return;
+      }
+      alert((data.data && data.data.message ? data.data.message : "Reset OK") + " Entry ID: " + (data.data && data.data.entry_id ? data.data.entry_id : ""));
+    })
+    .catch(function(err){
+      console.error(err);
+      alert("Reset failed (network error).");
+    });
+
   return;
 }
 
@@ -3047,6 +3085,27 @@ if ( $old_break !== $new_break ) {
         // BUT the DB-update logic is correct here, so we reuse it.
         $this->ajax_local_approve_entry();
     }
+
+    public function ajax_client_reset_entry_from_api() {
+    if ( ! is_user_logged_in() ) {
+        wp_send_json_error( array( 'message' => 'Not logged in.' ), 401 );
+    }
+
+    // Manual nonce check so we ALWAYS return JSON (never plain -1).
+    $nonce = isset( $_POST['security'] ) ? sanitize_text_field( wp_unslash( $_POST['security'] ) ) : '';
+    if ( ! wp_verify_nonce( $nonce, 'wiw_client_reset_entry_from_api' ) ) {
+        wp_send_json_error( array( 'message' => 'Security check failed.' ), 403 );
+    }
+
+    $entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+
+    wp_send_json_success(
+        array(
+            'message'  => 'Reset AJAX OK (stub).',
+            'entry_id' => $entry_id,
+        )
+    );
+}
 
 
 public function ajax_local_approve_entry() {
