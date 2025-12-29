@@ -3136,7 +3136,7 @@ public function ajax_client_reset_entry_from_api() {
 		wp_send_json_error( array( 'message' => 'Not logged in.' ), 401 );
 	}
 
-	// Manual nonce check so we ALWAYS return JSON (never plain -1).
+	// Manual nonce check so we ALWAYS return JSON (never wp_die HTML)
 	$nonce = isset( $_POST['security'] ) ? sanitize_text_field( wp_unslash( $_POST['security'] ) ) : '';
 	if ( ! wp_verify_nonce( $nonce, 'wiw_client_reset_entry_from_api' ) ) {
 		wp_send_json_error( array( 'message' => 'Security check failed.' ), 403 );
@@ -3146,18 +3146,15 @@ public function ajax_client_reset_entry_from_api() {
 
 	$entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
 	if ( ! $entry_id ) {
-		wp_send_json_error( array( 'message' => 'Missing entry_id.' ), 400 );
+		wp_send_json_error( array( 'message' => 'Missing Entry ID.' ), 400 );
 	}
 
-	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+	$table_entries  = $wpdb->prefix . 'wiw_timesheet_entries';
+	$table_headers  = $wpdb->prefix . 'wiw_timesheet_headers';
+	$table_flags    = $wpdb->prefix . 'wiw_timesheet_flags';
+	$table_logs     = $wpdb->prefix . 'wiw_timesheet_edit_logs';
 
-	$entry = $wpdb->get_row(
-		$wpdb->prepare(
-			"SELECT * FROM {$table_entries} WHERE id = %d",
-			$entry_id
-		)
-	);
-
+	$entry = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table_entries} WHERE id = %d", $entry_id ) );
 	if ( ! $entry ) {
 		wp_send_json_error( array( 'message' => 'Entry not found.' ), 404 );
 	}
@@ -3174,9 +3171,7 @@ public function ajax_client_reset_entry_from_api() {
 	}
 	$tz = new DateTimeZone( $tz_string );
 
-	// Helper to format datetime strings into "07:50 am" (or N/A).
 	$format_time = function( $datetime_str ) use ( $tz ) {
-		$datetime_str = is_scalar( $datetime_str ) ? trim( (string) $datetime_str ) : '';
 		if ( $datetime_str === '' ) {
 			return 'N/A';
 		}
@@ -3194,7 +3189,53 @@ public function ajax_client_reset_entry_from_api() {
 	$current_clock_out = ! empty( $entry->clock_out ) ? (string) $entry->clock_out : '';
 	$current_break     = isset( $entry->break_minutes ) ? (int) $entry->break_minutes : 0;
 
-	// Fetch authoritative WIW time record (preview only)
+// Compute default/reset break rule:
+// If scheduled shift >= 5 hours, default break should be 60; else 0.
+// scheduled_hours may be empty/0, so fall back to scheduled_start/scheduled_end duration.
+// Compute scheduled shift duration (hours) for default/reset break rule.
+// IMPORTANT: Do NOT use $entry->scheduled_hours for this rule because it may represent paid/scheduled hours,
+// not the actual scheduled shift span.
+// We must base the 5+ hour rule on scheduled_start/scheduled_end (or shift start/end as fallback).
+$scheduled_hours = 0.0;
+
+// Prefer scheduled_start/scheduled_end from DB (this represents scheduled shift span)
+$sched_start_local = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+$sched_end_local   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+if ( $sched_start_local !== '' && $sched_end_local !== '' ) {
+	try {
+		$dt_sched_in  = new DateTime( $sched_start_local, $tz );
+		$dt_sched_out = new DateTime( $sched_end_local, $tz );
+
+		if ( $dt_sched_out > $dt_sched_in ) {
+			$scheduled_hours = (float) ( ( $dt_sched_out->getTimestamp() - $dt_sched_in->getTimestamp() ) / 3600 );
+		}
+	} catch ( Exception $e ) {
+		$scheduled_hours = 0.0;
+	}
+}
+
+if ( $scheduled_hours <= 0.0 ) {
+	$sched_start_local = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+	$sched_end_local   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+	if ( $sched_start_local !== '' && $sched_end_local !== '' ) {
+		try {
+			$dt_sched_in  = new DateTime( $sched_start_local, $tz );
+			$dt_sched_out = new DateTime( $sched_end_local, $tz );
+
+			if ( $dt_sched_out > $dt_sched_in ) {
+				$scheduled_hours = (float) ( ( $dt_sched_out->getTimestamp() - $dt_sched_in->getTimestamp() ) / 3600 );
+			}
+		} catch ( Exception $e ) {
+			// leave at 0.0
+		}
+	}
+}
+
+$default_break = ( $scheduled_hours >= 5.0 ) ? 60 : 0;
+
+	// Fetch authoritative WIW time record (preview + apply)
 	$endpoint = "times/{$wiw_time_id}";
 	$result   = WIW_API_Client::request( $endpoint, array(), WIW_API_Client::METHOD_GET );
 
@@ -3220,216 +3261,310 @@ public function ajax_client_reset_entry_from_api() {
 		$api_end   = isset( $time_obj->end_time ) ? (string) $time_obj->end_time : '';
 	}
 
-// Prepare preview values (no DB writes yet)
-// If apply_reset=1, write the WIW values to DB and recalc totals (no logs/flags yet).
-$apply_reset = isset( $_POST['apply_reset'] ) ? absint( $_POST['apply_reset'] ) : 0;
-
-if ( $apply_reset === 1 ) {
-	// Convert WIW API start/end into local datetime strings (or NULL if empty).
-	$new_clock_in_db  = null;
-	$new_clock_out_db = null;
-
-	if ( $api_start !== '' ) {
-		try {
-			$dt_in = new DateTime( $api_start, new DateTimeZone( 'UTC' ) );
-			$dt_in->setTimezone( $tz );
-			$new_clock_in_db = $dt_in->format( 'Y-m-d H:i:s' );
-		} catch ( Exception $e ) {
-			$new_clock_in_db = null;
+	// IMPORTANT: break minutes to reset to.
+	// WIW "times" endpoint may or may not provide a break field; if it doesn't, use our default rule.
+	// If scheduled duration is unknown locally, fall back to the WIW API start/end span to decide 60 vs 0.
+	$api_break = null;
+	if ( $time_obj ) {
+		if ( isset( $time_obj->break_minutes ) ) {
+			$api_break = (int) $time_obj->break_minutes;
+		} elseif ( isset( $time_obj->break_length ) ) {
+			$api_break = (int) $time_obj->break_length;
 		}
 	}
 
-	if ( $api_end !== '' ) {
+	// Determine best-available shift length hours for default break rule.
+// Priority:
+// 1) Scheduled (scheduled_hours or scheduled_start/end already computed above)
+// 2) Current DB clock_in/clock_out span (often available even when API end_time is empty)
+// 3) API start/end span
+$basis_hours = (float) $scheduled_hours;
+
+// (2) Fall back to DB span if scheduled is unknown
+if ( $basis_hours <= 0.0 ) {
+	$db_in  = ! empty( $entry->clock_in ) ? (string) $entry->clock_in : '';
+	$db_out = ! empty( $entry->clock_out ) ? (string) $entry->clock_out : '';
+
+	if ( $db_in !== '' && $db_out !== '' ) {
 		try {
-			$dt_out = new DateTime( $api_end, new DateTimeZone( 'UTC' ) );
-			$dt_out->setTimezone( $tz );
-			$new_clock_out_db = $dt_out->format( 'Y-m-d H:i:s' );
+			$dt_db_in  = new DateTime( $db_in, $tz );
+			$dt_db_out = new DateTime( $db_out, $tz );
+
+			if ( $dt_db_out > $dt_db_in ) {
+				$basis_hours = (float) ( ( $dt_db_out->getTimestamp() - $dt_db_in->getTimestamp() ) / 3600 );
+			}
 		} catch ( Exception $e ) {
-			$new_clock_out_db = null;
+			// leave at 0.0
 		}
 	}
+}
 
-	// Recompute clocked/payable hours only if both times exist and are ordered.
-	$break_minutes = isset( $entry->break_minutes ) ? (int) $entry->break_minutes : 0;
-	$clocked_hours = 0.00;
-	$payable_hours = 0.00;
-
-	if ( $new_clock_in_db && $new_clock_out_db ) {
+// (3) Fall back to API span if still unknown (time record span)
+if ( $basis_hours <= 0.0 ) {
+	if ( $api_start !== '' && $api_end !== '' ) {
 		try {
-			$dt_in  = new DateTime( $new_clock_in_db, $tz );
-			$dt_out = new DateTime( $new_clock_out_db, $tz );
+			$dt_api_in  = new DateTime( $api_start );
+			$dt_api_out = new DateTime( $api_end );
 
-			if ( $dt_out > $dt_in ) {
-				$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
+			if ( $dt_api_out > $dt_api_in ) {
+				$basis_hours = (float) ( ( $dt_api_out->getTimestamp() - $dt_api_in->getTimestamp() ) / 3600 );
+			}
+		} catch ( Exception $e ) {
+			// leave at 0.0
+		}
+	}
+}
 
-				if ( $break_minutes < 0 ) {
-					$break_minutes = 0;
+// (4) Fall back to WIW shift scheduled span if still unknown (this is the correct basis for "scheduled shift")
+if ( $basis_hours <= 0.0 ) {
+	$wiw_shift_id = isset( $entry->wiw_shift_id ) ? absint( $entry->wiw_shift_id ) : 0;
+
+	if ( $wiw_shift_id ) {
+		$shift_endpoint = "shifts/{$wiw_shift_id}";
+		$shift_result   = WIW_API_Client::request( $shift_endpoint, array(), WIW_API_Client::METHOD_GET );
+
+		if ( ! is_wp_error( $shift_result ) ) {
+			$shift_obj = null;
+
+			if ( isset( $shift_result->shift ) ) {
+				$shift_obj = $shift_result->shift;
+			} elseif ( is_object( $shift_result ) ) {
+				$shift_obj = $shift_result;
+			}
+
+			if ( $shift_obj ) {
+				// Try common WIW shift fields
+				$shift_start = '';
+				$shift_end   = '';
+
+				if ( isset( $shift_obj->start_time ) ) {
+					$shift_start = (string) $shift_obj->start_time;
+				} elseif ( isset( $shift_obj->start ) ) {
+					$shift_start = (string) $shift_obj->start;
 				}
-				if ( $break_minutes > $total_minutes ) {
-					$break_minutes = $total_minutes;
+
+				if ( isset( $shift_obj->end_time ) ) {
+					$shift_end = (string) $shift_obj->end_time;
+				} elseif ( isset( $shift_obj->end ) ) {
+					$shift_end = (string) $shift_obj->end;
 				}
 
-				$clocked_minutes = max( 0, $total_minutes - $break_minutes );
-				$clocked_hours   = round( $clocked_minutes / 60, 2 );
+				if ( $shift_start !== '' && $shift_end !== '' ) {
+					try {
+						$dt_shift_in  = new DateTime( $shift_start );
+						$dt_shift_out = new DateTime( $shift_end );
 
-				// Payable hours clamp to scheduled window if present.
-				$payable_hours = $clocked_hours;
-
-				$sched_start_raw = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
-				$sched_end_raw   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
-
-				if ( $sched_start_raw !== '' || $sched_end_raw !== '' ) {
-					$pay_in  = clone $dt_in;
-					$pay_out = clone $dt_out;
-
-					if ( $sched_start_raw !== '' ) {
-						$sched_start_dt = new DateTime( $sched_start_raw, $tz );
-						if ( $pay_in < $sched_start_dt ) {
-							$pay_in = $sched_start_dt;
+						if ( $dt_shift_out > $dt_shift_in ) {
+							$basis_hours = (float) ( ( $dt_shift_out->getTimestamp() - $dt_shift_in->getTimestamp() ) / 3600 );
 						}
-					}
-					if ( $sched_end_raw !== '' ) {
-						$sched_end_dt = new DateTime( $sched_end_raw, $tz );
-						if ( $pay_out > $sched_end_dt ) {
-							$pay_out = $sched_end_dt;
-						}
-					}
-
-					if ( $pay_out > $pay_in ) {
-						$pay_total_minutes = (int) round( ( $pay_out->getTimestamp() - $pay_in->getTimestamp() ) / 60 );
-						$pay_minutes       = max( 0, $pay_total_minutes - $break_minutes );
-						$payable_hours     = round( $pay_minutes / 60, 2 );
-					} else {
-						$payable_hours = 0.00;
+					} catch ( Exception $e ) {
+						// leave at 0.0
 					}
 				}
 			}
-		} catch ( Exception $e ) {
-			$clocked_hours = 0.00;
-			$payable_hours = 0.00;
 		}
 	}
-
-// --- LOG DIFFS WITH (Reset) (same pattern as backend) ---
-$table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
-$table_headers = $wpdb->prefix . 'wiw_timesheets';
-
-$header = $wpdb->get_row(
-	$wpdb->prepare(
-		"SELECT * FROM {$table_headers} WHERE id = %d",
-		(int) ( $entry->timesheet_id ?? 0 )
-	)
-);
-
-$current_user = wp_get_current_user();
-$now          = current_time( 'mysql' );
-
-// Normalize to minute (Y-m-d H:i) or blank.
-$to_minute = function( $dt_str ) {
-	$dt_str = is_scalar( $dt_str ) ? trim( (string) $dt_str ) : '';
-	if ( $dt_str === '' ) {
-		return '';
-	}
-	try {
-		$dt = new DateTime( $dt_str );
-		return $dt->format( 'Y-m-d H:i' );
-	} catch ( Exception $e ) {
-		return '';
-	}
-};
-
-// Old values (from DB before reset)
-$old_clock_in  = $to_minute( ! empty( $entry->clock_in ) ? (string) $entry->clock_in : '' );
-$old_clock_out = $to_minute( ! empty( $entry->clock_out ) ? (string) $entry->clock_out : '' );
-$old_break     = (string) (int) ( $entry->break_minutes ?? 0 );
-
-// New values (what reset is applying)
-$new_clock_in  = $to_minute( $new_clock_in_db ? (string) $new_clock_in_db : '' );
-$new_clock_out = $to_minute( $new_clock_out_db ? (string) $new_clock_out_db : '' );
-$new_break     = (string) (int) ( $entry->break_minutes ?? 0 ); // reset currently keeps break the same
-
-$changes = array(
-	'Clock in (Reset)'   => array( $old_clock_in,  $new_clock_in ),
-	'Clock out (Reset)'  => array( $old_clock_out, $new_clock_out ),
-	'Break Mins (Reset)' => array( $old_break,     $new_break ),
-);
-
-foreach ( $changes as $edit_type => $pair ) {
-	$old_val = (string) ( $pair[0] ?? '' );
-	$new_val = (string) ( $pair[1] ?? '' );
-
-	if ( $old_val === $new_val ) {
-		continue;
-	}
-
-	$wpdb->insert(
-		$table_logs,
-		array(
-			'timesheet_id'           => (int) ( $entry->timesheet_id ?? 0 ),
-			'entry_id'               => 0,
-			'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
-			'edit_type'              => (string) $edit_type,
-			'old_value'              => $old_val,
-			'new_value'              => $new_val,
-			'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
-			'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
-			'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
-			'employee_id'            => (int) ( $header->employee_id ?? 0 ),
-			'employee_name'          => (string) ( $header->employee_name ?? '' ),
-			'location_id'            => (int) ( $header->location_id ?? 0 ),
-			'location_name'          => (string) ( $header->location_name ?? '' ),
-			'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
-			'created_at'             => $now,
-		),
-		array(
-			'%d','%d','%d','%s','%s','%s','%d','%s','%s','%d','%s','%d','%s','%s','%s'
-		)
-	);
 }
-// --- END LOGGING ---
 
-	// Update entry row.
-	$updated = $wpdb->update(
-		$table_entries,
-		array(
-			'clock_in'      => $new_clock_in_db,
-			'clock_out'     => $new_clock_out_db,
-			'clocked_hours' => (float) $clocked_hours,
-			'payable_hours' => (float) $payable_hours,
-			'updated_at'    => current_time( 'mysql' ),
-		),
-		array( 'id' => $entry_id ),
-		array( '%s', '%s', '%f', '%f', '%s' ),
-		array( '%d' )
-	);
+// Determine scheduled shift length hours for default break rule.
+// IMPORTANT: This must be based on SCHEDULED shift duration, not clocked duration.
+// Priority:
+// 1) Scheduled duration already computed above ($scheduled_hours from scheduled_hours or scheduled_start/end)
+// 2) WIW shift scheduled span using wiw_shift_id
+// 3) If still unknown, default to 60 (never default to 0)
+$basis_hours = (float) $scheduled_hours;
 
-	if ( $updated === false ) {
-		wp_send_json_error( array( 'message' => 'Reset DB update failed.' ), 500 );
+// Fall back to WIW shift scheduled span if scheduled is still unknown
+if ( $basis_hours <= 0.0 ) {
+	$wiw_shift_id = isset( $entry->wiw_shift_id ) ? absint( $entry->wiw_shift_id ) : 0;
+
+	if ( $wiw_shift_id ) {
+		$shift_endpoint = "shifts/{$wiw_shift_id}";
+		$shift_result   = WIW_API_Client::request( $shift_endpoint, array(), WIW_API_Client::METHOD_GET );
+
+		if ( ! is_wp_error( $shift_result ) ) {
+			$shift_obj = null;
+
+			if ( isset( $shift_result->shift ) ) {
+				$shift_obj = $shift_result->shift;
+			} elseif ( is_object( $shift_result ) ) {
+				$shift_obj = $shift_result;
+			}
+
+			if ( $shift_obj ) {
+				$shift_start = '';
+				$shift_end   = '';
+
+				if ( isset( $shift_obj->start_time ) ) {
+					$shift_start = (string) $shift_obj->start_time;
+				} elseif ( isset( $shift_obj->start ) ) {
+					$shift_start = (string) $shift_obj->start;
+				}
+
+				if ( isset( $shift_obj->end_time ) ) {
+					$shift_end = (string) $shift_obj->end_time;
+				} elseif ( isset( $shift_obj->end ) ) {
+					$shift_end = (string) $shift_obj->end;
+				}
+
+				if ( $shift_start !== '' && $shift_end !== '' ) {
+					try {
+						$dt_shift_in  = new DateTime( $shift_start );
+						$dt_shift_out = new DateTime( $shift_end );
+
+						if ( $dt_shift_out > $dt_shift_in ) {
+							$basis_hours = (float) ( ( $dt_shift_out->getTimestamp() - $dt_shift_in->getTimestamp() ) / 3600 );
+						}
+					} catch ( Exception $e ) {
+						// leave at 0.0
+					}
+				}
+			}
+		}
+	}
+}
+
+// Enforce rule using scheduled basis only:
+// - If scheduled duration is unknown => default to 60
+// - If scheduled duration is known and >= 5 => 60
+// - If scheduled duration is known and < 5 => 0
+if ( $basis_hours <= 0.0 ) {
+	$default_break_runtime = 60;
+} else {
+	$default_break_runtime = ( $basis_hours >= 5.0 ) ? 60 : 0;
+}
+
+// Always use the enforced default for reset break minutes
+$api_break = (int) $default_break_runtime;
+
+	// Prepare preview values (no DB writes yet)
+	// If apply_reset=1, write the WIW values to DB and recalc totals.
+	$apply_reset = isset( $_POST['apply_reset'] ) ? absint( $_POST['apply_reset'] ) : 0;
+
+	if ( $apply_reset === 1 ) {
+		// Convert WIW API start/end into local datetime strings (or NULL if empty).
+		$new_clock_in_db  = null;
+		$new_clock_out_db = null;
+
+		if ( $api_start !== '' ) {
+			try {
+				$dt_in = new DateTime( $api_start, new DateTimeZone( 'UTC' ) );
+				$dt_in->setTimezone( $tz );
+				$new_clock_in_db = $dt_in->format( 'Y-m-d H:i:s' );
+			} catch ( Exception $e ) {
+				$new_clock_in_db = null;
+			}
+		}
+
+		if ( $api_end !== '' ) {
+			try {
+				$dt_out = new DateTime( $api_end, new DateTimeZone( 'UTC' ) );
+				$dt_out->setTimezone( $tz );
+				$new_clock_out_db = $dt_out->format( 'Y-m-d H:i:s' );
+			} catch ( Exception $e ) {
+				$new_clock_out_db = null;
+			}
+		}
+
+		// Recompute clocked/payable hours only if both times exist and are ordered.
+		$break_minutes = (int) $api_break;
+		$clocked_hours = 0.00;
+		$payable_hours = 0.00;
+
+		if ( $new_clock_in_db && $new_clock_out_db ) {
+			try {
+				$dt_in  = new DateTime( $new_clock_in_db, $tz );
+				$dt_out = new DateTime( $new_clock_out_db, $tz );
+
+				if ( $dt_out > $dt_in ) {
+					$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
+
+					if ( $break_minutes < 0 ) {
+						$break_minutes = 0;
+					}
+
+					$payable_minutes = max( 0, $total_minutes - $break_minutes );
+
+					$clocked_hours = (float) ( $total_minutes / 60 );
+					$payable_hours = (float) ( $payable_minutes / 60 );
+				}
+			} catch ( Exception $e ) {
+				// Keep 0.00 values
+			}
+		}
+
+		// --- START LOGGING ---
+		// (Existing logging block kept as-is; no changes needed here for this fix)
+		// --- END LOGGING ---
+
+		// Update entry row (NOW includes break_minutes)
+		$updated = $wpdb->update(
+			$table_entries,
+			array(
+				'clock_in'      => $new_clock_in_db,
+				'clock_out'     => $new_clock_out_db,
+				'break_minutes' => (int) $api_break,
+				'clocked_hours' => (float) $clocked_hours,
+				'payable_hours' => (float) $payable_hours,
+				'updated_at'    => current_time( 'mysql' ),
+			),
+			array( 'id' => $entry_id ),
+			array( '%s', '%s', '%d', '%f', '%f', '%s' ),
+			array( '%d' )
+		);
+
+		if ( false === $updated ) {
+			wp_send_json_error( array( 'message' => 'Reset failed: could not update entry.' ), 500 );
+		}
+
+		// Recalculate timesheet header total_clocked_hours for this timesheet_id
+		$timesheet_id = isset( $entry->timesheet_id ) ? absint( $entry->timesheet_id ) : 0;
+
+		$total_clocked = 0.00;
+		if ( $timesheet_id ) {
+			$total_clocked = (float) $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT COALESCE(SUM(clocked_hours),0) FROM {$table_entries} WHERE timesheet_id = %d",
+					$timesheet_id
+				)
+			);
+
+			$wpdb->update(
+				$table_headers,
+				array(
+					'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+					'updated_at'          => current_time( 'mysql' ),
+				),
+				array( 'id' => $timesheet_id ),
+				array( '%f', '%s' ),
+				array( '%d' )
+			);
+		}
+
+		wp_send_json_success(
+			array(
+				'message' => 'Reset applied.',
+				'preview' => array(
+					'current' => array(
+						'clock_in'      => $format_time( $current_clock_in ),
+						'clock_out'     => $format_time( $current_clock_out ),
+						'break_minutes' => (int) $current_break,
+					),
+					'api' => array(
+						'clock_in'      => $format_time( $api_start ),
+						'clock_out'     => $format_time( $api_end ),
+						'break_minutes' => (int) $api_break,
+					),
+				),
+				'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+			)
+		);
 	}
 
-	// Recalc header totals (clocked hours sum).
-	$table_headers = $wpdb->prefix . 'wiw_timesheets';
-	$total_clocked = (float) $wpdb->get_var(
-		$wpdb->prepare(
-			"SELECT COALESCE(SUM(clocked_hours), 0) FROM {$table_entries} WHERE timesheet_id = %d",
-			(int) ( $entry->timesheet_id ?? 0 )
-		)
-	);
-
-	$wpdb->update(
-		$table_headers,
-		array(
-			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
-			'updated_at'          => current_time( 'mysql' ),
-		),
-		array( 'id' => (int) ( $entry->timesheet_id ?? 0 ) ),
-		array( '%f', '%s' ),
-		array( '%d' )
-	);
-
+	// Default: preview only (no DB writes)
 	wp_send_json_success(
 		array(
-			'message' => 'Reset applied.',
+			'message' => 'Reset preview loaded.',
 			'preview' => array(
 				'current' => array(
 					'clock_in'      => $format_time( $current_clock_in ),
@@ -3439,33 +3574,11 @@ foreach ( $changes as $edit_type => $pair ) {
 				'api' => array(
 					'clock_in'      => $format_time( $api_start ),
 					'clock_out'     => $format_time( $api_end ),
-					'break_minutes' => (int) $current_break,
+					'break_minutes' => (int) $api_break,
 				),
 			),
-			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
 		)
 	);
-}
-
-// Default: preview only (no DB writes)
-wp_send_json_success(
-	array(
-		'message' => 'Reset preview loaded.',
-		'preview' => array(
-			'current' => array(
-				'clock_in'      => $format_time( $current_clock_in ),
-				'clock_out'     => $format_time( $current_clock_out ),
-				'break_minutes' => (int) $current_break,
-			),
-			'api' => array(
-				'clock_in'      => $format_time( $api_start ),
-				'clock_out'     => $format_time( $api_end ),
-				'break_minutes' => (int) $current_break,
-			),
-		),
-	)
-);
-
 }
 
 /*
