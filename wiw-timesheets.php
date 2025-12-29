@@ -131,9 +131,7 @@ public function render_client_ui() {
         return $out;
     }
 
-    $timesheets = $this->get_scoped_local_timesheets( $client_id );
-    $filter_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
-    $filter_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
+$timesheets = $this->get_scoped_local_timesheets( $client_id );
 
 // Filter-aware summary (count reflects filtered results)
 $filter_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
@@ -858,7 +856,27 @@ if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
         alert(msg);
         return;
       }
-      alert((data.data && data.data.message ? data.data.message : "Reset OK") + " Entry ID: " + (data.data && data.data.entry_id ? data.data.entry_id : ""));
+var p = (data && data.data && data.data.preview) ? data.data.preview : null;
+
+if (!p) {
+  alert((data.data && data.data.message) ? data.data.message : "Reset preview loaded.");
+  return;
+}
+
+var msg = "";
+msg += (data.data && data.data.message) ? data.data.message : "Reset preview loaded.";
+msg += "\n\nCurrent (Saved):";
+msg += "\nClock In: " + (p.current && p.current.clock_in ? p.current.clock_in : "N/A");
+msg += "\nClock Out: " + (p.current && p.current.clock_out ? p.current.clock_out : "N/A");
+msg += "\nBreak (Min): " + (p.current && typeof p.current.break_minutes !== "undefined" ? p.current.break_minutes : "0");
+
+msg += "\n\nFrom WIW (Would Reset To):";
+msg += "\nClock In: " + (p.api && p.api.clock_in ? p.api.clock_in : "N/A");
+msg += "\nClock Out: " + (p.api && p.api.clock_out ? p.api.clock_out : "N/A");
+msg += "\nBreak (Min): " + (p.api && typeof p.api.break_minutes !== "undefined" ? p.api.break_minutes : "0");
+
+alert(msg);
+
     })
     .catch(function(err){
       console.error(err);
@@ -3086,28 +3104,123 @@ if ( $old_break !== $new_break ) {
         $this->ajax_local_approve_entry();
     }
 
-    public function ajax_client_reset_entry_from_api() {
-    if ( ! is_user_logged_in() ) {
-        wp_send_json_error( array( 'message' => 'Not logged in.' ), 401 );
-    }
+// AJAX handler: Preview reset of a timesheet entry from WIW API data (no DB writes).
+public function ajax_client_reset_entry_from_api() {
+	if ( ! is_user_logged_in() ) {
+		wp_send_json_error( array( 'message' => 'Not logged in.' ), 401 );
+	}
 
-    // Manual nonce check so we ALWAYS return JSON (never plain -1).
-    $nonce = isset( $_POST['security'] ) ? sanitize_text_field( wp_unslash( $_POST['security'] ) ) : '';
-    if ( ! wp_verify_nonce( $nonce, 'wiw_client_reset_entry_from_api' ) ) {
-        wp_send_json_error( array( 'message' => 'Security check failed.' ), 403 );
-    }
+	// Manual nonce check so we ALWAYS return JSON (never plain -1).
+	$nonce = isset( $_POST['security'] ) ? sanitize_text_field( wp_unslash( $_POST['security'] ) ) : '';
+	if ( ! wp_verify_nonce( $nonce, 'wiw_client_reset_entry_from_api' ) ) {
+		wp_send_json_error( array( 'message' => 'Security check failed.' ), 403 );
+	}
 
-    $entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+	global $wpdb;
 
-    wp_send_json_success(
-        array(
-            'message'  => 'Reset AJAX OK (stub).',
-            'entry_id' => $entry_id,
-        )
-    );
+	$entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+	if ( ! $entry_id ) {
+		wp_send_json_error( array( 'message' => 'Missing entry_id.' ), 400 );
+	}
+
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+	$entry = $wpdb->get_row(
+		$wpdb->prepare(
+			"SELECT * FROM {$table_entries} WHERE id = %d",
+			$entry_id
+		)
+	);
+
+	if ( ! $entry ) {
+		wp_send_json_error( array( 'message' => 'Entry not found.' ), 404 );
+	}
+
+	$wiw_time_id = isset( $entry->wiw_time_id ) ? absint( $entry->wiw_time_id ) : 0;
+	if ( ! $wiw_time_id ) {
+		wp_send_json_error( array( 'message' => 'This entry is missing wiw_time_id, cannot preview reset.' ), 400 );
+	}
+
+	// Timezone (WP setting)
+	$tz_string = get_option( 'timezone_string' );
+	if ( empty( $tz_string ) ) {
+		$tz_string = 'UTC';
+	}
+	$tz = new DateTimeZone( $tz_string );
+
+	// Helper to format datetime strings into "07:50 am" (or N/A).
+	$format_time = function( $datetime_str ) use ( $tz ) {
+		$datetime_str = is_scalar( $datetime_str ) ? trim( (string) $datetime_str ) : '';
+		if ( $datetime_str === '' ) {
+			return 'N/A';
+		}
+		try {
+			$dt = new DateTime( $datetime_str );
+			$dt->setTimezone( $tz );
+			return strtolower( $dt->format( 'g:i a' ) );
+		} catch ( Exception $e ) {
+			return 'N/A';
+		}
+	};
+
+	// Current local DB values (preview only)
+	$current_clock_in  = ! empty( $entry->clock_in ) ? (string) $entry->clock_in : '';
+	$current_clock_out = ! empty( $entry->clock_out ) ? (string) $entry->clock_out : '';
+	$current_break     = isset( $entry->break_minutes ) ? (int) $entry->break_minutes : 0;
+
+	// Fetch authoritative WIW time record (preview only)
+	$endpoint = "times/{$wiw_time_id}";
+	$result   = WIW_API_Client::request( $endpoint, array(), WIW_API_Client::METHOD_GET );
+
+	if ( is_wp_error( $result ) ) {
+		wp_send_json_error(
+			array( 'message' => 'WIW API request failed: ' . $result->get_error_message() ),
+			500
+		);
+	}
+
+	$time_obj = null;
+	if ( isset( $result->time ) ) {
+		$time_obj = $result->time;
+	} elseif ( is_object( $result ) ) {
+		$time_obj = $result;
+	}
+
+	$api_start = '';
+	$api_end   = '';
+
+	if ( $time_obj ) {
+		$api_start = isset( $time_obj->start_time ) ? (string) $time_obj->start_time : '';
+		$api_end   = isset( $time_obj->end_time ) ? (string) $time_obj->end_time : '';
+	}
+
+	// Return preview only (no DB writes)
+	wp_send_json_success(
+		array(
+			'message' => 'Reset preview loaded.',
+			'preview' => array(
+				'current' => array(
+					'clock_in'      => $format_time( $current_clock_in ),
+					'clock_out'     => $format_time( $current_clock_out ),
+					'break_minutes' => (int) $current_break,
+				),
+				'api' => array(
+					'clock_in'  => $format_time( $api_start ),
+					'clock_out' => $format_time( $api_end ),
+					// WIW API time record does not provide break minutes in this plugin flow,
+					// so we preview keeping current break unless you want a different rule later.
+					'break_minutes' => (int) $current_break,
+				),
+			),
+		)
+	);
 }
 
-
+/*
+ * AJAX handler: Approve a single timesheet entry (local only).
+ * - Updates wp_wiw_timesheet_entries.status from pending -> approved
+ * - Writes a log entry using the ENTRY ID
+ */
 public function ajax_local_approve_entry() {
 
     // Capability (local-only approve)
