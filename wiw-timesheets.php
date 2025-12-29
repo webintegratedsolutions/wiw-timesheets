@@ -1200,32 +1200,6 @@ public function admin_timesheets_page() {
     include WIW_PLUGIN_PATH . 'admin/timesheets-page.php';
 }
 
-
-    /**
-     * Sorts timesheet data first by employee name, then by start time.
-     */
-    private function sort_timesheet_data( $times, $user_map ) {
-        usort($times, function($a, $b) use ($user_map) {
-            $user_a_id = $a->user_id ?? 0;
-            $user_b_id = $b->user_id ?? 0;
-
-            $name_a = ($user_map[$user_a_id]->first_name ?? '') . ' ' . ($user_map[$user_a_id]->last_name ?? 'Unknown');
-            $name_b = ($user_map[$user_b_id]->first_name ?? '') . ' ' . ($user_map[$user_b_id]->last_name ?? 'Unknown');
-
-            $name_compare = strcasecmp($name_a, $name_b);
-            if ($name_compare !== 0) {
-                return $name_compare;
-            }
-
-            $time_a = $a->start_time ?? '';
-            $time_b = $b->start_time ?? '';
-
-            return strtotime($time_a) - strtotime($time_b);
-        });
-
-        return $times;
-    }
-
     private function fetch_timesheets_data($filters = array()) {
         $endpoint = 'times';
 
