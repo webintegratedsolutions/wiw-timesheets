@@ -875,7 +875,33 @@ msg += "\nClock In: " + (p.api && p.api.clock_in ? p.api.clock_in : "N/A");
 msg += "\nClock Out: " + (p.api && p.api.clock_out ? p.api.clock_out : "N/A");
 msg += "\nBreak (Min): " + (p.api && typeof p.api.break_minutes !== "undefined" ? p.api.break_minutes : "0");
 
-alert(msg);
+if (!window.confirm(msg + "\n\nApply this reset now?")) {
+  return;
+}
+
+var formData2 = new FormData();
+formData2.append("action", "wiw_client_reset_entry_from_api");
+formData2.append("security", nonceR);
+formData2.append("entry_id", entryId);
+formData2.append("apply_reset", "1");
+
+fetch(ajaxUrl, {
+  method: "POST",
+  credentials: "same-origin",
+  body: formData2
+})
+.then(function(r) { return r.json(); })
+.then(function(resp2) {
+  if (!resp2 || !resp2.success) {
+    var m = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
+    alert(m);
+    return;
+  }
+  window.location.reload();
+})
+.catch(function() {
+  alert("Reset failed (network error).");
+});
 
     })
     .catch(function(err){
@@ -3194,10 +3220,216 @@ public function ajax_client_reset_entry_from_api() {
 		$api_end   = isset( $time_obj->end_time ) ? (string) $time_obj->end_time : '';
 	}
 
-	// Return preview only (no DB writes)
+// Prepare preview values (no DB writes yet)
+// If apply_reset=1, write the WIW values to DB and recalc totals (no logs/flags yet).
+$apply_reset = isset( $_POST['apply_reset'] ) ? absint( $_POST['apply_reset'] ) : 0;
+
+if ( $apply_reset === 1 ) {
+	// Convert WIW API start/end into local datetime strings (or NULL if empty).
+	$new_clock_in_db  = null;
+	$new_clock_out_db = null;
+
+	if ( $api_start !== '' ) {
+		try {
+			$dt_in = new DateTime( $api_start, new DateTimeZone( 'UTC' ) );
+			$dt_in->setTimezone( $tz );
+			$new_clock_in_db = $dt_in->format( 'Y-m-d H:i:s' );
+		} catch ( Exception $e ) {
+			$new_clock_in_db = null;
+		}
+	}
+
+	if ( $api_end !== '' ) {
+		try {
+			$dt_out = new DateTime( $api_end, new DateTimeZone( 'UTC' ) );
+			$dt_out->setTimezone( $tz );
+			$new_clock_out_db = $dt_out->format( 'Y-m-d H:i:s' );
+		} catch ( Exception $e ) {
+			$new_clock_out_db = null;
+		}
+	}
+
+	// Recompute clocked/payable hours only if both times exist and are ordered.
+	$break_minutes = isset( $entry->break_minutes ) ? (int) $entry->break_minutes : 0;
+	$clocked_hours = 0.00;
+	$payable_hours = 0.00;
+
+	if ( $new_clock_in_db && $new_clock_out_db ) {
+		try {
+			$dt_in  = new DateTime( $new_clock_in_db, $tz );
+			$dt_out = new DateTime( $new_clock_out_db, $tz );
+
+			if ( $dt_out > $dt_in ) {
+				$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
+
+				if ( $break_minutes < 0 ) {
+					$break_minutes = 0;
+				}
+				if ( $break_minutes > $total_minutes ) {
+					$break_minutes = $total_minutes;
+				}
+
+				$clocked_minutes = max( 0, $total_minutes - $break_minutes );
+				$clocked_hours   = round( $clocked_minutes / 60, 2 );
+
+				// Payable hours clamp to scheduled window if present.
+				$payable_hours = $clocked_hours;
+
+				$sched_start_raw = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+				$sched_end_raw   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+				if ( $sched_start_raw !== '' || $sched_end_raw !== '' ) {
+					$pay_in  = clone $dt_in;
+					$pay_out = clone $dt_out;
+
+					if ( $sched_start_raw !== '' ) {
+						$sched_start_dt = new DateTime( $sched_start_raw, $tz );
+						if ( $pay_in < $sched_start_dt ) {
+							$pay_in = $sched_start_dt;
+						}
+					}
+					if ( $sched_end_raw !== '' ) {
+						$sched_end_dt = new DateTime( $sched_end_raw, $tz );
+						if ( $pay_out > $sched_end_dt ) {
+							$pay_out = $sched_end_dt;
+						}
+					}
+
+					if ( $pay_out > $pay_in ) {
+						$pay_total_minutes = (int) round( ( $pay_out->getTimestamp() - $pay_in->getTimestamp() ) / 60 );
+						$pay_minutes       = max( 0, $pay_total_minutes - $break_minutes );
+						$payable_hours     = round( $pay_minutes / 60, 2 );
+					} else {
+						$payable_hours = 0.00;
+					}
+				}
+			}
+		} catch ( Exception $e ) {
+			$clocked_hours = 0.00;
+			$payable_hours = 0.00;
+		}
+	}
+
+// --- LOG DIFFS WITH (Reset) (same pattern as backend) ---
+$table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+$table_headers = $wpdb->prefix . 'wiw_timesheets';
+
+$header = $wpdb->get_row(
+	$wpdb->prepare(
+		"SELECT * FROM {$table_headers} WHERE id = %d",
+		(int) ( $entry->timesheet_id ?? 0 )
+	)
+);
+
+$current_user = wp_get_current_user();
+$now          = current_time( 'mysql' );
+
+// Normalize to minute (Y-m-d H:i) or blank.
+$to_minute = function( $dt_str ) {
+	$dt_str = is_scalar( $dt_str ) ? trim( (string) $dt_str ) : '';
+	if ( $dt_str === '' ) {
+		return '';
+	}
+	try {
+		$dt = new DateTime( $dt_str );
+		return $dt->format( 'Y-m-d H:i' );
+	} catch ( Exception $e ) {
+		return '';
+	}
+};
+
+// Old values (from DB before reset)
+$old_clock_in  = $to_minute( ! empty( $entry->clock_in ) ? (string) $entry->clock_in : '' );
+$old_clock_out = $to_minute( ! empty( $entry->clock_out ) ? (string) $entry->clock_out : '' );
+$old_break     = (string) (int) ( $entry->break_minutes ?? 0 );
+
+// New values (what reset is applying)
+$new_clock_in  = $to_minute( $new_clock_in_db ? (string) $new_clock_in_db : '' );
+$new_clock_out = $to_minute( $new_clock_out_db ? (string) $new_clock_out_db : '' );
+$new_break     = (string) (int) ( $entry->break_minutes ?? 0 ); // reset currently keeps break the same
+
+$changes = array(
+	'Clock in (Reset)'   => array( $old_clock_in,  $new_clock_in ),
+	'Clock out (Reset)'  => array( $old_clock_out, $new_clock_out ),
+	'Break Mins (Reset)' => array( $old_break,     $new_break ),
+);
+
+foreach ( $changes as $edit_type => $pair ) {
+	$old_val = (string) ( $pair[0] ?? '' );
+	$new_val = (string) ( $pair[1] ?? '' );
+
+	if ( $old_val === $new_val ) {
+		continue;
+	}
+
+	$wpdb->insert(
+		$table_logs,
+		array(
+			'timesheet_id'           => (int) ( $entry->timesheet_id ?? 0 ),
+			'entry_id'               => 0,
+			'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+			'edit_type'              => (string) $edit_type,
+			'old_value'              => $old_val,
+			'new_value'              => $new_val,
+			'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
+			'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
+			'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+			'employee_id'            => (int) ( $header->employee_id ?? 0 ),
+			'employee_name'          => (string) ( $header->employee_name ?? '' ),
+			'location_id'            => (int) ( $header->location_id ?? 0 ),
+			'location_name'          => (string) ( $header->location_name ?? '' ),
+			'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
+			'created_at'             => $now,
+		),
+		array(
+			'%d','%d','%d','%s','%s','%s','%d','%s','%s','%d','%s','%d','%s','%s','%s'
+		)
+	);
+}
+// --- END LOGGING ---
+
+	// Update entry row.
+	$updated = $wpdb->update(
+		$table_entries,
+		array(
+			'clock_in'      => $new_clock_in_db,
+			'clock_out'     => $new_clock_out_db,
+			'clocked_hours' => (float) $clocked_hours,
+			'payable_hours' => (float) $payable_hours,
+			'updated_at'    => current_time( 'mysql' ),
+		),
+		array( 'id' => $entry_id ),
+		array( '%s', '%s', '%f', '%f', '%s' ),
+		array( '%d' )
+	);
+
+	if ( $updated === false ) {
+		wp_send_json_error( array( 'message' => 'Reset DB update failed.' ), 500 );
+	}
+
+	// Recalc header totals (clocked hours sum).
+	$table_headers = $wpdb->prefix . 'wiw_timesheets';
+	$total_clocked = (float) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COALESCE(SUM(clocked_hours), 0) FROM {$table_entries} WHERE timesheet_id = %d",
+			(int) ( $entry->timesheet_id ?? 0 )
+		)
+	);
+
+	$wpdb->update(
+		$table_headers,
+		array(
+			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+			'updated_at'          => current_time( 'mysql' ),
+		),
+		array( 'id' => (int) ( $entry->timesheet_id ?? 0 ) ),
+		array( '%f', '%s' ),
+		array( '%d' )
+	);
+
 	wp_send_json_success(
 		array(
-			'message' => 'Reset preview loaded.',
+			'message' => 'Reset applied.',
 			'preview' => array(
 				'current' => array(
 					'clock_in'      => $format_time( $current_clock_in ),
@@ -3205,15 +3437,35 @@ public function ajax_client_reset_entry_from_api() {
 					'break_minutes' => (int) $current_break,
 				),
 				'api' => array(
-					'clock_in'  => $format_time( $api_start ),
-					'clock_out' => $format_time( $api_end ),
-					// WIW API time record does not provide break minutes in this plugin flow,
-					// so we preview keeping current break unless you want a different rule later.
+					'clock_in'      => $format_time( $api_start ),
+					'clock_out'     => $format_time( $api_end ),
 					'break_minutes' => (int) $current_break,
 				),
 			),
+			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
 		)
 	);
+}
+
+// Default: preview only (no DB writes)
+wp_send_json_success(
+	array(
+		'message' => 'Reset preview loaded.',
+		'preview' => array(
+			'current' => array(
+				'clock_in'      => $format_time( $current_clock_in ),
+				'clock_out'     => $format_time( $current_clock_out ),
+				'break_minutes' => (int) $current_break,
+			),
+			'api' => array(
+				'clock_in'      => $format_time( $api_start ),
+				'clock_out'     => $format_time( $api_end ),
+				'break_minutes' => (int) $current_break,
+			),
+		),
+	)
+);
+
 }
 
 /*
