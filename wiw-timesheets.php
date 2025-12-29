@@ -43,6 +43,9 @@ require_once WIW_PLUGIN_PATH . 'includes/admin-login-handler.php';
 // Include the timesheet sync trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 
+// Include the time formatting trait
+require_once WIW_PLUGIN_PATH . 'includes/time-formatting-trait.php';
+
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
@@ -60,6 +63,9 @@ class WIW_Timesheet_Manager {
 
     // Include timesheet sync methods
     use WIW_Timesheet_Sync_Trait;
+
+    // Include time formatting methods
+    use WIWTS_Time_Formatting_Trait;
 
     public function __construct() {
         // 1. Add Admin Menus and Settings
@@ -1321,93 +1327,6 @@ private function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_
     return $wpdb->get_results( $prepared );
 }
 
-    /**
-     * Format a DATETIME string into the site's local time + WP time format.
-     * Returns '' if input is empty/invalid.
-     */
-    private function wiw_format_time_local( $datetime_str ) {
-        $datetime_str = is_scalar( $datetime_str ) ? trim( (string) $datetime_str ) : '';
-        if ( $datetime_str === '' ) {
-            return '';
-        }
-
-        try {
-            $wp_timezone_string = get_option( 'timezone_string' );
-            if ( empty( $wp_timezone_string ) ) {
-                $wp_timezone_string = 'UTC';
-            }
-            $wp_tz = new DateTimeZone( $wp_timezone_string );
-
-            // Stored values in your local tables are already local DATETIME (no TZ info).
-            $dt = new DateTime( $datetime_str, $wp_tz );
-            $dt->setTimezone( $wp_tz );
-
-            $time_format = get_option( 'time_format' );
-            if ( empty( $time_format ) ) {
-                $time_format = 'g:i A';
-            }
-
-            return $dt->format( $time_format );
-        } catch ( Exception $e ) {
-            return '';
-        }
-    }
-
-    /**
-     * Format a start/end DATETIME range for display.
-     * If end is missing, shows "Active (N/A)" (admin-style).
-     */
-    private function wiw_format_time_range_local( $start_datetime, $end_datetime ) {
-        $start = $this->wiw_format_time_local( $start_datetime );
-        $end   = $this->wiw_format_time_local( $end_datetime );
-
-        if ( $start !== '' && $end !== '' ) {
-            return $start . ' - ' . $end;
-        }
-
-        if ( $start !== '' && $end === '' ) {
-            return $start . ' - Active (N/A)';
-        }
-
-        return 'N/A';
-    }
-
-/**
- * Format a local DATETIME string using WP timezone + date/time formats.
- * Example output: "December 22, 2025 9:22 AM"
- */
-private function wiw_format_datetime_local_pretty( $datetime_str ) {
-    $datetime_str = is_scalar( $datetime_str ) ? trim( (string) $datetime_str ) : '';
-    if ( $datetime_str === '' ) {
-        return 'N/A';
-    }
-
-    try {
-        $wp_timezone_string = get_option( 'timezone_string' );
-        if ( empty( $wp_timezone_string ) ) {
-            $wp_timezone_string = 'UTC';
-        }
-        $wp_tz = new DateTimeZone( $wp_timezone_string );
-
-        // Stored values are local DATETIME in DB (no TZ info), treat as WP local.
-        $dt = new DateTime( $datetime_str, $wp_tz );
-        $dt->setTimezone( $wp_tz );
-
-        $date_format = get_option( 'date_format' );
-        if ( empty( $date_format ) ) {
-            $date_format = 'F j, Y';
-        }
-
-        $time_format = get_option( 'time_format' );
-        if ( empty( $time_format ) ) {
-            $time_format = 'g:i A';
-        }
-
-        return $dt->format( $date_format . ' ' . $time_format );
-    } catch ( Exception $e ) {
-        return 'N/A';
-    }
-}
 
 /**
  * Fetch edit logs for a given timesheet ID.
@@ -1526,23 +1445,8 @@ private function wiw_get_location_name_address_by_id( $location_id ) {
 
     return array( 'name' => $name, 'address' => $address );
 }
-
-    /**
-     * Normalize a local DATETIME string to minute precision (YYYY-mm-dd HH:ii).
-     * The UI edits HH:MM, while the WIW API may include seconds. We treat
-     * "seconds-only" differences as no change for logging purposes.
-     */
-    private function normalize_datetime_to_minute( $datetime ) {
-        $datetime = is_string( $datetime ) ? trim( $datetime ) : '';
-        if ( $datetime === '' ) {
-            return '';
-        }
-        if ( strlen( $datetime ) >= 16 ) {
-            return substr( $datetime, 0, 16 );
-        }
-        return $datetime;
-    }
-
+    
+// Insert a local edit log entry into the DB.
     private function insert_local_edit_log( $args ) {
         global $wpdb;
 
