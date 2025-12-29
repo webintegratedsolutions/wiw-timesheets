@@ -102,8 +102,11 @@ class WIW_Timesheet_Manager {
         // 7. Finalize local timesheet (admin-post)
         add_action( 'admin_post_wiw_finalize_local_timesheet', array( $this, 'handle_finalize_local_timesheet' ) );
 
-        // ✅ Register additional AJAX hooks (THIS was missing)
-        $this->register_ajax_hooks();
+// ✅ Register additional AJAX hooks
+if ( method_exists( $this, 'register_ajax_hooks' ) ) {
+    $this->register_ajax_hooks();
+}
+
     }
 
 
