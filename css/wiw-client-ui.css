@@ -1,0 +1,163 @@
+/* WIW Timesheets Client UI (front-end) */
+
+.wiw-client-timesheets {
+  margin: 20px 0;
+}
+
+.wiw-client-timesheets h2,
+.wiw-client-timesheets h3 {
+  margin: 18px 0 10px;
+}
+
+.wiw-client-timesheets table.wp-list-table {
+  border-collapse: collapse;
+  width: 100%;
+  background: #fff;
+  border: 1px solid #ccd0d4;
+}
+
+.wiw-client-timesheets table.wp-list-table thead th {
+  background: #f6f7f7;
+  border-bottom: 1px solid #ccd0d4;
+  padding: 10px 8px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.wiw-client-timesheets table.wp-list-table tbody td {
+  border-top: 1px solid #e5e5e5;
+  padding: 10px 8px;
+  vertical-align: top;
+}
+
+.wiw-client-timesheets table.wp-list-table.striped tbody tr:nth-child(odd),
+.wiw-client-timesheets table.wp-list-table.striped > tbody > :nth-child(odd) {
+  background-color: #f6f7f7;
+}
+
+.wiw-client-timesheets .wiw-muted {
+  color: #666;
+}
+
+.wiw-client-timesheets .wiw-btn {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 3px;
+  border: 1px solid #2271b1;
+  background: #2271b1;
+  color: #fff;
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.wiw-client-timesheets .wiw-btn:hover,
+.wiw-client-timesheets .wiw-btn:focus {
+  background: #135e96;
+  border-color: #135e96;
+  color: #fff;
+  text-decoration: none;
+}
+
+.wiw-client-timesheets .wiw-btn.secondary {
+  background: #f6f7f7;
+  border-color: #8c8f94;
+  color: #2c3338;
+}
+
+.wiw-client-timesheets .wiw-btn.secondary:hover,
+.wiw-client-timesheets .wiw-btn.secondary:focus {
+  background: #e5e5e5;
+  border-color: #787c82;
+  color: #2c3338;
+}
+
+/* Disabled approve button: no hover, no pointer, muted color */
+.wiw-btn.wiw-client-approve-btn:disabled,
+.wiw-btn.wiw-client-approve-btn[disabled] {
+    background-color: #e0e0e0 !important;
+    color: #777 !important;
+    border-color: #ccc !important;
+    cursor: not-allowed !important;
+    opacity: 1 !important; /* prevent fade flicker */
+}
+
+/* Kill hover/focus/active effects when disabled */
+.wiw-btn.wiw-client-approve-btn:disabled:hover,
+.wiw-btn.wiw-client-approve-btn:disabled:focus,
+.wiw-btn.wiw-client-approve-btn:disabled:active {
+    background-color: #e0e0e0 !important;
+    color: #777 !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+/* Legend / Reference (Client UI) */
+.wiw-client-timesheets .wiw-legend {
+  border: 1px solid #ccd0d4;
+  background: #fff;
+  padding: 10px;
+  margin-top: 10px;
+}
+
+/* Timesheet Details block (between Pay Period header and table) */
+.wiw-client-timesheets table.wiw-timesheet-details {
+  font-size: 13px; /* slightly smaller than main table */
+}
+
+.wiw-client-timesheets table.wiw-timesheet-details tbody tr:first-child th,
+.wiw-client-timesheets table.wiw-timesheet-details tbody tr:first-child td {
+  border-top: none;
+}
+
+.wiw-client-timesheets table.wiw-timesheet-details th,
+.wiw-client-timesheets table.wiw-timesheet-details td {
+  padding: 8px 10px;
+  vertical-align: top;
+  border-top: 1px solid #e5e5e5;
+}
+
+.wiw-client-timesheets table.wiw-timesheet-details th {
+  font-weight: 600;
+  width: 180px;
+}
+
+.wiw-client-timesheets table.wiw-timesheet-details td strong {
+  font-weight: 600;
+}
+
+/* Location row: remove bold emphasis */
+.wiw-client-timesheets table.wiw-timesheet-details .wiw-location-name {
+  font-weight: normal;
+}
+
+
+.wiw-client-timesheets .wiw-legend summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px;
+  background: #f6f7f7;
+  margin: -10px -10px 10px;
+}
+
+.wiw-client-timesheets .wiw-legend table.wp-list-table {
+  margin-top: 0;
+}
+
+.wiw-client-timesheets .wiw-legend th.field-col {
+  width: 220px;
+}
+
+/* Edit Logs spacing */
+.wiw-edit-logs-table th,
+.wiw-edit-logs-table td {
+	padding: 10px 12px;
+	vertical-align: middle;
+}
+
+.wiw-edit-logs-separator {
+	margin: 24px 0;
+	border: 0;
+	border-top: 1px solid #ccd0d4;
+}

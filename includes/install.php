@@ -16,10 +16,10 @@ function wiw_timesheet_manager_install() {
 
 	$charset_collate = $wpdb->get_charset_collate();
 
-	$table_timesheets = $wpdb->prefix . 'wiw_timesheets';
-	$table_entries    = $wpdb->prefix . 'wiw_timesheet_entries';
-	$table_edit_logs  = $wpdb->prefix . 'wiw_timesheet_edit_logs';
-	$table_flags      = $wpdb->prefix . 'wiw_timesheet_flags';
+$table_timesheets    = $wpdb->prefix . 'wiw_timesheets';
+$table_entries       = $wpdb->prefix . 'wiw_timesheet_entries';
+$table_edit_logs     = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+$table_flags         = $wpdb->prefix . 'wiw_timesheet_flags';
 
 	// Timesheets (header)
 	$sql_timesheets = "CREATE TABLE {$table_timesheets} (
@@ -112,9 +112,10 @@ function wiw_timesheet_manager_install() {
 		KEY idx_flag_type (flag_type)
 	) {$charset_collate};";
 
-	// Run dbDelta for all tables.
-	dbDelta( $sql_timesheets );
-	dbDelta( $sql_entries );
-	dbDelta( $sql_logs );
-	dbDelta( $sql_flags );
+// Run dbDelta for all tables.
+dbDelta( $sql_timesheets );
+dbDelta( $sql_entries );
+dbDelta( $sql_logs );
+dbDelta( $sql_flags );
+
 }

@@ -28,6 +28,9 @@ require_once WIW_PLUGIN_PATH . 'includes/wheniwork.php';
 // Include the admin enqueue file for styles/scripts
 require_once WIW_PLUGIN_PATH . 'includes/admin-enqueue.php';
 
+// Include the front-end enqueue file for client UI styles
+require_once WIW_PLUGIN_PATH . 'includes/frontend-enqueue.php';
+
 // Include the installation file for DB setup
 require_once WIW_PLUGIN_PATH . 'includes/install.php';
 
@@ -40,6 +43,9 @@ require_once WIW_PLUGIN_PATH . 'includes/admin-login-handler.php';
 // Include the timesheet sync trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 
+// Include the time formatting trait
+require_once WIW_PLUGIN_PATH . 'includes/time-formatting-trait.php';
+
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
@@ -48,7 +54,6 @@ require_once WIW_PLUGIN_PATH . 'includes/data-functions.php';
 
 // Include the shortcodes
 require_once WIW_PLUGIN_PATH . 'includes/shortcodes.php';
-
 
 /**
 * Core Plugin Class
@@ -64,13 +69,20 @@ class WIW_Timesheet_Manager {
     // Include timesheet sync methods
     use WIW_Timesheet_Sync_Trait;
 
+    // Include time formatting methods
+    use WIWTS_Time_Formatting_Trait;
+
     public function __construct() {
         // 1. Add Admin Menus and Settings
         add_action( 'admin_menu', array( $this, 'add_admin_menus' ) );
         add_action( 'admin_init', array( $this, 'register_settings' ) );
 
-        // 2. Add Front-end UI (Client Area) via Shortcode (Still registered, but logic is deferred)
+        // 2. Add Front-end UI (Client Area) via Shortcodes (Still registered, but logic is deferred)
         add_shortcode( 'wiw_timesheets_client', array( $this, 'render_client_ui' ) );
+
+        // NEW: Client Filter UI Shortcode
+        add_shortcode( 'wiw_timesheets_client_filter', array( $this, 'render_client_filter_ui' ) );
+
 
         // 3. Handle AJAX requests for viewing/adjusting/approving (Crucial for interaction)
         // REMOVED: add_action( 'wp_ajax_wiw_fetch_timesheets', array( $this, 'handle_fetch_timesheets' ) );
@@ -79,6 +91,12 @@ class WIW_Timesheet_Manager {
 
         // 4. NEW: AJAX for local entry hours update (Local Timesheets view)
         add_action( 'wp_ajax_wiw_local_update_entry', array( $this, 'ajax_local_update_entry' ) );
+
+        // NEW: AJAX for client entry hours update (Client UI)
+        add_action( 'wp_ajax_wiw_client_update_entry', array( $this, 'ajax_client_update_entry' ) );
+
+        // NEW: AJAX for client entry reset (Client UI)
+        add_action( 'wp_ajax_wiw_client_reset_entry_from_api', array( $this, 'ajax_client_reset_entry_from_api' ) );
 
         // 5. Login handler
         add_action( 'admin_post_wiw_login_handler', 'wiwts_handle_wiw_login' );
@@ -89,26 +107,958 @@ class WIW_Timesheet_Manager {
         // 7. Finalize local timesheet (admin-post)
         add_action( 'admin_post_wiw_finalize_local_timesheet', array( $this, 'handle_finalize_local_timesheet' ) );
 
-        // ✅ Register additional AJAX hooks (THIS was missing)
-        $this->register_ajax_hooks();
+// ✅ Register additional AJAX hooks
+if ( method_exists( $this, 'register_ajax_hooks' ) ) {
+    $this->register_ajax_hooks();
+}
+
     }
+
 
     /**
-     * Normalize a local DATETIME string to minute precision (YYYY-mm-dd HH:ii).
-     * The UI edits HH:MM, while the WIW API may include seconds. We treat
-     * "seconds-only" differences as no change for logging purposes.
+     * Front-end shortcode: [wiw_timesheets_client]
+     * Minimal client UI for now (Step 1): shows scoped record count.
      */
-    private function normalize_datetime_to_minute( $datetime ) {
-        $datetime = is_string( $datetime ) ? trim( $datetime ) : '';
-        if ( $datetime === '' ) {
-            return '';
-        }
-        if ( strlen( $datetime ) >= 16 ) {
-            return substr( $datetime, 0, 16 );
-        }
-        return $datetime;
+public function render_client_ui() {
+    if ( ! is_user_logged_in() ) {
+        return '<p>You must be logged in to view timesheets.</p>';
     }
 
+    $current_user_id = get_current_user_id();
+    $client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+    $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
+
+    // Always show the client account number for now (debug).
+        // Role indicator shown at the top of the client UI output.
+    $current_user_role_label = 'Client';
+    if ( current_user_can( 'manage_options' ) ) {
+        $current_user_role_label = 'Administrator';
+    }
+
+    $out  = '<div class="wiw-client-timesheets">';
+    $out .= '<div class="wiw-client-role-indicator" style="margin:0 0 10px 0;font-size:13px;color:#555;">Logged in as: <strong>' . esc_html( $current_user_role_label ) . '</strong></div>';
+    $out .= '<div id="wiwts-client-ajax" data-ajax-url="' . esc_attr( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '" data-nonce-approve="' . esc_attr( wp_create_nonce( 'wiw_local_approve_entry' ) ) . '" data-nonce-reset="' . esc_attr( wp_create_nonce( 'wiw_client_reset_entry_from_api' ) ) . '"></div>';
+
+    if ( $client_id === '' ) {
+        $out .= '<p>No client account number found on your user profile.</p>';
+        $out .= '</div>';
+        return $out;
+    }
+
+$timesheets = $this->get_scoped_local_timesheets( $client_id );
+
+// Filter-aware summary (count reflects filtered results)
+$filter_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+$filter_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
+
+// Defaults
+$employee_label   = 'All Employees';
+$pay_period_label = 'All Pay Periods';
+
+// Determine employee label from data
+if ( $filter_emp !== '' ) {
+    foreach ( $timesheets as $ts_row ) {
+        if ( isset( $ts_row->employee_id ) && (string) $ts_row->employee_id === (string) $filter_emp ) {
+            $employee_label = $ts_row->employee_name ?? 'Selected Employee';
+            break;
+        }
+    }
+}
+
+// Determine pay period label
+if ( $filter_period !== '' ) {
+    $parts = explode( '|', $filter_period );
+    if ( ! empty( $parts[0] ) ) {
+        $pay_period_label = 'Pay Period ' . $parts[0] . ( ! empty( $parts[1] ) ? ' to ' . $parts[1] : '' );
+    }
+}
+
+// Count timesheets AFTER filters
+$filtered_count = 0;
+foreach ( $timesheets as $ts_row ) {
+    $row_emp_id = isset( $ts_row->employee_id ) ? (string) $ts_row->employee_id : '';
+    $row_ws     = isset( $ts_row->week_start_date ) ? (string) $ts_row->week_start_date : '';
+    $row_we     = isset( $ts_row->week_end_date ) ? (string) $ts_row->week_end_date : '';
+    $row_period = $row_ws . '|' . $row_we;
+
+    if ( $filter_emp !== '' && $row_emp_id !== (string) $filter_emp ) {
+        continue;
+    }
+    if ( $filter_period !== '' && $row_period !== (string) $filter_period ) {
+        continue;
+    }
+    $filtered_count++;
+}
+
+$timesheet_word = ( $filtered_count === 1 ) ? 'timesheet' : 'timesheets';
+
+// Output summary
+$out .= '<p class="wiw-muted" style="margin:6px 0 12px; font-size:13px; font-weight:normal;">'
+    . 'Total of '
+    . '<strong>' . esc_html( $filtered_count . ' ' . $timesheet_word . ' found' ) . '</strong>'
+    . ' for '
+    . esc_html( $employee_label )
+    . ' and '
+    . esc_html( $pay_period_label )
+    . '.'
+    . '</p>';
+
+    if ( empty( $timesheets ) ) {
+        $out .= '<p>No timesheets found for your account.</p>';
+        $out .= '</div>';
+        return $out;
+    }
+
+// Group by Employee -> Pay Period (Week Start/End).
+$grouped = array();
+
+foreach ( $timesheets as $ts ) {
+    $employee_id   = isset( $ts->employee_id ) ? (string) $ts->employee_id : '';
+    $employee_name = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
+    if ( $filter_emp !== '' && (string) $employee_id !== (string) $filter_emp ) {
+        continue;
+    }
+
+    $emp_key = $employee_id !== '' ? $employee_id : md5( $employee_name );
+
+    $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+    $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+    $period_key = $week_start . '|' . $week_end;
+    if ( $filter_period !== '' && (string) $period_key !== (string) $filter_period ) {
+        continue;
+    }
+
+    if ( ! isset( $grouped[ $emp_key ] ) ) {
+        $grouped[ $emp_key ] = array(
+            'employee_id'   => $employee_id,
+            'employee_name' => $employee_name,
+            'periods'       => array(),
+        );
+    }
+
+    if ( ! isset( $grouped[ $emp_key ]['periods'][ $period_key ] ) ) {
+        $grouped[ $emp_key ]['periods'][ $period_key ] = array(
+            'week_start' => $week_start,
+            'week_end'   => $week_end,
+            'rows'       => array(),
+        );
+    }
+
+    $grouped[ $emp_key ]['periods'][ $period_key ]['rows'][] = $ts;
+}
+
+// Sort employees by name.
+uasort(
+    $grouped,
+    function( $a, $b ) {
+        return strcasecmp( (string) $a['employee_name'], (string) $b['employee_name'] );
+    }
+);
+
+// Render grouped tables.
+foreach ( $grouped as $emp_group ) {
+    $out .= '<h2 style="margin-top:24px;">👤 Employee: ' . esc_html( $emp_group['employee_name'] ) . '</h2>';
+
+    // Sort pay periods newest first by week_start.
+    $periods = $emp_group['periods'];
+    uasort(
+        $periods,
+        function( $a, $b ) {
+            return strcmp( (string) $b['week_start'], (string) $a['week_start'] );
+        }
+    );
+
+    foreach ( $periods as $period ) {
+        $pay_period_label = trim( (string) $period['week_start'] ) . ( $period['week_end'] ? ' to ' . trim( (string) $period['week_end'] ) : '' );
+
+// Each Employee + Pay Period corresponds to a single Timesheet ID.
+$timesheet_id_for_period = '';
+if ( ! empty( $period['rows'] ) && isset( $period['rows'][0]->id ) ) {
+    $timesheet_id_for_period = (string) absint( $period['rows'][0]->id );
+}
+
+$ts_label = $timesheet_id_for_period !== ''
+    ? ' | Timesheet #' . $timesheet_id_for_period
+    : '';
+
+if ( current_user_can( 'manage_options' ) ) {
+    $out .= '<h3 style="margin:12px 0 8px;">🗓️ Pay Period: '
+        . esc_html( $pay_period_label . $ts_label )
+        . '</h3>';
+} else {
+    $out .= '<h3 style="margin:12px 0 8px;">🗓️ Shifts from: '
+        . esc_html( $pay_period_label )
+        . '</h3>';
+}
+
+// Timesheet Details (shown between Pay Period header and the table)
+$ts_header = ! empty( $period['rows'] ) ? $period['rows'][0] : null;
+
+$ts_status  = ( $ts_header && isset( $ts_header->status ) ) ? (string) $ts_header->status : '';
+$ts_created = ( $ts_header && isset( $ts_header->created_at ) ) ? (string) $ts_header->created_at : '';
+$ts_updated = ( $ts_header && isset( $ts_header->updated_at ) ) ? (string) $ts_header->updated_at : '';
+
+$ts_total_sched  = ( $ts_header && isset( $ts_header->total_scheduled_hours ) ) ? (string) $ts_header->total_scheduled_hours : '0.00';
+$ts_total_clock  = ( $ts_header && isset( $ts_header->total_clocked_hours ) ) ? (string) $ts_header->total_clocked_hours : '0.00';
+
+// Optional: sum payable hours from daily records view/table (matches backend data where available).
+$ts_total_payable = '0.00';
+if ( $timesheet_id_for_period !== '' ) {
+	global $wpdb;
+	$table_daily = $wpdb->prefix . 'wiw_daily_records';
+	$sum_payable = $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT SUM(payable_hours) FROM {$table_daily} WHERE timesheet_id = %d AND location_id = %s",
+			absint( $timesheet_id_for_period ),
+			$client_id
+		)
+	);
+	if ( $sum_payable !== null && $sum_payable !== '' ) {
+		$ts_total_payable = (string) $sum_payable;
+	}
+}
+
+// Build Actions buttons (nonfunctional for now).
+$actions_html  = '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+$actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="true">Sign Off</a>';
+$actions_html .= '<a href="#" class="wiw-btn secondary" onclick="return false;" aria-disabled="true">Reset</a>';
+$actions_html .= '</div>';
+
+if ( current_user_can( 'manage_options' ) ) {
+$out .= '<table class="wp-list-table widefat fixed striped wiw-timesheet-details" style="margin:8px 0 14px;">';
+$out .= '<tbody>';
+
+// Created/Updated (formatted like admin: WP timezone + date/time format)
+$created_display = $this->wiw_format_datetime_local_pretty( $ts_created );
+$updated_display = $this->wiw_format_datetime_local_pretty( $ts_updated );
+
+// Location (Name + Address), matching admin Locations page
+$ts_location_id = ( $ts_header && isset( $ts_header->location_id ) ) ? (string) $ts_header->location_id : (string) $client_id;
+$loc            = $this->wiw_get_location_name_address_by_id( $ts_location_id );
+$loc_name       = isset( $loc['name'] ) ? (string) $loc['name'] : 'N/A';
+$loc_address    = isset( $loc['address'] ) ? (string) $loc['address'] : 'N/A';
+
+$out .= '<tr><th style="width:180px;">Created/Updated</th><td>'
+    . esc_html( $created_display )
+    . ' / '
+    . esc_html( $updated_display )
+    . '</td></tr>';
+
+$out .= '<tr><th>Location</th><td>'
+    . '<span class="wiw-muted">' . esc_html( $loc_address ) . '</span>'
+    . '</td></tr>';
+
+$out .= '<tr><th>Totals</th><td>'
+    . 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
+    . 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
+    . 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
+    . '</td></tr>';
+
+$out .= '<tr><th>Status</th><td>' . esc_html( $ts_status !== '' ? $ts_status : 'N/A' ) . '</td></tr>';
+
+$out .= '<tr><th>Actions</th><td>' . $actions_html . '</td></tr>';
+
+$out .= '</tbody></table>';
+}
+
+        $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
+        $out .= '<thead><tr>';
+$out .= '<th>Shift Date</th>';
+$out .= '<th>Sched. Start/End</th>';
+$out .= '<th>Clock In</th>';
+$out .= '<th>Clock Out</th>';
+$out .= '<th>Break (Min)</th>';
+$out .= '<th>Sched. Hrs</th>';
+$out .= '<th>Clocked Hrs</th>';
+$out .= '<th>Payable Hrs</th>';
+$out .= '<th>Actions</th>';
+
+        $out .= '<tbody>';
+
+        foreach ( $period['rows'] as $ts ) {
+            $id = isset( $ts->id ) ? (string) $ts->id : '';
+
+            // These exist in wp_wiw_timesheets:
+            $employee_name = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
+            $location_name = isset( $ts->location_name ) ? (string) $ts->location_name : '';
+            $status        = isset( $ts->status ) ? (string) $ts->status : '';
+
+            $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+            $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+
+            $sched_hrs   = isset( $ts->total_scheduled_hours ) ? (string) $ts->total_scheduled_hours : '0.00';
+            $clocked_hrs = isset( $ts->total_clocked_hours ) ? (string) $ts->total_clocked_hours : '0.00';
+
+            // These come from daily records (not available yet on this install):
+            $sched_start_end = 'N/A';
+            $clock_in_out    = 'N/A';
+            $break_min       = 'N/A';
+            $payable_hrs     = 'N/A';
+
+            // Date column: at timesheet level we only have week_start_date; use that for now.
+            $date_display = $week_start;
+
+            // Actions: placeholder for now (we’ll wire details once daily records exist).
+            $actions_html = '<span style="color:#666;">N/A</span>';
+
+$timesheet_id = isset( $ts->id ) ? absint( $ts->id ) : 0;
+$daily_rows   = $this->get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id );
+
+// If no daily rows exist, still show a single summary row using the timesheet header.
+if ( empty( $daily_rows ) ) {
+    $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+    $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+    $pay_period = $week_start . ( $week_end ? ' to ' . $week_end : '' );
+
+    $out .= '<tr>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>' . esc_html( (string) ( $ts->total_scheduled_hours ?? '0.00' ) ) . '</td>';
+    $out .= '<td>' . esc_html( (string) ( $ts->total_clocked_hours ?? '0.00' ) ) . '</td>';
+    $out .= '<td>N/A</td>';
+    $out .= '<td>' . esc_html( (string) ( $ts->status ?? '' ) ) . '</td>';
+    $out .= '<td><span class="wiw-muted">N/A</span></td>';
+    $out .= '</tr>';
+
+} else {
+    // Render one row per daily record (matches Local Timesheets view behavior).
+    foreach ( $daily_rows as $dr ) {
+        $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+        $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+        $pay_period = $week_start . ( $week_end ? ' to ' . $week_end : '' );
+
+        $date_display = isset( $dr->date ) ? (string) $dr->date : 'N/A';
+
+        $sched_start = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
+        $sched_end   = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
+        $sched_start_end = $this->wiw_format_time_range_local( $sched_start, $sched_end );
+
+        $clock_in  = isset( $dr->clock_in ) ? (string) $dr->clock_in : '';
+        $clock_out = isset( $dr->clock_out ) ? (string) $dr->clock_out : '';
+        $clock_in_out = $this->wiw_format_time_range_local( $clock_in, $clock_out );
+
+
+        $break_min = isset( $dr->break_minutes ) ? (string) $dr->break_minutes : '0';
+
+        $sched_hrs   = isset( $dr->scheduled_hours ) ? (string) $dr->scheduled_hours : '0.00';
+        $clocked_hrs = isset( $dr->clocked_hours ) ? (string) $dr->clocked_hours : '0.00';
+        $payable_hrs = isset( $dr->payable_hours ) ? (string) $dr->payable_hours : '0.00';
+
+        $status_raw = isset( $dr->status ) ? (string) $dr->status : '';
+        $status     = strtolower( trim( $status_raw ) );
+
+        $out .= '<tr>';
+        $out .= '<td>' . esc_html( $date_display ) . '</td>';
+$out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
+
+// Raw HH:MM for edit inputs (local DATETIME -> HH:MM)
+$clock_in_raw  = ( $clock_in && strlen( (string) $clock_in ) >= 16 ) ? substr( (string) $clock_in, 11, 5 ) : '';
+$clock_out_raw = ( $clock_out && strlen( (string) $clock_out ) >= 16 ) ? substr( (string) $clock_out, 11, 5 ) : '';
+
+// Display values (existing helper formatting)
+$clock_in_display  = $this->wiw_format_time_local( $clock_in );
+$clock_out_display = $this->wiw_format_time_local( $clock_out );
+
+$out .= '<td class="wiw-client-cell-clock-in" data-orig="' . esc_attr( $clock_in_raw ) . '">'
+    . '<span class="wiw-client-view">' . esc_html( $clock_in_display !== '' ? $clock_in_display : 'N/A' ) . '</span>'
+    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr( $clock_in_raw ) . '" style="display:none; width:80px;" />'
+    . '</td>';
+
+$out .= '<td class="wiw-client-cell-clock-out" data-orig="' . esc_attr( $clock_out_raw ) . '">'
+    . '<span class="wiw-client-view">' . esc_html( $clock_out_display !== '' ? $clock_out_display : 'N/A' ) . '</span>'
+    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr( $clock_out_raw ) . '" style="display:none; width:80px;" />'
+    . '</td>';
+
+$out .= '<td class="wiw-client-cell-break" data-orig="' . esc_attr( (string) $break_min ) . '">'
+    . '<span class="wiw-client-view">' . esc_html( (string) $break_min ) . '</span>'
+    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="0" value="' . esc_attr( (string) $break_min ) . '" style="display:none; width:70px;" />'
+    . '</td>';
+
+        $out .= '<td>' . esc_html( $sched_hrs ) . '</td>';
+        $out .= '<td>' . esc_html( $clocked_hrs ) . '</td>';
+        $out .= '<td>' . esc_html( $payable_hrs ) . '</td>';
+
+$detail_rows = array(
+    'Timesheet ID'              => (string) $timesheet_id,
+    'Daily Record ID'           => $dr_id,
+    'WIW Time ID'               => $wiw_time_id,
+    'WIW Shift ID'              => $wiw_shift_id,
+    'Shift Date'                => $date_display,
+    'Scheduled Start/End (fmt)' => $fmt_sched_range,
+    'Scheduled Start (raw)'     => $raw_sched_start !== '' ? $raw_sched_start : 'N/A',
+    'Scheduled End (raw)'       => $raw_sched_end !== '' ? $raw_sched_end : 'N/A',
+    'Clock In/Out (fmt)'        => $fmt_clock_range,
+    'Clock In (raw)'            => $raw_clock_in !== '' ? $raw_clock_in : 'N/A',
+    'Clock Out (raw)'           => $raw_clock_out !== '' ? $raw_clock_out : 'N/A',
+    'Break (Min)'               => $break_min,
+    'Sched. Hrs'                => $sched_hrs,
+    'Clocked Hrs'               => $clocked_hrs,
+    'Payable Hrs'               => $payable_hrs,
+    'Status'                    => $status,
+);
+
+$details_html  = '<details>';
+$details_html .= '<summary><span class="wiw-btn secondary">View</span></summary>';
+$details_html .= '<div style="margin-top:8px; padding:10px; border:1px solid #ccd0d4; background:#fff;">';
+$details_html .= '<table style="width:100%; border-collapse:collapse;">';
+
+foreach ( $detail_rows as $label => $value ) {
+    $details_html .= '<tr>';
+    $details_html .= '<th style="text-align:left; padding:6px 8px; width:220px; border-top:1px solid #eee;">' . esc_html( $label ) . '</th>';
+    $details_html .= '<td style="padding:6px 8px; border-top:1px solid #eee;">' . esc_html( (string) $value ) . '</td>';
+    $details_html .= '</tr>';
+}
+
+$details_html .= '</table>';
+$details_html .= '</div>';
+$details_html .= '</details>';
+
+$is_approved      = ( strtolower( (string) $status ) === 'approved' );
+$approve_disabled = $is_approved ? ' disabled="disabled"' : '';
+$approve_label    = $is_approved ? 'Approved' : 'Approve';
+
+// Unresolved flags (use the same Description text shown in the expandable Flags table).
+// Cached by Timesheet ID to avoid repeated queries per row.
+static $wiwts_client_flags_unresolved_cache = array();
+
+$tid_for_flags = isset( $timesheet_id ) ? absint( $timesheet_id ) : 0;
+
+if ( $tid_for_flags > 0 && ! array_key_exists( $tid_for_flags, $wiwts_client_flags_unresolved_cache ) ) {
+    $unresolved_descs = array();
+
+    $flags_for_ts = $this->get_scoped_flags_for_timesheet( $client_id, $tid_for_flags );
+    if ( ! empty( $flags_for_ts ) ) {
+        foreach ( $flags_for_ts as $fg ) {
+            $fg_status = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+            if ( $fg_status === 'resolved' ) {
+                continue;
+            }
+
+            // IMPORTANT: match the expandable table's "Description" column exactly.
+            $fg_desc = isset( $fg->description ) ? (string) $fg->description : '';
+            $fg_desc = trim( $fg_desc );
+
+            if ( $fg_desc !== '' ) {
+                $unresolved_descs[] = $fg_desc;
+            }
+        }
+    }
+
+    $wiwts_client_flags_unresolved_cache[ $tid_for_flags ] = $unresolved_descs;
+}
+
+$unresolved_flags_attr = '';
+if ( $tid_for_flags > 0 && ! empty( $wiwts_client_flags_unresolved_cache[ $tid_for_flags ] ) ) {
+    // Use a safe delimiter; JS will split this into bullet lines.
+    $unresolved_flags_attr = ' data-unresolved-flags="' . esc_attr( implode( '||', $wiwts_client_flags_unresolved_cache[ $tid_for_flags ] ) ) . '"';
+}
+
+$actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
+if ( ! $is_approved ) {
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
+}
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
+$actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" style="display:none;">Reset</button>';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
+$actions_html .= '</div>';
+
+
+
+$out .= '<td>' . $actions_html . '</td>';
+
+
+        $out .= '</tr>';
+    }
+}
+
+        }
+
+        $out .= '</tbody></table>';
+
+        // Expandable edit logs (per-timesheet, shown under each daily table when that timesheet is open).
+        if ( isset( $timesheet_id_for_period ) && $timesheet_id_for_period !== '' ) {
+        	$edit_logs = $this->get_scoped_edit_logs_for_timesheet( $client_id, absint( $timesheet_id_for_period ) );
+
+            if ( current_user_can( 'manage_options' ) ) {
+        	$out .= '<details class="wiw-edit-logs" style="margin:12px 0 22px;">';
+        	$out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
+        	$out .= '<div style="padding-top:8px;">';
+
+        	if ( empty( $edit_logs ) ) {
+        		$out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
+        	} else {
+        		$out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
+        		$out .= '<thead><tr>';
+        		$out .= '<th>When</th>';
+        		$out .= '<th>Modified</th>';
+        		$out .= '<th>Old</th>';
+        		$out .= '<th>New</th>';
+        		$out .= '<th>Edited By</th>';
+        		$out .= '</tr></thead>';
+        		$out .= '<tbody>';
+
+        		foreach ( $edit_logs as $lg ) {
+        			$when = isset( $lg->created_at ) ? $this->wiw_format_datetime_local_pretty( (string) $lg->created_at ) : '';
+
+        			$field = isset( $lg->edit_type ) ? (string) $lg->edit_type : '';
+        			$oldv  = isset( $lg->old_value ) ? (string) $lg->old_value : '';
+        			$newv  = isset( $lg->new_value ) ? (string) $lg->new_value : '';
+
+// Client-friendly display: show time only (12-hour) when value is a datetime.
+$oldv_norm = $this->normalize_datetime_to_minute( $oldv );
+$newv_norm = $this->normalize_datetime_to_minute( $newv );
+
+$oldv_disp = $oldv_norm;
+$newv_disp = $newv_norm;
+
+if ( preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $oldv_norm ) ) {
+	$oldv_disp = date_i18n( 'g:i a', strtotime( $oldv_norm ) );
+}
+
+if ( preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $newv_norm ) ) {
+	$newv_disp = date_i18n( 'g:i a', strtotime( $newv_norm ) );
+}
+
+        			$who = '';
+        			if ( ! empty( $lg->edited_by_display_name ) ) {
+        				$who = (string) $lg->edited_by_display_name;
+        			} elseif ( ! empty( $lg->edited_by_user_login ) ) {
+        				$who = (string) $lg->edited_by_user_login;
+        			}
+
+        			$out .= '<tr>';
+        			$out .= '<td>' . esc_html( $when !== '' ? $when : 'N/A' ) . '</td>';
+        			$out .= '<td><strong>' . esc_html( $field !== '' ? $field : 'N/A' ) . '</strong></td>';
+        			$out .= '<td>' . esc_html( $oldv_disp !== '' ? $oldv_disp : 'N/A' ) . '</td>';
+        			$out .= '<td>' . esc_html( $newv_disp !== '' ? $newv_disp : 'N/A' ) . '</td>';
+        			$out .= '<td>' . esc_html( $who !== '' ? $who : 'N/A' ) . '</td>';
+        			$out .= '</tr>';
+        		}
+
+        		$out .= '</tbody></table>';
+        	}
+
+        	$out .= '</div>';
+$out .= '</details>';
+}
+// Expandable flags (per-timesheet, shown under each daily table when that timesheet is open).
+$flags = $this->get_scoped_flags_for_timesheet( $client_id, absint( $timesheet_id_for_period ) );
+
+$has_unresolved_flags = false;
+if ( ! empty( $flags ) ) {
+	foreach ( $flags as $fg ) {
+		$status = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+		if ( $status !== 'resolved' ) {
+			$has_unresolved_flags = true;
+			break;
+		}
+	}
+}
+
+$flag_icon = $has_unresolved_flags ? '🟠' : '🟢';
+$flag_count = is_array( $flags ) ? count( $flags ) : 0;
+
+$out .= '<details class="wiw-flags" style="margin:12px 0 22px;">';
+$out .= '<summary>' . $flag_icon . ' Click to Expand: Flags</summary>';
+$out .= '<div style="padding-top:8px;">';
+
+if ( empty( $flags ) ) {
+	$out .= '<p class="description" style="margin:0;">No flags found for this timesheet.</p>';
+} else {
+	// Border wrapper (requested).
+	$out .= '<div style="border:1px solid #ccd0d4; border-radius:4px; overflow:hidden; background:#fff;">';
+	$out .= '<table class="wp-list-table widefat fixed striped" style="margin:0;">';
+	$out .= '<thead><tr>';
+	$out .= '<th style="width:110px;">Type</th>';
+	$out .= '<th>Description</th>';
+	$out .= '<th style="width:120px;">Status</th>';
+	$out .= '<th style="width:220px;">Updated</th>';
+	$out .= '</tr></thead>';
+	$out .= '<tbody>';
+
+	foreach ( $flags as $fg ) {
+		$type   = isset( $fg->flag_type ) ? (string) $fg->flag_type : '';
+		$desc   = isset( $fg->description ) ? (string) $fg->description : '';
+		$status = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+
+		$updated_raw = isset( $fg->updated_at ) ? (string) $fg->updated_at : '';
+		$updated     = $updated_raw !== '' ? $this->wiw_format_datetime_local_pretty( $updated_raw ) : 'N/A';
+
+		// Orange for unresolved, green for resolved (requested).
+		$row_style = ( $status === 'resolved' )
+			? 'background:#dff0d8;'
+			: 'background:#fff3cd;';
+
+		// Equal spacing on rows (requested).
+		$cell_style = 'style="padding:10px 10px; vertical-align:top;"';
+
+		$out .= '<tr style="' . esc_attr( $row_style ) . '">';
+		$out .= '<td ' . $cell_style . '><strong>' . esc_html( $type !== '' ? $type : 'N/A' ) . '</strong></td>';
+		$out .= '<td ' . $cell_style . '>' . esc_html( $desc !== '' ? $desc : 'N/A' ) . '</td>';
+		$out .= '<td ' . $cell_style . '>' . esc_html( $status !== '' ? $status : 'N/A' ) . '</td>';
+		$out .= '<td ' . $cell_style . '>' . esc_html( $updated ) . '</td>';
+		$out .= '</tr>';
+	}
+
+	$out .= '</tbody></table>';
+	$out .= '</div>';
+}
+
+$out .= '</div>';
+$out .= '</details>';
+$out .= '<hr class="wiw-edit-logs-separator" />';
+
+        }
+
+    }
+}
+
+
+// Expandable legend/reference (shown once below all tables).
+$out .= '<hr style="margin:24px 0;" />';
+$out .= '<details class="wiw-legend">';
+$out .= '<summary>';
+$out .= '💡 Click to Expand: Field Reference Legend';
+$out .= '</summary>';
+
+$out .= '<div style="padding-top: 8px;">';
+$out .= '<table class="wp-list-table widefat fixed striped">';
+$out .= '<thead><tr><th class="field-col">Field</th><th>Description</th></tr></thead>';
+$out .= '<tbody>';
+
+$out .= '<tr><td><strong>Shift Date</strong></td><td>The date of the shift entry. This corresponds to the specific day the time record applies to within the pay period.</td></tr>';
+$out .= '<tr><td><strong>Sched. Start/End</strong></td><td>The scheduled shift start and end time (local time). If the shift schedule is not available, this will show <em>N/A</em>.</td></tr>';
+$out .= '<tr><td><strong>Clock In</strong></td><td>The clock-in time for the shift entry (if available).</td></tr>';
+$out .= '<tr><td><strong>Clock Out</strong></td><td>The clock-out time for the shift entry (if available). If missing, it may indicate an active shift.</td></tr>';
+$out .= '<tr><td><strong>Break (Min)</strong></td><td>Total break time deducted, shown in minutes.</td></tr>';
+$out .= '<tr><td><strong>Sched. Hrs</strong></td><td>Total scheduled hours for the shift entry.</td></tr>';
+$out .= '<tr><td><strong>Clocked Hrs</strong></td><td>Total hours actually worked for the shift entry, based on clock-in/clock-out minus breaks.</td></tr>';
+$out .= '<tr><td><strong>Payable Hrs</strong></td><td>Total hours payable for the shift entry. This is typically the clocked hours after break deductions and any business rules applied.</td></tr>';
+$out .= '<tr><td><strong>Status</strong></td><td>The approval status of the entry (for example: <em>pending</em> or <em>approved</em>).</td></tr>';
+
+$out .= '</tbody></table>';
+$out .= '</div>';
+$out .= '</details>';
+
+return $out;
+
+}
+
+/**
+ * Front-end shortcode: [wiw_timesheets_client_filter]
+ * Renders scoped dropdown filters (Employee, Pay Period) that drive the main table via query params.
+ */
+public function render_client_filter_ui() {
+    if ( ! is_user_logged_in() ) {
+        return '';
+    }
+
+    $current_user_id = get_current_user_id();
+    $client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+    $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
+    if ( $client_id === '' ) {
+        return '';
+    }
+
+    // Pull scoped timesheets (local header rows) to populate dropdown options.
+    $timesheets = $this->get_scoped_local_timesheets( $client_id );
+    if ( empty( $timesheets ) ) {
+        return '';
+    }
+
+// Current selections from query string (used to dynamically repopulate options).
+$selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+$selected_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
+
+// Build dynamic option sets based on selection.
+// - If employee selected: show only periods that exist for that employee.
+// - If period selected: show only employees that exist for that period.
+// - If both selected: show intersection.
+$employees = array(); // employee_id => employee_name
+$periods   = array(); // "start|end" => "start to end"
+
+foreach ( $timesheets as $ts ) {
+    $eid   = isset( $ts->employee_id ) ? (string) $ts->employee_id : '';
+    $ename = isset( $ts->employee_name ) ? (string) $ts->employee_name : '';
+
+    $ws = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+    $we = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+    $pkey = ( $ws !== '' ) ? ( $ws . '|' . $we ) : '';
+
+    // Filter logic for option generation:
+    // If a pay period is selected, only include rows that match it (for employee option set).
+    if ( $selected_period !== '' && $pkey !== $selected_period ) {
+        // This row doesn't belong to the selected period.
+        // Still allow period option generation below if employee is selected only.
+        // We'll handle that by not adding employees for non-matching periods.
+    }
+
+    // If an employee is selected, only include rows that match it (for period option set).
+    if ( $selected_emp !== '' && $eid !== $selected_emp ) {
+        // Same concept: don't add periods for other employees.
+    }
+
+    // Add employee option only if it matches selected period (when selected).
+    if ( $eid !== '' && $ename !== '' ) {
+        if ( $selected_period === '' || $pkey === $selected_period ) {
+            $employees[ $eid ] = $ename;
+        }
+    }
+
+    // Add period option only if it matches selected employee (when selected).
+    if ( $pkey !== '' ) {
+        $plabel = $ws . ( $we ? ' to ' . $we : '' );
+        if ( $selected_emp === '' || $eid === $selected_emp ) {
+            $periods[ $pkey ] = $plabel;
+        }
+    }
+}
+
+    // Sort options for nicer UX.
+    asort( $employees, SORT_NATURAL | SORT_FLAG_CASE );
+    uasort(
+        $periods,
+        function( $a, $b ) {
+            // Sort by the label start date desc (string compare works for YYYY-MM-DD)
+            return strcmp( $b, $a );
+        }
+    );
+
+    // Preserve other query args.
+    $action_url = get_permalink();
+
+    $out  = '<div class="wiw-client-timesheets" style="margin-bottom:14px;">';
+    $out .= '<form method="get" action="' . esc_url( $action_url ) . '" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">';
+
+    $out .= '<div>';
+    $out .= '<label for="wiw_emp" style="display:block;font-weight:600;margin-bottom:4px;">Employee</label>';
+    $out .= '<select id="wiw_emp" name="wiw_emp">';
+    $out .= '<option value="">All Employees</option>';
+    foreach ( $employees as $eid => $ename ) {
+        $out .= '<option value="' . esc_attr( $eid ) . '"' . selected( $selected_emp, $eid, false ) . '>'
+            . esc_html( $ename )
+            . '</option>';
+    }
+    $out .= '</select>';
+    $out .= '</div>';
+
+    $out .= '<div>';
+if ( current_user_can( 'manage_options' ) ) {
+    $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Pay Period</label>';
+} else {
+    $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Shifts from:</label>';
+}
+    $out .= '<select id="wiw_period" name="wiw_period">';
+if ( current_user_can( 'manage_options' ) ) {
+    $out .= '<option value="">All Pay Periods</option>';
+} else {
+    $out .= '<option value="">Anytime</option>';
+}
+    foreach ( $periods as $pkey => $plabel ) {
+        $out .= '<option value="' . esc_attr( $pkey ) . '"' . selected( $selected_period, $pkey, false ) . '>'
+            . esc_html( $plabel )
+            . '</option>';
+    }
+    $out .= '</select>';
+    $out .= '</div>';
+
+    $out .= '<div>';
+    $out .= '<button type="submit" class="wiw-btn">Filter</button> ';
+    $out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( array( 'wiw_emp', 'wiw_period' ), $action_url ) ) . '">Reset</a>';
+    $out .= '</div>';
+
+    $out .= '</form>';
+    $out .= '</div>';
+
+    $out .= '<hr style="margin:40px 0;" />';
+
+    return $out;
+}
+
+
+/**
+ * Fetch local timesheets from DB, always scoped to a client account number.
+ * (No admin bypass; the shortcode is assumed to be used on a secure client page.)
+ */
+private function get_scoped_local_timesheets( $client_id ) {
+    global $wpdb;
+
+    $table_ts    = $wpdb->prefix . 'wiw_timesheets';
+    $table_daily = $wpdb->prefix . 'wiw_daily_records';
+
+    $client_id = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+    if ( $client_id === '' ) {
+        return array();
+    }
+
+$sql = "
+    SELECT ts.*,
+           0 AS daily_record_count
+    FROM {$table_ts} ts
+    WHERE ts.location_id = %s
+    ORDER BY ts.week_start_date DESC, ts.id DESC
+";
+
+    $prepared = $wpdb->prepare( $sql, $client_id );
+
+$results = $wpdb->get_results( $prepared );
+
+return $results;
+
+}
+
+/**
+ * Fetch daily records for a given timesheet ID from the compatibility table/view.
+ * Scoped by location_id to ensure client isolation.
+ */
+private function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id ) {
+    global $wpdb;
+
+    $table_daily = $wpdb->prefix . 'wiw_daily_records';
+
+    $client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+    $timesheet_id = absint( $timesheet_id );
+
+    if ( $client_id === '' || $timesheet_id <= 0 ) {
+        return array();
+    }
+
+    $sql = "
+        SELECT *
+        FROM {$table_daily}
+        WHERE timesheet_id = %d
+          AND location_id = %s
+        ORDER BY date ASC, id ASC
+    ";
+
+    $prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+
+    return $wpdb->get_results( $prepared );
+}
+
+
+/**
+ * Fetch edit logs for a given timesheet ID.
+ * Scoped by location_id to ensure client isolation.
+ */
+private function get_scoped_edit_logs_for_timesheet( $client_id, $timesheet_id ) {
+	global $wpdb;
+
+	$table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+	$table_ts   = $wpdb->prefix . 'wiw_timesheets';
+
+	$client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+	$timesheet_id = absint( $timesheet_id );
+
+	if ( $client_id === '' || $timesheet_id <= 0 ) {
+		return array();
+	}
+
+	// Join to timesheets to enforce location scope.
+	$sql = "
+		SELECT l.*
+		FROM {$table_logs} l
+		INNER JOIN {$table_ts} ts ON ts.id = l.timesheet_id
+		WHERE l.timesheet_id = %d
+		  AND ts.location_id = %s
+		ORDER BY l.created_at DESC, l.id DESC
+		LIMIT 200
+	";
+
+	$prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+
+	return $wpdb->get_results( $prepared );
+}
+
+/**
+ * Fetch flags for a given timesheet ID.
+ * Scoped by location_id to ensure client isolation.
+ *
+ * Flags table is keyed by wiw_time_id, so we join to daily records to
+ * get only flags that belong to this timesheet.
+ */
+private function get_scoped_flags_for_timesheet( $client_id, $timesheet_id ) {
+	global $wpdb;
+
+	$table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
+	$table_daily = $wpdb->prefix . 'wiw_daily_records';
+
+	$client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+	$timesheet_id = absint( $timesheet_id );
+
+	if ( $client_id === '' || $timesheet_id <= 0 ) {
+		return array();
+	}
+
+	$sql = "
+		SELECT f.*
+		FROM {$table_flags} f
+		INNER JOIN {$table_daily} d ON d.wiw_time_id = f.wiw_time_id
+		WHERE d.timesheet_id = %d
+		  AND d.location_id = %s
+		ORDER BY
+			CASE WHEN f.flag_status = 'resolved' THEN 1 ELSE 0 END ASC,
+			f.updated_at DESC,
+			f.id DESC
+	";
+
+	$prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+
+	return $wpdb->get_results( $prepared );
+}
+
+/**
+ * Fetch a location (site) name + address by location_id, matching admin Locations formatting.
+ * Uses fetch_locations_data() and maps sites by ID.
+ */
+private function wiw_get_location_name_address_by_id( $location_id ) {
+    $location_id = is_scalar( $location_id ) ? trim( (string) $location_id ) : '';
+    if ( $location_id === '' ) {
+        return array( 'name' => 'N/A', 'address' => 'N/A' );
+    }
+
+    // Cache per request to avoid repeated API calls.
+    if ( ! isset( $this->wiw_site_map ) || ! is_array( $this->wiw_site_map ) ) {
+        $this->wiw_site_map = array();
+
+        $locations_data = $this->fetch_locations_data();
+        if ( ! is_wp_error( $locations_data ) ) {
+            $sites = isset( $locations_data->sites ) ? $locations_data->sites : array();
+            foreach ( $sites as $site ) {
+                if ( isset( $site->id ) ) {
+                    $this->wiw_site_map[ (string) $site->id ] = $site;
+                }
+            }
+        }
+    }
+
+    $site = isset( $this->wiw_site_map[ $location_id ] ) ? $this->wiw_site_map[ $location_id ] : null;
+
+    if ( ! $site ) {
+        return array( 'name' => 'N/A', 'address' => 'N/A' );
+    }
+
+    $name = isset( $site->name ) ? (string) $site->name : 'N/A';
+
+    // Match admin Locations address formatting in admin_locations_page().
+    $address = trim(
+        ( $site->address ?? '' ) .
+        ( ! empty( $site->address ) && ! empty( $site->city ) ? ', ' : '' ) .
+        ( $site->city ?? '' ) .
+        ( ! empty( $site->city ) && ! empty( $site->zip_code ) ? ' ' : '' ) .
+        ( $site->zip_code ?? '' )
+    );
+    if ( $address === '' ) {
+        $address = 'Address Not Provided';
+    }
+
+    return array( 'name' => $name, 'address' => $address );
+}
+    
+// Insert a local edit log entry into the DB.
     private function insert_local_edit_log( $args ) {
         global $wpdb;
 
@@ -246,177 +1196,14 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
         }
     }
 
-    /**
-     * Renders the main Timesheets management page (Admin Area).
-     */
-    public function admin_timesheets_page() {
-        ?>
-        <div class="wrap">
-            <h1>🗓️ When I Work Timesheet Dashboard</h1>
-
-            <?php
-            $timesheets_data = $this->fetch_timesheets_data();
-
-            if ( is_wp_error( $timesheets_data ) ) {
-                $error_message = $timesheets_data->get_error_message();
-                ?>
-                <div class="notice notice-error">
-                    <p><strong>❌ Timesheet Fetch Error:</strong> <?php echo esc_html($error_message); ?></p>
-                    <?php if ($timesheets_data->get_error_code() === 'wiw_token_missing') : ?>
-                        <p>Please go to the <a href="<?php echo esc_url(admin_url('admin.php?page=wiw-timesheets-settings')); ?>">Settings Page</a> to log in and save your session token.</p>
-                    <?php endif; ?>
-                </div>
-                <?php
-            } else {
-                $times          = isset($timesheets_data->times) ? $timesheets_data->times : array();
-                $included_users = isset($timesheets_data->users) ? $timesheets_data->users : array();
-                $included_shifts= isset($timesheets_data->shifts) ? $timesheets_data->shifts : array();
-                $included_sites = isset($timesheets_data->sites) ? $timesheets_data->sites : array();
-
-                $user_map  = array_column($included_users, null, 'id');
-                $shift_map = array_column($included_shifts, null, 'id');
-                $site_map  = array_column($included_sites, null, 'id');
-                $site_map[0] = (object) array('name' => 'No Assigned Location');
-
-                $wp_timezone_string = get_option('timezone_string');
-                if (empty($wp_timezone_string)) { $wp_timezone_string = 'UTC'; }
-                $wp_timezone = new DateTimeZone($wp_timezone_string);
-                $time_format = get_option('time_format') ?: 'g:i A';
-
-                if ( method_exists( $this, 'calculate_shift_duration_in_hours' ) ) {
-                    foreach ( $times as &$time_entry ) {
-                        $clocked_duration = $this->calculate_timesheet_duration_in_hours( $time_entry );
-                        $time_entry->calculated_duration = $clocked_duration;
-
-                        $shift_id            = $time_entry->shift_id ?? null;
-                        $scheduled_shift_obj = $shift_map[ $shift_id ] ?? null;
-
-                        if ( $scheduled_shift_obj ) {
-                            $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours( $scheduled_shift_obj );
-
-                            $dt_sched_start = new DateTime( $scheduled_shift_obj->start_time, new DateTimeZone( 'UTC' ) );
-                            $dt_sched_end   = new DateTime( $scheduled_shift_obj->end_time,   new DateTimeZone( 'UTC' ) );
-                            $dt_sched_start->setTimezone( $wp_timezone );
-                            $dt_sched_end->setTimezone( $wp_timezone );
-
-                            $time_entry->scheduled_shift_display =
-                                $dt_sched_start->format( $time_format ) . ' - ' . $dt_sched_end->format( $time_format );
-
-                            $site_lookup_id = $scheduled_shift_obj->site_id ?? 0;
-                            $site_obj       = $site_map[ $site_lookup_id ] ?? null;
-
-                            $time_entry->location_id   = $site_lookup_id;
-                            $time_entry->location_name = ( $site_obj && isset( $site_obj->name ) )
-                                ? esc_html( $site_obj->name )
-                                : 'No Assigned Location';
-
-                        } else {
-                            $time_entry->scheduled_duration      = 0.0;
-                            $time_entry->scheduled_shift_display = 'N/A';
-                            $time_entry->location_id             = 0;
-                            $time_entry->location_name           = 'N/A';
-                        }
-                    }
-                    unset( $time_entry );
-                }
-
-                $this->sync_timesheets_to_local_db( $times, $user_map, $wp_timezone, $shift_map );
-
-                $times = $this->sort_timesheet_data( $times, $user_map );
-                $grouped_timesheets = $this->group_timesheet_by_pay_period( $times, $user_map );
-
-                $timesheet_nonce = wp_create_nonce('wiw_timesheet_nonce');
-                ?>
-                <div class="notice notice-success"><p>✅ Timesheet data fetched successfully!</p></div>
-
-                <h2>Latest Timesheets (Grouped by Employee and Week of)</h2>
-
-                <?php if (empty($grouped_timesheets)) : ?>
-                    <p>No timesheet records found within the filtered period.</p>
-                <?php else : ?>
-
-                <table class="wp-list-table widefat fixed striped" id="wiw-timesheets-table">
-                    <thead>
-                        <tr>
-                            <th width="5%">Record ID</th>
-                            <th width="8%">Date</th>
-                            <th width="10%">Employee Name</th>
-                            <th width="10%">Location</th>
-                            <th width="10%">Scheduled Shift</th>
-                            <th width="6%">Hrs Scheduled</th>
-                            <th width="8%">Clock In</th>
-                            <th width="8%">Clock Out</th>
-                            <th width="7%">Breaks (Min -)</th>
-                            <th width="6%">Hrs Clocked</th>
-                            <th width="7%">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php
-                        $employee_data = $grouped_timesheets;
-                        $global_row_index = 0;
-                        include plugin_dir_path(__FILE__) . 'admin/timesheet-loop.php';
-                        ?>
-                    </tbody>
-                </table>
-                <?php endif; ?>
-
-                <?php include plugin_dir_path(__FILE__) . 'admin/timesheet-dashboard-script.php'; ?>
-
-                <hr/>
-                <details style="border: 1px solid #ccc; background: #fff; padding: 10px; margin-top: 20px;">
-                    <summary style="cursor: pointer; font-weight: bold; padding: 5px; background: #e0e0e0; margin: -10px;">
-                        💡 Click to Expand: Data Reference Legend (Condensed)
-                    </summary>
-                    <div style="padding-top: 15px;">
-                        <table class="form-table" style="margin-top: 0;">
-                            <tbody>
-                                <tr><th scope="row">Record ID</th><td>Unique identifier for the timesheet entry (used for API actions).</td></tr>
-                                <tr><th scope="row">Date</th><td>Clock In Date (local timezone). Highlighted red if Clock Out occurs on a different day (overnight shift).</td></tr>
-                                <tr><th scope="row">Employee Name</th><td>Name retrieved from users data.</td></tr>
-                                <tr><th scope="row">Location</th><td>Assigned Location retrieved from the corresponding shift record.</td></tr>
-                                <tr><th scope="row">Scheduled Shift</th><td>Scheduled Start - End Time (local timezone). Shows N/A if no shift is linked.</td></tr>
-                                <tr><th scope="row">Hrs Scheduled</th><td>Total Scheduled Hours. Week of totals aggregate this value.</td></tr>
-                                <tr><th scope="row">Clock In / Out</th><td>Actual Clock In/Out Time (local timezone). Clock Out shows Active (N/A) if the shift is open.</td></tr>
-                                <tr><th scope="row">Breaks (Min -)</th><td>Time deducted for breaks, derived from the break_hours raw data converted to minutes.</td></tr>
-                                <tr><th scope="row">Hrs Clocked</th><td>Total Clocked Hours. Week of totals aggregate this value.</td></tr>
-                                <tr><th scope="row">Status</th><td>Approval status: Pending or Approved.</td></tr>
-                                <tr><th scope="row">Actions</th><td>Interactive options (Data and Edit/Approve).</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </details>
-                <?php
-            }
-            ?>
-        </div>
-        <?php
-    }
-
-    /**
-     * Sorts timesheet data first by employee name, then by start time.
-     */
-    private function sort_timesheet_data( $times, $user_map ) {
-        usort($times, function($a, $b) use ($user_map) {
-            $user_a_id = $a->user_id ?? 0;
-            $user_b_id = $b->user_id ?? 0;
-
-            $name_a = ($user_map[$user_a_id]->first_name ?? '') . ' ' . ($user_map[$user_a_id]->last_name ?? 'Unknown');
-            $name_b = ($user_map[$user_b_id]->first_name ?? '') . ' ' . ($user_map[$user_b_id]->last_name ?? 'Unknown');
-
-            $name_compare = strcasecmp($name_a, $name_b);
-            if ($name_compare !== 0) {
-                return $name_compare;
-            }
-
-            $time_a = $a->start_time ?? '';
-            $time_b = $b->start_time ?? '';
-
-            return strtotime($time_a) - strtotime($time_b);
-        });
-
-        return $times;
-    }
+/**
+ * Renders the main Timesheets management page (Admin Area).
+ */
+public function admin_timesheets_page() {
+    // Render the Timesheets admin page template.
+    // (Template will use variables/functions available in this scope or via plugin includes.)
+    include WIW_PLUGIN_PATH . 'admin/timesheets-page.php';
+}
 
     private function fetch_timesheets_data($filters = array()) {
         $endpoint = 'times';
@@ -508,7 +1295,7 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                 ?>
                 <div class="notice notice-success"><p>✅ Shift data fetched successfully!</p></div>
 
-                <h2>Latest Shifts (Grouped by Employee and Week of)</h2>
+                <h2>Latest Shifts (Grouped by Employee and Pay Period)</h2>
 
                 <?php if (empty($grouped_shifts)) : ?>
                     <p>No shift records found within the filtered period.</p>
@@ -541,12 +1328,12 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
                             <?php
 
                             foreach ($periods as $period_start_date => $period_data) :
-                                $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 4 days'));
+                                $period_end_date = date('Y-m-d', strtotime($period_start_date . ' + 13 days'));
                                 $total_scheduled_hours = number_format($period_data['total_clocked_hours'] ?? 0.0, 2);
                                 ?>
                                 <tr class="wiw-period-total">
                                     <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
-                                        📅 Week of: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
+                                        📅 Pay Period: <?php echo esc_html($period_start_date); ?> to <?php echo esc_html($period_end_date); ?>
                                     </td>
                                     <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo $total_scheduled_hours; ?></td>
                                     <td style="background-color: #f0f0ff;"></td>
@@ -878,1064 +1665,10 @@ add_action( 'wp_ajax_wiw_local_approve_entry', array( $this, 'ajax_local_approve
         $table_timesheet_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
         $selected_id = isset( $_GET['timesheet_id'] ) ? (int) $_GET['timesheet_id'] : 0;
-        ?>
-        <div class="wrap">
-            <h1>📁 Local Timesheets (Database View)</h1>
-            <p>This page displays timesheets stored locally in WordPress, grouped by Employee, Week, and Location.</p>
-        <?php
+        
+        
+        require_once WIW_PLUGIN_PATH . 'admin/local-timesheets-page.php';
 
-        if ( $selected_id > 0 ) {
-            $header = $wpdb->get_row(
-                $wpdb->prepare(
-                    "SELECT * FROM {$table_timesheets} WHERE id = %d",
-                    $selected_id
-                )
-            );
-
-            if ( $header ) {
-                $list_url = remove_query_arg( 'timesheet_id' );
-                ?>
-                <p>
-                    <a href="<?php echo esc_url( $list_url ); ?>" class="button">← Back to Local Timesheets List</a>
-                </p>
-
-                <?php
-                if ( isset( $_GET['reset_success'] ) ) : ?>
-                    <div class="notice notice-success is-dismissible"><p>✅ Local timesheet reset from When I Work successfully.</p></div>
-                <?php endif;
-
-                if ( isset( $_GET['reset_error'] ) && $_GET['reset_error'] !== '' ) : ?>
-                    <div class="notice notice-error is-dismissible">
-                        <p><strong>❌ Reset failed:</strong> <?php echo esc_html( sanitize_text_field( wp_unslash( $_GET['reset_error'] ) ) ); ?></p>
-                    </div>
-                <?php endif; ?>
-
-<?php if ( isset( $_GET['finalize_success'] ) ) : ?>
-    <div class="notice notice-success is-dismissible"><p>✅ Timesheet signed off and finalized.</p></div>
-<?php endif; ?>
-
-<?php if ( isset( $_GET['finalize_error'] ) && $_GET['finalize_error'] !== '' ) : ?>
-    <div class="notice notice-error is-dismissible">
-        <p><strong>❌ Sign off failed:</strong> <?php echo esc_html( sanitize_text_field( wp_unslash( $_GET['finalize_error'] ) ) ); ?></p>
-    </div>
-<?php endif; ?>
-
-<?php $is_timesheet_approved = ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ); ?>
-
-<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: 10px 0 20px;">
-    <input type="hidden" name="action" value="wiw_reset_local_timesheet" />
-    <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( (int) $header->id ); ?>" />
-    <?php wp_nonce_field( 'wiw_reset_local_timesheet', 'wiw_reset_nonce' ); ?>
-
-    <?php if ( $is_timesheet_approved ) : ?>
-        <button type="button" class="button button-secondary" disabled="disabled"
-            style="opacity:0.6;cursor:not-allowed;"
-            title="This timesheet has been finalized and can no longer be reset.">
-            Timesheet Finalized
-        </button>
-    <?php else : ?>
-        <button type="submit" class="button button-secondary"
-            onclick="return confirm('Reset will discard ALL local edits for this timesheet and restore the original data from When I Work. Continue?');">
-            Reset from API
-        </button>
-    <?php endif; ?>
-</form>
-
-
-                <h2>Timesheet #<?php echo esc_html( $header->id ); ?> Details</h2>
-                <?php
-// === WIWTS SIGN-OFF ELIGIBILITY CHECK START ===
-$all_entries_approved = true;
-
-// Initially assume sign-off is enabled
-$signoff_enabled = ( $all_entries_approved && ! $is_timesheet_approved );
-
-$entry_statuses = $wpdb->get_col(
-    $wpdb->prepare(
-        "SELECT status
-         FROM {$table_timesheet_entries}
-         WHERE timesheet_id = %d",
-        (int) $header->id
-    )
-);
-
-// If there are no entries, or any non-approved entry, disable sign off
-if ( empty( $entry_statuses ) ) {
-    $all_entries_approved = false;
-} else {
-    foreach ( $entry_statuses as $st ) {
-        if ( strtolower( (string) $st ) !== 'approved' ) {
-            $all_entries_approved = false;
-            break;
-        }
-    }
-}
-// === WIWTS SIGN-OFF ELIGIBILITY CHECK END ===
-?>
-
-                <table class="widefat striped" style="max-width: 900px;">
-                    <tbody>
-                        <tr>
-    <th scope="row" style="width: 200px;">Timesheet ID</th>
-    <td>#<?php echo esc_html( $header->id ); ?></td>
-</tr>
-                        <tr>
-                            <th scope="row" style="width: 200px;">Employee</th>
-                            <td><?php echo esc_html( $header->employee_name ); ?> (ID: <?php echo esc_html( $header->employee_id ); ?>)</td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Location</th>
-                            <td>
-                                <?php echo esc_html( $header->location_name ); ?>
-                                <?php if ( ! empty( $header->location_id ) ) : ?>
-                                    (ID: <?php echo esc_html( $header->location_id ); ?>)
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Week of</th>
-                            <td>
-                                <?php echo esc_html( $header->week_start_date ); ?>
-                                <?php if ( ! empty( $header->week_end_date ) ) : ?>
-                                    &nbsp;to&nbsp;<?php echo esc_html( $header->week_end_date ); ?>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                        <?php
-// === WIWTS SHIFTS SUMMARY ROW START ===
-$entries_count = (int) $wpdb->get_var(
-    $wpdb->prepare(
-        "SELECT COUNT(*) FROM {$table_timesheet_entries} WHERE timesheet_id = %d",
-        (int) $header->id
-    )
-);
-
-// Pull distinct shift IDs from local entries (if your entries table stores shift_id)
-$shift_ids = $wpdb->get_col(
-    $wpdb->prepare(
-        "SELECT DISTINCT wiw_shift_id
-         FROM {$table_timesheet_entries}
-         WHERE timesheet_id = %d
-           AND wiw_shift_id IS NOT NULL
-           AND wiw_shift_id <> 0
-         ORDER BY wiw_shift_id ASC",
-        (int) $header->id
-    )
-);
-
-$shift_ids = array_values( array_unique( array_filter( array_map( 'absint', (array) $shift_ids ) ) ) );
-
-$shift_ids_display = 'N/A';
-if ( ! empty( $shift_ids ) ) {
-    $shift_ids_display = implode( ', ', $shift_ids );
-}
-// === WIWTS SHIFTS SUMMARY ROW END ===
-?>
-
-<tr>
-    <th scope="row">Shifts</th>
-    <td>
-        <?php echo esc_html( $entries_count ); ?>
-        <?php if ( ! empty( $shift_ids ) ) : ?>
-            — (Shift Ids: <?php echo esc_html( $shift_ids_display ); ?>)
-        <?php else : ?>
-            — (Shift Ids: N/A)
-        <?php endif; ?>
-    </td>
-</tr>
-
-                        <tr>
-                            <th scope="row">Totals</th>
-<td>
-    <?php
-    // Calculate payable total directly from entries (authoritative)
-    $payable_total = (float) $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT COALESCE(SUM(payable_hours), 0)
-             FROM {$table_timesheet_entries}
-             WHERE timesheet_id = %d",
-            (int) $header->id
-        )
-    );
-    ?>
-    Scheduled: <?php echo esc_html( number_format( (float) $header->total_scheduled_hours, 2 ) ); ?> hrs,
-    Clocked: <span id="wiw-local-header-total-clocked">
-        <?php echo esc_html( number_format( (float) $header->total_clocked_hours, 2 ) ); ?>
-    </span> hrs,
-    Payable: <?php echo esc_html( number_format( $payable_total, 2 ) ); ?> hrs
-</td>
-
-                        </tr>
-                        <tr>
-                            <th scope="row">Status</th>
-                            <td><?php echo esc_html( $header->status ); ?></td>
-                        </tr>
-<tr>
-    <th scope="row">Created / Updated</th>
-    <td>
-        Created: <?php echo esc_html( $header->created_at ); ?><br/>
-        Updated: <?php echo esc_html( $header->updated_at ); ?>
-    </td>
-</tr>
-
-<?php
-// === WIWTS SIGN OFF ENABLE CHECK (ROBUST) START ===
-$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
-
-$is_timesheet_approved = ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' );
-
-// Count any records not approved (case-insensitive)
-$unapproved_count = (int) $wpdb->get_var(
-    $wpdb->prepare(
-        "SELECT COUNT(*)
-         FROM {$table_entries}
-         WHERE timesheet_id = %d
-           AND LOWER(COALESCE(status,'')) <> 'approved'",
-        (int) $header->id
-    )
-);
-
-// Count total records (so we don't allow sign off when there are zero rows)
-$total_count = (int) $wpdb->get_var(
-    $wpdb->prepare(
-        "SELECT COUNT(*)
-         FROM {$table_entries}
-         WHERE timesheet_id = %d",
-        (int) $header->id
-    )
-);
-
-// Enabled only if ALL daily records approved, there is at least 1 record, and header not already approved
-$signoff_enabled = ( ! $is_timesheet_approved && $total_count > 0 && $unapproved_count === 0 );
-// === WIWTS SIGN OFF ENABLE CHECK (ROBUST) END ===
-?>
-
-<tr>
-    <th scope="row">Sign Off</th>
-    <td>
-        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0;">
-            <input type="hidden" name="action" value="wiw_finalize_local_timesheet" />
-            <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( (int) $header->id ); ?>" />
-            <?php wp_nonce_field( 'wiw_finalize_local_timesheet', 'wiw_finalize_nonce' ); ?>
-
-            <?php if ( $signoff_enabled ) : ?>
-                <button type="submit"
-                        class="button button-primary"
-                        onclick="return confirm('Sign off this timesheet?\n\nOnce signed off, changes can no longer be made to any time records for this timesheet week.');">
-                    Sign Off
-                </button>
-            <?php else : ?>
-                <button type="button"
-                        class="button"
-                        disabled="disabled"
-                        style="background:#ccc;border-color:#ccc;color:#666;cursor:not-allowed;opacity:1;"
-                        title="<?php
-                            echo esc_attr(
-                                $is_timesheet_approved
-                                    ? 'Timesheet already finalized'
-                                    : 'All daily records must be approved before sign off'
-                            );
-                        ?>">
-                    Sign Off
-                </button>
-            <?php endif; ?>
-
-            <?php if ( $is_timesheet_approved ) : ?>
-                <p style="margin:6px 0 0;color:#666;font-size:12px;">This timesheet has been finalized.</p>
-            <?php elseif ( ! $signoff_enabled ) : ?>
-                <p style="margin:6px 0 0;color:#666;font-size:12px;">All daily records must be approved before sign off.</p>
-            <?php endif; ?>
-        </form>
-    </td>
-</tr>
-                    </tbody>
-                </table>
-
-                <h3 style="margin-top: 30px;">Daily Entries</h3>
-                <?php
-                $entries = $wpdb->get_results(
-                    $wpdb->prepare(
-                        "SELECT * FROM {$table_timesheet_entries}
-                         WHERE timesheet_id = %d
-                         ORDER BY date ASC, clock_in ASC",
-                        $header->id
-                    )
-                );
-
-                // ✅ Prefetch flags for all entries in one query (avoid N+1 queries)
-$table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
-$flags_map   = array(); // [wiw_time_id] => array of flag rows
-
-$wiw_ids = array();
-foreach ( (array) $entries as $e ) {
-    if ( ! empty( $e->wiw_time_id ) ) {
-        $wiw_ids[] = (int) $e->wiw_time_id;
-    }
-}
-$wiw_ids = array_values( array_unique( array_filter( $wiw_ids ) ) );
-
-if ( ! empty( $wiw_ids ) ) {
-    $in = implode( ',', array_map( 'absint', $wiw_ids ) );
-
-    $flag_rows = $wpdb->get_results(
-        "SELECT id, wiw_time_id, flag_type, description, flag_status, created_at, updated_at
-         FROM {$table_flags}
-         WHERE wiw_time_id IN ({$in})
-         ORDER BY wiw_time_id ASC, id ASC"
-    );
-
-    foreach ( (array) $flag_rows as $fr ) {
-        $tid = (int) ( $fr->wiw_time_id ?? 0 );
-        if ( ! $tid ) { continue; }
-        if ( ! isset( $flags_map[ $tid ] ) ) {
-            $flags_map[ $tid ] = array();
-        }
-        $flags_map[ $tid ][] = $fr;
-    }
-}
-
-// ✅ Prefetch edit logs for all entries in one query (avoid N+1 queries)
-$table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
-$logs_map   = array(); // [wiw_time_id] => array of log rows
-
-if ( ! empty( $wiw_ids ) ) {
-    $in_logs = implode( ',', array_map( 'absint', $wiw_ids ) );
-
-    $log_rows = $wpdb->get_results(
-        "SELECT id, wiw_time_id, edit_type, old_value, new_value, edited_by_user_login, edited_by_display_name, created_at
-         FROM {$table_logs}
-         WHERE wiw_time_id IN ({$in_logs})
-         ORDER BY wiw_time_id ASC, id DESC"
-    );
-
-    foreach ( (array) $log_rows as $lr ) {
-        $tid = (int) ( $lr->wiw_time_id ?? 0 );
-        if ( ! $tid ) { continue; }
-        if ( ! isset( $logs_map[ $tid ] ) ) {
-            $logs_map[ $tid ] = array();
-        }
-        $logs_map[ $tid ][] = $lr;
-    }
-}
-
-
-                if ( empty( $entries ) ) : ?>
-                    <p>No entries found for this timesheet.</p>
-                <?php else : ?>
-                    <table class="widefat fixed striped">
-                        <thead>
-                            <tr>
-                                <th width="10%">Date</th>
-                                <th width="12%">Time Record ID</th>
-                                <th width="17%">Scheduled Start/End</th>
-                                <th width="10%">Clock In</th>
-                                <th width="10%">Clock Out</th>
-                                <th width="10%">Break (min)</th>
-                                <th width="10%">Sched. Hrs</th>
-                                <th width="10%">Clocked Hrs</th>
-                                <th width="10%">Payable Hrs</th>
-                                <th width="7%">Status</th>
-                                <th width="10%">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <?php foreach ( $entries as $entry ) : ?>
-                            <?php
-                            $fmt = function( $dt_string ) {
-                                if ( empty( $dt_string ) ) { return 'N/A'; }
-                                $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
-                                $tz = new DateTimeZone( $tz_string );
-                                try {
-                                    $dt = new DateTime( (string) $dt_string, $tz );
-                                    return $dt->format( 'g:ia' );
-                                } catch ( Exception $e ) {
-                                    return 'N/A';
-                                }
-                            };
-
-                            $scheduled_range = 'N/A';
-                            if ( ! empty( $entry->scheduled_start ) && ! empty( $entry->scheduled_end ) ) {
-                                $scheduled_range = $fmt( $entry->scheduled_start ) . ' to ' . $fmt( $entry->scheduled_end );
-                            }
-
-                            $clock_in_display  = $fmt( $entry->clock_in );
-                            $clock_out_display = $fmt( $entry->clock_out );
-
-                            $payable_hours_val = isset( $entry->payable_hours ) ? (float) $entry->payable_hours : (float) $entry->clocked_hours;
-                            ?>
-                            <tr>
-                                <td><?php echo esc_html( $entry->date ); ?></td>
-                                <td><?php echo esc_html( (int) $entry->wiw_time_id ); ?></td>
-                                <td><?php echo esc_html( $scheduled_range ); ?></td>
-
-                                <td class="wiw-local-clock-in"
-                                    data-time="<?php echo esc_attr( $entry->clock_in ? substr( (string) $entry->clock_in, 11, 5 ) : '' ); ?>">
-                                    <?php echo esc_html( $clock_in_display ); ?>
-                                </td>
-
-                                <td class="wiw-local-clock-out"
-                                    data-time="<?php echo esc_attr( $entry->clock_out ? substr( (string) $entry->clock_out, 11, 5 ) : '' ); ?>">
-                                    <?php echo esc_html( $clock_out_display ); ?>
-                                </td>
-
-                                <td class="wiw-local-break-min" data-break="<?php echo esc_attr( (int) $entry->break_minutes ); ?>">
-                                    <?php echo esc_html( (int) $entry->break_minutes ); ?>
-                                </td>
-
-                                <td><?php echo esc_html( number_format( (float) $entry->scheduled_hours, 2 ) ); ?></td>
-
-                                <td class="wiw-local-clocked-hours">
-                                    <?php echo esc_html( number_format( (float) $entry->clocked_hours, 2 ) ); ?>
-                                </td>
-
-                                <td class="wiw-local-payable-hours">
-                                    <?php echo esc_html( number_format( (float) $payable_hours_val, 2 ) ); ?>
-                                </td>
-
-                                <td class="wiw-local-status" data-status="<?php echo esc_attr( (string) $entry->status ); ?>">
-    <?php echo esc_html( (string) $entry->status ); ?>
-</td>
-
-<td>
-<?php
-$entry_status = (string) ( $entry->status ?? 'pending' );
-$is_approved  = ( strtolower( $entry_status ) === 'approved' );
-
-// Flags data already prepared above
-$wiw_time_id_for_flags = (int) ( $entry->wiw_time_id ?? 0 );
-
-// Safe access to flags for this entry
-$row_flags            = isset( $flags_map[ $wiw_time_id_for_flags ] ) ? (array) $flags_map[ $wiw_time_id_for_flags ] : array();
-$flags_count          = count( $row_flags );
-$flags_row_id         = 'wiw-local-flags-' . (int) $entry->id;
-
-// === WIWTS APPROVE COLOR BY FLAGS ICON LOGIC START ===
-$has_active_flags = false;
-
-if ( $flags_count ) {
-    foreach ( $row_flags as $fr ) {
-        $status_raw = isset( $fr->flag_status ) ? (string) $fr->flag_status : '';
-        $status     = strtolower( trim( $status_raw ) );
-
-        if ( $status !== 'resolved' ) {
-            $has_active_flags = true;
-            break;
-        }
-    }
-}
-
-$approve_bg   = $has_active_flags ? '#dba617' : '#46b450';
-$approve_bord = $approve_bg;
-// === WIWTS APPROVE COLOR BY FLAGS ICON LOGIC END ===
-
-?>
-
-<?php if ( ! $is_approved ) : ?>
-    <button type="button"
-            class="button button-small wiw-local-edit-entry"
-            data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
-        Edit
-    </button>
-
-<button type="button"
-        class="button button-small wiw-local-approve-entry"
-        data-entry-id="<?php echo esc_attr( $entry->id ); ?>"
-        style="margin-top:6px;background:<?php echo esc_attr( $approve_bg ); ?>;border-color:<?php echo esc_attr( $approve_bord ); ?>;color:#fff;">
-    Approve Week
-</button>
-<?php else : ?>
-    <button type="button"
-            class="button button-small wiw-local-approve-entry wiw-local-approved"
-            disabled="disabled"
-            style="margin-top:0;background:#2271b1;border-color:#2271b1;color:#fff;opacity:1;cursor:default;">
-        Week Approved
-    </button>
-<?php endif; ?>
-
-</td>
-                               
-</tr>
-
-<!-- ✅ Flags button moved to its own row below, aligned left -->
-<tr class="wiw-local-flags-actions-row">
-    <td style="text-align:left;">
-<?php
-// === WIWTS FLAGS ICON (ROW-SAFE) START ===
-$wiw_time_id_for_flags = (int) ( $entry->wiw_time_id ?? 0 );
-$row_flags            = isset( $flags_map[ $wiw_time_id_for_flags ] ) ? (array) $flags_map[ $wiw_time_id_for_flags ] : array();
-$flags_count          = count( $row_flags );
-
-$has_active = false;
-if ( $flags_count ) {
-    foreach ( $row_flags as $fr ) {
-        $status_raw = isset( $fr->flag_status ) ? (string) $fr->flag_status : '';
-        $status     = strtolower( trim( $status_raw ) );
-if ( $status !== 'resolved' ) {
-
-            $has_active = true;
-            break;
-        }
-    }
-}
-
-$flags_icon = '🚩';
-if ( $flags_count && ! $has_active ) {
-    $flags_icon = '✅';
-}
-// === WIWTS FLAGS ICON (ROW-SAFE) END ===
-?>
-
-<button type="button"
-        class="button button-small wiw-local-toggle-flags"
-        data-target="<?php echo esc_attr( $flags_row_id ); ?>"
-        <?php echo $flags_count ? '' : 'disabled="disabled"'; ?>
-        aria-label="<?php echo esc_attr( $flags_count ? 'View flags' : 'No flags' ); ?>">
-    <?php if ( $flags_count ) : ?>
-        <?php echo esc_html( $flags_icon ); ?>
-        Flags (<?php echo (int) $flags_count; ?>)
-    <?php else : ?>
-        No Flags
-    <?php endif; ?>
-</button>
-
-<?php
-$wiw_time_id_for_logs = (int) ( $entry->wiw_time_id ?? 0 );
-$row_logs            = isset( $logs_map[ $wiw_time_id_for_logs ] ) ? (array) $logs_map[ $wiw_time_id_for_logs ] : array();
-$logs_count          = count( $row_logs );
-
-$logs_row_id         = 'wiw-local-logs-' . (int) $entry->id;
-?>
-
-    </td>
-    <td colspan="10"></td>
-</tr>
-
-<!-- ✅ Hidden flags details row toggled by the button above -->
-<tr id="<?php echo esc_attr( $flags_row_id ); ?>" style="display:none; background-color:#f9f9f9;">
-    <td colspan="11">
-        <div style="padding:10px; border:1px solid #ddd;">
-            <?php if ( empty( $row_flags ) ) : ?>
-                <em>No flags for this record.</em>
-            <?php else : ?>
-                <ul style="margin:0; padding-left:18px;">
-                    <?php foreach ( $row_flags as $fr ) : ?>
-<li>
-    <strong><?php echo esc_html( (string) ( $fr->flag_type ?? '' ) ); ?></strong>
-    — <?php
-$status_raw = ( isset( $fr->flag_status ) && $fr->flag_status === 'resolved' ) ? 'resolved' : 'active';
-
-// Display label mapping
-$status_label = ( $status_raw === 'resolved' ) ? 'resolved' : 'unresolved';
-$color        = ( $status_raw === 'resolved' ) ? 'green' : 'orange';
-
-echo esc_html( (string) $fr->description ) .
-     ' <span style="font-weight:600;color:' . esc_attr( $color ) . ';">(' .
-     esc_html( $status_label ) .
-     ')</span>';
-
-    ?>
-</li>
-                    <?php endforeach; ?>
-                </ul>
-            <?php endif; ?>
-        </div>
-    </td>
-</tr>
-                            </tr>
-
-                        <?php endforeach; ?>
-
-                        </tbody>
-                    </table>
-
-<?php
-// ✅ Unified Edit Logs table (under Daily Entries)
-$timesheet_logs = $wpdb->get_results(
-    $wpdb->prepare(
-        "SELECT id, wiw_time_id, edit_type, old_value, new_value, edited_by_user_login, edited_by_display_name, created_at
-         FROM {$table_logs}
-         WHERE timesheet_id = %d
-         ORDER BY id DESC",
-        (int) $header->id
-    )
-);
-?>
-
-<h3 style="margin-top: 30px;">📝 Edit Logs</h3>
-
-<?php if ( empty( $timesheet_logs ) ) : ?>
-    <p>No edit logs found for this timesheet.</p>
-<?php else : ?>
-    <table class="widefat fixed striped" style="margin-top: 10px;">
-        <thead>
-            <tr>
-                <th width="12%">Time Record ID</th>
-                <th width="16%">Edit Type</th>
-                <th width="18%">Old Value</th>
-                <th width="18%">New Value</th>
-                <th width="18%">Edited By</th>
-                <th width="18%">Date</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php foreach ( $timesheet_logs as $lr ) : ?>
-                <?php $who = (string) ( $lr->edited_by_display_name ?: $lr->edited_by_user_login ); ?>
-                <tr>
-                    <td><?php echo esc_html( (int) ( $lr->wiw_time_id ?? 0 ) ); ?></td>
-                    <td><?php echo esc_html( (string) ( $lr->edit_type ?? '' ) ); ?></td>
-                    <td><code><?php echo esc_html( (string) ( $lr->old_value ?? '' ) ); ?></code></td>
-                    <td><code><?php echo esc_html( (string) ( $lr->new_value ?? '' ) ); ?></code></td>
-                    <td><?php echo esc_html( $who ); ?></td>
-                    <td><?php echo esc_html( (string) ( $lr->created_at ?? '' ) ); ?></td>
-                </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-<?php endif; ?>
-
-
-                    <?php
-                    $local_edit_nonce = wp_create_nonce( 'wiw_local_edit_entry' );
-                    // === WIWTS APPROVE TIME RECORD NONCE ADD START ===
-$local_approve_nonce = wp_create_nonce( 'wiw_local_approve_entry' );
-// === WIWTS APPROVE TIME RECORD NONCE ADD END ===
-
-                    ?>
-                    <script type="text/javascript">
-                    jQuery(function($) {
-
-// Toggle flags row
-$(document).on('click', '.wiw-local-toggle-flags', function(e) {
-    e.preventDefault();
-    var targetId = $(this).data('target');
-    if (targetId) {
-        $('#' + targetId).toggle();
-    }
-});
-
-// Toggle logs row
-$(document).on('click', '.wiw-local-toggle-logs', function(e) {
-    e.preventDefault();
-    var targetId = $(this).data('target');
-    if (targetId) {
-        $('#' + targetId).toggle();
-    }
-});
-
-
-                        // Edit entry button handler
-                        $('.wiw-local-edit-entry').on('click', function(e) {
-                            e.preventDefault();
-
-                            var $btn    = $(this);
-                            var $row    = $btn.closest('tr');
-                            var entryId = $btn.data('entry-id');
-
-                            var $cellIn   = $row.find('.wiw-local-clock-in');
-                            var $cellOut  = $row.find('.wiw-local-clock-out');
-                            var $cellHrs  = $row.find('.wiw-local-clocked-hours');
-                            var $cellPay  = $row.find('.wiw-local-payable-hours');
-
-                            var $cellBreak = $row.find('.wiw-local-break-min');
-                            var currentBreak = $cellBreak.data('break');
-                            if (currentBreak === undefined || currentBreak === null) currentBreak = 0;
-                            currentBreak = String(currentBreak);
-
-                            var currentIn  = $cellIn.data('time')  || '';
-                            var currentOut = $cellOut.data('time') || '';
-
-                            var newIn = window.prompt('Enter new Clock In time (HH:MM, 24-hour)', currentIn);
-                            if (!newIn) return;
-
-                            var newOut = window.prompt('Enter new Clock Out time (HH:MM, 24-hour)', currentOut);
-                            if (!newOut) return;
-
-                            var newBreak = window.prompt('Enter Break minutes (0 or more)', currentBreak);
-                            if (newBreak === null) return;
-
-                            newBreak = String(newBreak).trim();
-                            if (newBreak === '') newBreak = '0';
-
-                            if (!/^\d+$/.test(newBreak)) {
-                                alert('Break minutes must be a whole number (e.g., 0, 15, 30).');
-                                return;
-                            }
-
-                            $.post(ajaxurl, {
-                                action: 'wiw_local_update_entry',
-                                security: '<?php echo esc_js( $local_edit_nonce ); ?>',
-                                entry_id: entryId,
-                                clock_in_time: newIn,
-                                clock_out_time: newOut,
-                                break_minutes: newBreak
-                            }).done(function(resp) {
-    if (!resp || !resp.success) {
-        alert((resp && resp.data && resp.data.message) ? resp.data.message : 'Update failed.');
-        return;
-    }
-
-    if (resp.data.clock_in_display) {
-        $cellIn.text(resp.data.clock_in_display).data('time', newIn);
-    }
-
-    if (resp.data.clock_out_display) {
-        $cellOut.text(resp.data.clock_out_display).data('time', newOut);
-    }
-
-    if (resp.data.break_minutes_display !== undefined) {
-        $cellBreak
-            .text(resp.data.break_minutes_display)
-            .data('break', parseInt(resp.data.break_minutes_display, 10));
-    }
-
-    if (resp.data.clocked_hours_display) {
-        $cellHrs.text(resp.data.clocked_hours_display);
-    }
-
-    if (resp.data.payable_hours_display) {
-        $cellPay.text(resp.data.payable_hours_display);
-    }
-
-    if (resp.data.header_total_clocked_display) {
-        $('#wiw-local-header-total-clocked').text(resp.data.header_total_clocked_display);
-    }
-
-    // ✅ Force refresh so flags + edit logs update
-setTimeout(function () {
-    window.location.reload();
-}, 0);
-
-}).fail(function() {
-                                alert('AJAX error updating entry.');
-                            });
-
-                        });
-                    });
-
-// === WIWTS APPROVE TIME RECORD JS ADD START ===
-jQuery(document).on('click', '.wiw-local-approve-entry', function(e) {
-    e.preventDefault();
-
-    var $btn = jQuery(this);
-    if ($btn.is(':disabled') || $btn.hasClass('wiw-local-approved')) {
-        return;
-    }
-
-    var entryId = $btn.data('entry-id');
-    if (!entryId) return;
-
-// Build confirmation message
-var confirmMsg = 'Approve this time record?\n\nThis will finalize the record until Reset from API is used.';
-
-// 🔎 Check for active flags in the flags details row
-var flagsRowId = 'wiw-local-flags-' + entryId;
-var $flagsRow  = jQuery('#' + flagsRowId);
-
-if ($flagsRow.length) {
-    var activeFlags = [];
-
-    $flagsRow.find('li').each(function () {
-        var text = jQuery(this).text();
-        if (text.toLowerCase().includes('(active)')) {
-            activeFlags.push('• ' + text.replace(/\s*\(active\)\s*/i, '').trim());
-        }
-    });
-
-    if (activeFlags.length) {
-        confirmMsg += '\n\n⚠️ ACTIVE FLAGS DETECTED:\n' + activeFlags.join('\n');
-    }
-}
-
-if (!window.confirm(confirmMsg)) {
-    return;
-}
-
-    jQuery.post(ajaxurl, {
-        action: 'wiw_local_approve_entry',
-        security: '<?php echo esc_js( $local_approve_nonce ); ?>',
-        entry_id: entryId
-    }).done(function(resp) {
-        if (!resp || !resp.success) {
-            alert((resp && resp.data && resp.data.message) ? resp.data.message : 'Approval failed.');
-            return;
-        }
-
-        // Update UI immediately
-        var $row = $btn.closest('tr');
-        $row.find('.wiw-local-status').text('approved').attr('data-status', 'approved');
-
-        // Remove Edit button if present
-        $row.find('.wiw-local-edit-entry').remove();
-
-        // Turn Approve into disabled "Approved" (blue)
-        $btn
-            .text('Approved')
-            .addClass('wiw-local-approved')
-            .prop('disabled', true)
-            .css({
-                background: '#2271b1',
-                borderColor: '#2271b1',
-                color: '#fff',
-                opacity: 1,
-                cursor: 'default',
-                marginTop: 0
-            });
-
-        // Refresh so Edit Logs table reflects the new entry
-        window.location.reload();
-    }).fail(function() {
-        alert('AJAX error approving entry.');
-    });
-});
-// === WIWTS APPROVE TIME RECORD JS ADD END ===
-
-                    </script>
-                <?php endif; ?>
-
-                <?php
-            } else {
-                ?>
-                <div class="notice notice-error">
-                    <p>Timesheet not found.</p>
-                </div>
-                <?php
-            }
-
-            echo '</div>'; // .wrap
-            return;
-        }
-
-        // No specific ID selected: show list of headers (GROUPED like main dashboard)
-        $headers = $wpdb->get_results(
-            "SELECT * FROM {$table_timesheets}
-             ORDER BY employee_name ASC, week_start_date DESC, location_name ASC
-             LIMIT 500"
-        );
-
-        if ( empty( $headers ) ) : ?>
-            <div class="notice notice-warning">
-                <p>No local timesheets found. Visit the main WIW Timesheets Dashboard to fetch and sync data.</p>
-            </div>
-        <?php else :
-
-            $ids = array_map( static function( $r ) { return (int) $r->id; }, $headers );
-            $ids = array_filter( $ids );
-
-            $totals_map = array();
-            if ( ! empty( $ids ) ) {
-                $in = implode( ',', array_map( 'absint', $ids ) );
-
-$rows = $wpdb->get_results(
-    "SELECT timesheet_id,
-            COALESCE(SUM(break_minutes), 0) AS break_total,
-            COALESCE(SUM(payable_hours), 0) AS payable_total,
-            MIN(date) AS min_date,
-
-            MIN(scheduled_start) AS min_scheduled_start,
-            MAX(scheduled_end)   AS max_scheduled_end,
-
-            MIN(clock_in)  AS min_clock_in,
-            MAX(clock_out) AS max_clock_out
-
-     FROM {$table_timesheet_entries}
-     WHERE timesheet_id IN ({$in})
-     GROUP BY timesheet_id"
-);
-
-
-                foreach ( (array) $rows as $t ) {
-                    $tid = (int) ( $t->timesheet_id ?? 0 );
-                    if ( ! $tid ) { continue; }
-$totals_map[ $tid ] = array(
-    'break_total'   => (int) ( $t->break_total ?? 0 ),
-    'payable_total' => (float) ( $t->payable_total ?? 0 ),
-    'min_date'      => (string) ( $t->min_date ?? '' ),
-
-    'min_scheduled_start' => (string) ( $t->min_scheduled_start ?? '' ),
-    'max_scheduled_end'   => (string) ( $t->max_scheduled_end ?? '' ),
-
-    'min_clock_in'        => (string) ( $t->min_clock_in ?? '' ),
-    'max_clock_out'       => (string) ( $t->max_clock_out ?? '' ),
-);
-                }
-            }
-
-            $grouped = array();
-            foreach ( $headers as $row ) {
-                $emp  = (string) ( $row->employee_name ?? 'Unknown' );
-                $week = (string) ( $row->week_start_date ?? '' );
-                if ( $week === '' ) { continue; }
-
-                if ( ! isset( $grouped[ $emp ] ) ) {
-                    $grouped[ $emp ] = array();
-                }
-                if ( ! isset( $grouped[ $emp ][ $week ] ) ) {
-                    $grouped[ $emp ][ $week ] = array(
-                        'rows' => array(),
-                    );
-                }
-                $grouped[ $emp ][ $week ]['rows'][] = $row;
-            }
-            ?>
-
-            <!-- ✅ FIXED: THEAD now has Location column so it matches row output -->
-            <table class="wp-list-table widefat fixed striped">
-                <thead>
-<tr>
-    <th width="2%">ID</th>
-    <th width="13%">Week of</th>
-    <th width="6%">Date</th>
-
-    <th width="11%">Sched. Start/End</th>
-    <th width="11%">Clock In/Clock Out</th>
-
-    <th width="12%">Employee</th>
-    <th width="16%">Location</th>
-
-    <th width="7%">Break (Min)</th>
-    <th width="7%">Sched. Hrs</th>
-    <th width="7%">Clocked Hrs</th>
-    <th width="7%">Payable Hrs</th>
-
-    <th width="7%">Status</th>
-    <th width="8%">Actions</th>
-</tr>
-
-                </thead>
-
-                <tbody>
-                <?php foreach ( $grouped as $employee_name => $weeks ) : ?>
-                    <tr class="wiw-employee-header">
-                        <td colspan="13" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
-                            👤 Employee: <?php echo esc_html( $employee_name ); ?>
-                        </td>
-                    </tr>
-
-                    <?php foreach ( $weeks as $week_start => $bundle ) :
-
-                        usort( $bundle['rows'], static function( $a, $b ) {
-                            $la = (string) ( $a->location_name ?? '' );
-                            $lb = (string) ( $b->location_name ?? '' );
-                            return strcasecmp( $la, $lb );
-                        } );
-
-                        $week_end = '';
-                        if ( ! empty( $bundle['rows'][0]->week_end_date ) ) {
-                            $week_end = (string) $bundle['rows'][0]->week_end_date;
-                        } else {
-                            $week_end = date( 'Y-m-d', strtotime( $week_start . ' +4 days' ) );
-                        }
-
-                        $week_break   = 0;
-                        $week_sched   = 0.0;
-                        $week_clocked = 0.0;
-                        $week_payable = 0.0;
-
-                        foreach ( $bundle['rows'] as $r ) {
-                            $tid = (int) ( $r->id ?? 0 );
-                            $week_sched   += (float) ( $r->total_scheduled_hours ?? 0 );
-                            $week_clocked += (float) ( $r->total_clocked_hours ?? 0 );
-                            $week_break   += (int) ( $totals_map[ $tid ]['break_total'] ?? 0 );
-                            $week_payable += (float) ( $totals_map[ $tid ]['payable_total'] ?? 0 );
-                        }
-                        ?>
-                        <tr class="wiw-period-total">
-                            <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
-                                📅 Week of: <?php echo esc_html( $week_start ); ?> to <?php echo esc_html( $week_end ); ?>
-                            </td>
-                            <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( (int) $week_break ); ?></td>
-                            <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( number_format( (float) $week_sched, 2 ) ); ?></td>
-                            <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( number_format( (float) $week_clocked, 2 ) ); ?></td>
-                            <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( number_format( (float) $week_payable, 2 ) ); ?></td>
-                            <td colspan="2" style="background-color: #f0f0ff;"></td>
-                        </tr>
-
-                        
-
-                        <?php 
-                        
-                        $tz_string = get_option( 'timezone_string' ) ?: 'UTC';
-$tz        = new DateTimeZone( $tz_string );
-
-$fmt_time = function( $dt_string ) use ( $tz ) {
-    if ( empty( $dt_string ) ) return 'N/A';
-    try {
-        $dt = new DateTime( (string) $dt_string, $tz );
-        return $dt->format( 'g:ia' );
-    } catch ( Exception $e ) {
-        return 'N/A';
-    }
-};
-
-$fmt_range = function( $start, $end, $separator ) use ( $fmt_time ) {
-    if ( empty( $start ) || empty( $end ) ) return 'N/A';
-    return $fmt_time( $start ) . $separator . $fmt_time( $end );
-};
-
-                        foreach ( $bundle['rows'] as $row ) :
-                            $tid = (int) ( $row->id ?? 0 );
-
-                            $break_total   = (int) ( $totals_map[ $tid ]['break_total'] ?? 0 );
-                            $payable_total = (float) ( $totals_map[ $tid ]['payable_total'] ?? 0 );
-
-                            $detail_url = add_query_arg(
-                                array( 'timesheet_id' => $tid ),
-                                menu_page_url( 'wiw-local-timesheets', false )
-                            );
-
-                            $min_date = (string) ( $totals_map[ $tid ]['min_date'] ?? '' );
-                            if ( $min_date === '' ) { $min_date = '—'; }
-                            ?>
-                            <tr>
-                                <td><?php echo esc_html( $tid ); ?></td>
-                                <td>
-                                    <?php echo esc_html( $row->week_start_date ); ?>
-                                    <?php if ( ! empty( $row->week_end_date ) ) : ?>
-                                        &nbsp;to&nbsp;<?php echo esc_html( $row->week_end_date ); ?>
-                                    <?php endif; ?>
-                                </td>
-<td><?php echo esc_html( $min_date ); ?></td>
-
-<?php
-$min_sched = (string) ( $totals_map[ $tid ]['min_scheduled_start'] ?? '' );
-$max_sched = (string) ( $totals_map[ $tid ]['max_scheduled_end'] ?? '' );
-$min_in    = (string) ( $totals_map[ $tid ]['min_clock_in'] ?? '' );
-$max_out   = (string) ( $totals_map[ $tid ]['max_clock_out'] ?? '' );
-
-$scheduled_range = $fmt_range( $min_sched, $max_sched, ' to ' );
-$clock_range     = $fmt_range( $min_in,    $max_out,   ' / ' );
-?>
-<td><?php echo esc_html( $scheduled_range ); ?></td>
-<td><?php echo esc_html( $clock_range ); ?></td>
-
-<td><?php echo esc_html( $row->employee_name ); ?></td>
-<td>
-    <?php echo esc_html( $row->location_name ); ?>
-
-                                    <?php if ( ! empty( $row->location_id ) ) : ?>
-                                        <br/><small>(ID: <?php echo esc_html( $row->location_id ); ?>)</small>
-                                    <?php endif; ?>
-                                </td>
-                                <td><?php echo esc_html( $break_total ); ?></td>
-                                <td><?php echo esc_html( number_format( (float) $row->total_scheduled_hours, 2 ) ); ?></td>
-                                <td><?php echo esc_html( number_format( (float) $row->total_clocked_hours, 2 ) ); ?></td>
-                                <td><?php echo esc_html( number_format( (float) $payable_total, 2 ) ); ?></td>
-                                <td><?php echo esc_html( $row->status ); ?></td>
-                                <td>
-                                    <a href="<?php echo esc_url( $detail_url ); ?>" class="button button-small">Open Timesheet</a>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-
-                    <?php endforeach; ?>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-
-        <?php endif; ?>
-
-        </div><!-- .wrap -->
-        <?php
     }
 
 /**
@@ -2020,11 +1753,12 @@ $table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
         );
     }
 
-    // 2) Fetch API data for this header's week range
-    $start = (string) $header->week_start_date;
-    $end   = ! empty( $header->week_end_date )
-        ? date( 'Y-m-d', strtotime( $header->week_end_date . ' +1 day' ) )
-        : date( 'Y-m-d', strtotime( $header->week_start_date . ' +7 days' ) );
+    // 2) Fetch fresh data from API for the header's week + employee + location
+$start = (string) $header->week_start_date;
+$end   = ! empty( $header->week_end_date )
+    ? date( 'Y-m-d', strtotime( $header->week_end_date . ' +1 day' ) )
+    : date( 'Y-m-d', strtotime( $header->week_start_date . ' +14 days' ) );
+
 
     $api = WIW_API_Client::request(
         'times',
@@ -2071,21 +1805,35 @@ $table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
             continue;
         }
 
-        // Verify "Week of" matches using the same Monday logic as sync
-        try {
-            $dt_week = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
-            $dt_week->setTimezone( $wp_timezone );
+// Verify pay period start matches using the same BIWEEKLY logic as sync (Sunday-anchored)
+try {
+    $dt_week = new DateTime( $start_time_utc, new DateTimeZone( 'UTC' ) );
+    $dt_week->setTimezone( $wp_timezone );
 
-            $dayN = (int) $dt_week->format( 'N' ); // 1=Mon..7=Sun
-            $days = ( $dayN <= 5 ) ? -( $dayN - 1 ) : ( 8 - $dayN );
-            if ( $days !== 0 ) { $dt_week->modify( "{$days} days" ); }
+    // Anchor: 2025-12-07 is a known pay period start (Sunday).
+    $anchor = new DateTime( '2025-12-07 00:00:00', $wp_timezone );
 
-            if ( $dt_week->format( 'Y-m-d' ) !== (string) $header->week_start_date ) {
-                continue;
-            }
-        } catch ( Exception $e ) {
-            continue;
-        }
+    // 1) Move dt_week back to the Sunday of its week.
+    $dayN = (int) $dt_week->format( 'N' ); // 1=Mon..7=Sun
+    $days_back_to_sunday = ( $dayN % 7 );  // Sun(7)->0, Mon(1)->1, ...
+    if ( $days_back_to_sunday !== 0 ) {
+        $dt_week->modify( "-{$days_back_to_sunday} days" );
+    }
+
+    // 2) Snap that Sunday to the correct biweekly boundary relative to the anchor.
+    $diff_days = (int) floor( ( $dt_week->getTimestamp() - $anchor->getTimestamp() ) / DAY_IN_SECONDS );
+    $mod = $diff_days % 14;
+    if ( $mod < 0 ) { $mod += 14; }
+    if ( $mod !== 0 ) {
+        $dt_week->modify( '-' . $mod . ' days' );
+    }
+
+    if ( $dt_week->format( 'Y-m-d' ) !== (string) $header->week_start_date ) {
+        continue;
+    }
+} catch ( Exception $e ) {
+    continue;
+}
 
         $wiw_time_id = (int) ( $time_entry->id ?? 0 );
         if ( ! $wiw_time_id ) { continue; }
@@ -2114,8 +1862,8 @@ $table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
         $break_minutes = (int) ( $time_entry->break ?? 0 );
 
         $reset_map[ $wiw_time_id ] = array(
-            'clock_in'      => $clock_in_local,
-            'clock_out'     => $clock_out_local,
+// Only overwrite clock_in/clock_out if we have valid new times
+// Otherwise keep existing DB values (N/A stays N/A)
             'break_minutes' => $break_minutes,
         );
 
@@ -2538,6 +2286,802 @@ wp_send_json_success(
 );
 }
 
+public function ajax_client_update_entry() {
+	if ( ! is_user_logged_in() ) {
+		wp_send_json_error( array( 'message' => 'Not logged in.' ), 403 );
+	}
+
+	check_ajax_referer( 'wiw_local_edit_entry', 'security' );
+
+	global $wpdb;
+
+	$entry_id       = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+	$clock_in_time  = isset( $_POST['clock_in_time'] ) ? sanitize_text_field( wp_unslash( $_POST['clock_in_time'] ) ) : '';
+	$clock_out_time = isset( $_POST['clock_out_time'] ) ? sanitize_text_field( wp_unslash( $_POST['clock_out_time'] ) ) : '';
+	$break_minutes  = isset( $_POST['break_minutes'] ) ? absint( $_POST['break_minutes'] ) : 0;
+
+	if ( ! $entry_id ) {
+		wp_send_json_error( array( 'message' => 'Missing entry_id.' ), 400 );
+	}
+
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+	$table_headers = $wpdb->prefix . 'wiw_timesheets';
+
+	$entry = $wpdb->get_row(
+		$wpdb->prepare(
+			"SELECT * FROM {$table_entries} WHERE id = %d",
+			$entry_id
+		)
+	);
+
+	if ( ! $entry ) {
+		wp_send_json_error( array( 'message' => 'Entry not found.' ), 404 );
+	}
+
+	$timesheet_id = isset( $entry->timesheet_id ) ? absint( $entry->timesheet_id ) : 0;
+	$date         = isset( $entry->date ) ? (string) $entry->date : '';
+
+	if ( ! $timesheet_id ) {
+		wp_send_json_error( array( 'message' => 'Entry is missing timesheet_id.' ), 400 );
+	}
+	if ( $date === '' ) {
+		wp_send_json_error( array( 'message' => 'Entry is missing date.' ), 400 );
+	}
+
+	// Timezone
+	$tz_string = get_option( 'timezone_string' );
+	if ( empty( $tz_string ) ) {
+		$tz_string = 'UTC';
+	}
+	$tz = new DateTimeZone( $tz_string );
+
+	// Normalize input: allow blank (N/A). Only accept HH:MM when non-blank.
+	$in_blank  = ( trim( $clock_in_time ) === '' );
+	$out_blank = ( trim( $clock_out_time ) === '' );
+
+	$in_valid  = ( ! $in_blank && preg_match( '/^\d{2}:\d{2}$/', $clock_in_time ) );
+	$out_valid = ( ! $out_blank && preg_match( '/^\d{2}:\d{2}$/', $clock_out_time ) );
+
+	if ( ( ! $in_blank && ! $in_valid ) || ( ! $out_blank && ! $out_valid ) ) {
+		wp_send_json_error( array( 'message' => 'Clock In/Out must be HH:MM (24-hour).' ), 400 );
+	}
+
+	// Build new datetime values (NULL when blank to preserve N/A).
+	$new_clock_in  = null;
+	$new_clock_out = null;
+
+	if ( $in_valid ) {
+		try {
+			$new_clock_in = ( new DateTime( $date . ' ' . $clock_in_time . ':00', $tz ) )->format( 'Y-m-d H:i:s' );
+		} catch ( Exception $e ) {
+			wp_send_json_error( array( 'message' => 'Invalid Clock In value.' ), 400 );
+		}
+	}
+
+	if ( $out_valid ) {
+		try {
+			$new_clock_out = ( new DateTime( $date . ' ' . $clock_out_time . ':00', $tz ) )->format( 'Y-m-d H:i:s' );
+		} catch ( Exception $e ) {
+			wp_send_json_error( array( 'message' => 'Invalid Clock Out value.' ), 400 );
+		}
+	}
+
+	// If BOTH are provided, enforce ordering.
+	if ( $in_valid && $out_valid ) {
+		try {
+			$dt_in  = new DateTime( $new_clock_in, $tz );
+			$dt_out = new DateTime( $new_clock_out, $tz );
+			if ( $dt_out <= $dt_in ) {
+				wp_send_json_error( array( 'message' => 'Clock Out must be after Clock In.' ), 400 );
+			}
+		} catch ( Exception $e ) {
+			wp_send_json_error( array( 'message' => 'Invalid time entries.' ), 400 );
+		}
+	}
+
+	// Compute hours only when BOTH times exist; otherwise 0.
+	$clocked_hours  = 0.00;
+	$payable_hours  = 0.00;
+
+	if ( $in_valid && $out_valid ) {
+		$dt_in  = new DateTime( $new_clock_in, $tz );
+		$dt_out = new DateTime( $new_clock_out, $tz );
+
+		$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
+
+		if ( $break_minutes < 0 ) {
+			$break_minutes = 0;
+		}
+		if ( $break_minutes > $total_minutes ) {
+			$break_minutes = $total_minutes;
+		}
+
+		$clocked_minutes = max( 0, $total_minutes - $break_minutes );
+		$clocked_hours   = round( $clocked_minutes / 60, 2 );
+
+		// Payable hours: clamp to scheduled window if present.
+		$payable_hours = $clocked_hours;
+
+		try {
+			$sched_start_raw = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+			$sched_end_raw   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+			if ( $sched_start_raw !== '' || $sched_end_raw !== '' ) {
+				$pay_in  = clone $dt_in;
+				$pay_out = clone $dt_out;
+
+				if ( $sched_start_raw !== '' ) {
+					$sched_start_dt = new DateTime( $sched_start_raw, $tz );
+					if ( $pay_in < $sched_start_dt ) {
+						$pay_in = $sched_start_dt;
+					}
+				}
+				if ( $sched_end_raw !== '' ) {
+					$sched_end_dt = new DateTime( $sched_end_raw, $tz );
+					if ( $pay_out > $sched_end_dt ) {
+						$pay_out = $sched_end_dt;
+					}
+				}
+
+				if ( $pay_out > $pay_in ) {
+					$pay_total_minutes = (int) round( ( $pay_out->getTimestamp() - $pay_in->getTimestamp() ) / 60 );
+					$pay_minutes       = max( 0, $pay_total_minutes - $break_minutes );
+					$payable_hours     = round( $pay_minutes / 60, 2 );
+				} else {
+					$payable_hours = 0.00;
+				}
+			}
+		} catch ( Exception $e ) {
+			$payable_hours = $clocked_hours;
+		}
+	}
+
+	// Update entry row:
+	// - If blank => store NULL (N/A)
+	// - If valid => store new datetime
+	$update_data = array(
+		'clock_in'      => $in_blank ? null : $new_clock_in,
+		'clock_out'     => $out_blank ? null : $new_clock_out,
+		'break_minutes' => (int) $break_minutes,
+		'clocked_hours' => (float) $clocked_hours,
+		'payable_hours' => (float) $payable_hours,
+		'updated_at'    => current_time( 'mysql' ),
+	);
+
+    // --- LOGGING (match backend admin behavior) ---
+$now          = current_time( 'mysql' );
+$current_user = wp_get_current_user();
+$edited_by_login = (string) ( $current_user->user_login ?? '' );
+
+// Load header (for employee/location/week fields in logs).
+$header = $wpdb->get_row(
+	$wpdb->prepare(
+		"SELECT * FROM {$table_headers} WHERE id = %d",
+		$timesheet_id
+	)
+);
+
+$employee_id     = (int) ( $header->employee_id ?? 0 );
+$employee_name   = (string) ( $header->employee_name ?? '' );
+$location_id     = (int) ( $header->location_id ?? ( $entry->location_id ?? 0 ) );
+$location_name   = (string) ( $header->location_name ?? ( $entry->location_name ?? '' ) );
+$week_start_date = (string) ( $header->week_start_date ?? '' );
+
+// Old values (from DB)
+$old_clock_in_raw  = (string) ( $entry->clock_in  ? $entry->clock_in  : '' );
+$old_clock_out_raw = (string) ( $entry->clock_out ? $entry->clock_out : '' );
+
+$old_clock_in_norm  = $this->normalize_datetime_to_minute( $old_clock_in_raw );
+$old_clock_out_norm = $this->normalize_datetime_to_minute( $old_clock_out_raw );
+
+// New values (what we are about to store)
+$new_clock_in_raw  = isset( $update_data['clock_in'] )  ? (string) $update_data['clock_in']  : $old_clock_in_raw;
+$new_clock_out_raw = isset( $update_data['clock_out'] ) ? (string) $update_data['clock_out'] : $old_clock_out_raw;
+
+$new_clock_in_norm  = $this->normalize_datetime_to_minute( $new_clock_in_raw );
+$new_clock_out_norm = $this->normalize_datetime_to_minute( $new_clock_out_raw );
+
+$old_break = (int) $entry->break_minutes;
+$new_break = (int) $break_minutes;
+
+if ( $old_clock_in_norm !== $new_clock_in_norm ) {
+	$this->insert_local_edit_log( array(
+		'timesheet_id'           => $timesheet_id,
+		'entry_id'               => $entry_id,
+		'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+		'edit_type'              => 'Clock in',
+		'old_value'              => $old_clock_in_norm,
+		'new_value'              => $new_clock_in_norm,
+		'edited_by_user_id'      => get_current_user_id(),
+		'edited_by_user_login'   => $edited_by_login,
+		'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+		'employee_id'            => $employee_id,
+		'employee_name'          => $employee_name,
+		'location_id'            => $location_id,
+		'location_name'          => $location_name,
+		'week_start_date'        => $week_start_date,
+		'created_at'             => $now,
+	) );
+}
+
+if ( $old_clock_out_norm !== $new_clock_out_norm ) {
+	$this->insert_local_edit_log( array(
+		'timesheet_id'           => $timesheet_id,
+		'entry_id'               => $entry_id,
+		'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+		'edit_type'              => 'Clock out',
+		'old_value'              => $old_clock_out_norm,
+		'new_value'              => $new_clock_out_norm,
+		'edited_by_user_id'      => get_current_user_id(),
+		'edited_by_user_login'   => $edited_by_login,
+		'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+		'employee_id'            => $employee_id,
+		'employee_name'          => $employee_name,
+		'location_id'            => $location_id,
+		'location_name'          => $location_name,
+		'week_start_date'        => $week_start_date,
+		'created_at'             => $now,
+	) );
+}
+
+if ( $old_break !== $new_break ) {
+	$this->insert_local_edit_log( array(
+		'timesheet_id'           => $timesheet_id,
+		'entry_id'               => $entry_id,
+		'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+		'edit_type'              => 'Break Mins',
+		'old_value'              => (string) $old_break,
+		'new_value'              => (string) $new_break,
+		'edited_by_user_id'      => get_current_user_id(),
+		'edited_by_user_login'   => $edited_by_login,
+		'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+		'employee_id'            => $employee_id,
+		'employee_name'          => $employee_name,
+		'location_id'            => $location_id,
+		'location_name'          => $location_name,
+		'week_start_date'        => $week_start_date,
+		'created_at'             => $now,
+	) );
+}
+
+	$updated = $wpdb->update(
+		$table_entries,
+		$update_data,
+		array( 'id' => $entry_id ),
+		array( '%s', '%s', '%d', '%f', '%f', '%s' ),
+		array( '%d' )
+	);
+
+	if ( $updated === false ) {
+		wp_send_json_error( array( 'message' => 'Database update failed.' ), 500 );
+	}
+
+	// ✅ IMPORTANT: Recalculate flags after any client edit so flags resolve/reactivate correctly
+	try {
+		$clock_in_str  = ! empty( $update_data['clock_in'] ) ? (string) $update_data['clock_in'] : (string) ( $entry->clock_in ?? '' );
+		$clock_out_str = ! empty( $update_data['clock_out'] ) ? (string) $update_data['clock_out'] : (string) ( $entry->clock_out ?? '' );
+
+		$sched_start_local = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+		$sched_end_local   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+		$this->wiwts_sync_store_time_flags(
+			(int) ( $entry->wiw_time_id ?? 0 ),
+			(string) $clock_in_str,
+			(string) $clock_out_str,
+			(string) $sched_start_local,
+			(string) $sched_end_local,
+			$tz
+		);
+	} catch ( Exception $e ) {
+		// Do not fail the edit if flags calculation fails
+	}
+
+	// Keep header totals in sync (sum stored clocked_hours).
+	$total_clocked = (float) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COALESCE(SUM(clocked_hours), 0) FROM {$table_entries} WHERE timesheet_id = %d",
+			$timesheet_id
+		)
+	);
+
+	$wpdb->update(
+		$table_headers,
+		array(
+			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+			'updated_at'          => current_time( 'mysql' ),
+		),
+		array( 'id' => $timesheet_id ),
+		array( '%f', '%s' ),
+		array( '%d' )
+	);
+
+	wp_send_json_success(
+		array(
+			'message'             => 'Saved.',
+			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+		)
+	);
+}
+
+    /**
+     * Legacy/compat approve handler.
+     *
+     * Some older JS/actions still call:
+     *  - wiw_approve_single_timesheet
+     *  - wiw_approve_timesheet
+     *  - wiw_approve_timesheet_period
+     *
+     * We approve locally only (DB status update), so route to the local approver.
+     */
+    public function handle_approve_timesheet() {
+        // Delegate to the local single-entry approve endpoint.
+        // This expects: action=wiw_local_approve_entry and nonce=wiw_local_approve_entry
+        // BUT the DB-update logic is correct here, so we reuse it.
+        $this->ajax_local_approve_entry();
+    }
+
+// AJAX handler: Preview reset of a timesheet entry from WIW API data (no DB writes).
+public function ajax_client_reset_entry_from_api() {
+	if ( ! is_user_logged_in() ) {
+		wp_send_json_error( array( 'message' => 'Not logged in.' ), 401 );
+	}
+
+	// Manual nonce check so we ALWAYS return JSON (never plain -1).
+	$nonce = isset( $_POST['security'] ) ? sanitize_text_field( wp_unslash( $_POST['security'] ) ) : '';
+	if ( ! wp_verify_nonce( $nonce, 'wiw_client_reset_entry_from_api' ) ) {
+		wp_send_json_error( array( 'message' => 'Security check failed.' ), 403 );
+	}
+
+	global $wpdb;
+
+	$entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+	if ( ! $entry_id ) {
+		wp_send_json_error( array( 'message' => 'Missing entry_id.' ), 400 );
+	}
+
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+	$entry = $wpdb->get_row(
+		$wpdb->prepare(
+			"SELECT * FROM {$table_entries} WHERE id = %d",
+			$entry_id
+		)
+	);
+
+	if ( ! $entry ) {
+		wp_send_json_error( array( 'message' => 'Entry not found.' ), 404 );
+	}
+
+	$wiw_time_id = isset( $entry->wiw_time_id ) ? absint( $entry->wiw_time_id ) : 0;
+	if ( ! $wiw_time_id ) {
+		wp_send_json_error( array( 'message' => 'This entry is missing wiw_time_id, cannot preview reset.' ), 400 );
+	}
+
+	// Timezone (WP setting)
+	$tz_string = get_option( 'timezone_string' );
+	if ( empty( $tz_string ) ) {
+		$tz_string = 'UTC';
+	}
+	$tz = new DateTimeZone( $tz_string );
+
+	// Helper to format datetime strings into "07:50 am" (or N/A).
+	$format_time = function( $datetime_str ) use ( $tz ) {
+		$datetime_str = is_scalar( $datetime_str ) ? trim( (string) $datetime_str ) : '';
+		if ( $datetime_str === '' ) {
+			return 'N/A';
+		}
+		try {
+			$dt = new DateTime( $datetime_str );
+			$dt->setTimezone( $tz );
+			return strtolower( $dt->format( 'g:i a' ) );
+		} catch ( Exception $e ) {
+			return 'N/A';
+		}
+	};
+
+	// Current local DB values (preview only)
+	$current_clock_in  = ! empty( $entry->clock_in ) ? (string) $entry->clock_in : '';
+	$current_clock_out = ! empty( $entry->clock_out ) ? (string) $entry->clock_out : '';
+	$current_break     = isset( $entry->break_minutes ) ? (int) $entry->break_minutes : 0;
+
+	// Fetch authoritative WIW time record (preview only)
+	$endpoint = "times/{$wiw_time_id}";
+	$result   = WIW_API_Client::request( $endpoint, array(), WIW_API_Client::METHOD_GET );
+
+	if ( is_wp_error( $result ) ) {
+		wp_send_json_error(
+			array( 'message' => 'WIW API request failed: ' . $result->get_error_message() ),
+			500
+		);
+	}
+
+	$time_obj = null;
+	if ( isset( $result->time ) ) {
+		$time_obj = $result->time;
+	} elseif ( is_object( $result ) ) {
+		$time_obj = $result;
+	}
+
+	$api_start = '';
+	$api_end   = '';
+
+	if ( $time_obj ) {
+		$api_start = isset( $time_obj->start_time ) ? (string) $time_obj->start_time : '';
+		$api_end   = isset( $time_obj->end_time ) ? (string) $time_obj->end_time : '';
+	}
+
+// Prepare preview values (no DB writes yet)
+// If apply_reset=1, write the WIW values to DB and recalc totals (no logs/flags yet).
+$apply_reset = isset( $_POST['apply_reset'] ) ? absint( $_POST['apply_reset'] ) : 0;
+
+if ( $apply_reset === 1 ) {
+	// Convert WIW API start/end into local datetime strings (or NULL if empty).
+	$new_clock_in_db  = null;
+	$new_clock_out_db = null;
+
+	if ( $api_start !== '' ) {
+		try {
+			$dt_in = new DateTime( $api_start, new DateTimeZone( 'UTC' ) );
+			$dt_in->setTimezone( $tz );
+			$new_clock_in_db = $dt_in->format( 'Y-m-d H:i:s' );
+		} catch ( Exception $e ) {
+			$new_clock_in_db = null;
+		}
+	}
+
+	if ( $api_end !== '' ) {
+		try {
+			$dt_out = new DateTime( $api_end, new DateTimeZone( 'UTC' ) );
+			$dt_out->setTimezone( $tz );
+			$new_clock_out_db = $dt_out->format( 'Y-m-d H:i:s' );
+		} catch ( Exception $e ) {
+			$new_clock_out_db = null;
+		}
+	}
+
+	// Recompute clocked/payable hours only if both times exist and are ordered.
+	$break_minutes = isset( $entry->break_minutes ) ? (int) $entry->break_minutes : 0;
+	$clocked_hours = 0.00;
+	$payable_hours = 0.00;
+
+	if ( $new_clock_in_db && $new_clock_out_db ) {
+		try {
+			$dt_in  = new DateTime( $new_clock_in_db, $tz );
+			$dt_out = new DateTime( $new_clock_out_db, $tz );
+
+			if ( $dt_out > $dt_in ) {
+				$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
+
+				if ( $break_minutes < 0 ) {
+					$break_minutes = 0;
+				}
+				if ( $break_minutes > $total_minutes ) {
+					$break_minutes = $total_minutes;
+				}
+
+				$clocked_minutes = max( 0, $total_minutes - $break_minutes );
+				$clocked_hours   = round( $clocked_minutes / 60, 2 );
+
+				// Payable hours clamp to scheduled window if present.
+				$payable_hours = $clocked_hours;
+
+				$sched_start_raw = ! empty( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+				$sched_end_raw   = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+				if ( $sched_start_raw !== '' || $sched_end_raw !== '' ) {
+					$pay_in  = clone $dt_in;
+					$pay_out = clone $dt_out;
+
+					if ( $sched_start_raw !== '' ) {
+						$sched_start_dt = new DateTime( $sched_start_raw, $tz );
+						if ( $pay_in < $sched_start_dt ) {
+							$pay_in = $sched_start_dt;
+						}
+					}
+					if ( $sched_end_raw !== '' ) {
+						$sched_end_dt = new DateTime( $sched_end_raw, $tz );
+						if ( $pay_out > $sched_end_dt ) {
+							$pay_out = $sched_end_dt;
+						}
+					}
+
+					if ( $pay_out > $pay_in ) {
+						$pay_total_minutes = (int) round( ( $pay_out->getTimestamp() - $pay_in->getTimestamp() ) / 60 );
+						$pay_minutes       = max( 0, $pay_total_minutes - $break_minutes );
+						$payable_hours     = round( $pay_minutes / 60, 2 );
+					} else {
+						$payable_hours = 0.00;
+					}
+				}
+			}
+		} catch ( Exception $e ) {
+			$clocked_hours = 0.00;
+			$payable_hours = 0.00;
+		}
+	}
+
+// --- LOG DIFFS WITH (Reset) (same pattern as backend) ---
+$table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+$table_headers = $wpdb->prefix . 'wiw_timesheets';
+
+$header = $wpdb->get_row(
+	$wpdb->prepare(
+		"SELECT * FROM {$table_headers} WHERE id = %d",
+		(int) ( $entry->timesheet_id ?? 0 )
+	)
+);
+
+$current_user = wp_get_current_user();
+$now          = current_time( 'mysql' );
+
+// Normalize to minute (Y-m-d H:i) or blank.
+$to_minute = function( $dt_str ) {
+	$dt_str = is_scalar( $dt_str ) ? trim( (string) $dt_str ) : '';
+	if ( $dt_str === '' ) {
+		return '';
+	}
+	try {
+		$dt = new DateTime( $dt_str );
+		return $dt->format( 'Y-m-d H:i' );
+	} catch ( Exception $e ) {
+		return '';
+	}
+};
+
+// Old values (from DB before reset)
+$old_clock_in  = $to_minute( ! empty( $entry->clock_in ) ? (string) $entry->clock_in : '' );
+$old_clock_out = $to_minute( ! empty( $entry->clock_out ) ? (string) $entry->clock_out : '' );
+$old_break     = (string) (int) ( $entry->break_minutes ?? 0 );
+
+// New values (what reset is applying)
+$new_clock_in  = $to_minute( $new_clock_in_db ? (string) $new_clock_in_db : '' );
+$new_clock_out = $to_minute( $new_clock_out_db ? (string) $new_clock_out_db : '' );
+$new_break     = (string) (int) ( $entry->break_minutes ?? 0 ); // reset currently keeps break the same
+
+$changes = array(
+	'Clock in (Reset)'   => array( $old_clock_in,  $new_clock_in ),
+	'Clock out (Reset)'  => array( $old_clock_out, $new_clock_out ),
+	'Break Mins (Reset)' => array( $old_break,     $new_break ),
+);
+
+foreach ( $changes as $edit_type => $pair ) {
+	$old_val = (string) ( $pair[0] ?? '' );
+	$new_val = (string) ( $pair[1] ?? '' );
+
+	if ( $old_val === $new_val ) {
+		continue;
+	}
+
+	$wpdb->insert(
+		$table_logs,
+		array(
+			'timesheet_id'           => (int) ( $entry->timesheet_id ?? 0 ),
+			'entry_id'               => 0,
+			'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+			'edit_type'              => (string) $edit_type,
+			'old_value'              => $old_val,
+			'new_value'              => $new_val,
+			'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
+			'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
+			'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+			'employee_id'            => (int) ( $header->employee_id ?? 0 ),
+			'employee_name'          => (string) ( $header->employee_name ?? '' ),
+			'location_id'            => (int) ( $header->location_id ?? 0 ),
+			'location_name'          => (string) ( $header->location_name ?? '' ),
+			'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
+			'created_at'             => $now,
+		),
+		array(
+			'%d','%d','%d','%s','%s','%s','%d','%s','%s','%d','%s','%d','%s','%s','%s'
+		)
+	);
+}
+// --- END LOGGING ---
+
+	// Update entry row.
+	$updated = $wpdb->update(
+		$table_entries,
+		array(
+			'clock_in'      => $new_clock_in_db,
+			'clock_out'     => $new_clock_out_db,
+			'clocked_hours' => (float) $clocked_hours,
+			'payable_hours' => (float) $payable_hours,
+			'updated_at'    => current_time( 'mysql' ),
+		),
+		array( 'id' => $entry_id ),
+		array( '%s', '%s', '%f', '%f', '%s' ),
+		array( '%d' )
+	);
+
+	if ( $updated === false ) {
+		wp_send_json_error( array( 'message' => 'Reset DB update failed.' ), 500 );
+	}
+
+	// Recalc header totals (clocked hours sum).
+	$table_headers = $wpdb->prefix . 'wiw_timesheets';
+	$total_clocked = (float) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COALESCE(SUM(clocked_hours), 0) FROM {$table_entries} WHERE timesheet_id = %d",
+			(int) ( $entry->timesheet_id ?? 0 )
+		)
+	);
+
+	$wpdb->update(
+		$table_headers,
+		array(
+			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+			'updated_at'          => current_time( 'mysql' ),
+		),
+		array( 'id' => (int) ( $entry->timesheet_id ?? 0 ) ),
+		array( '%f', '%s' ),
+		array( '%d' )
+	);
+
+	wp_send_json_success(
+		array(
+			'message' => 'Reset applied.',
+			'preview' => array(
+				'current' => array(
+					'clock_in'      => $format_time( $current_clock_in ),
+					'clock_out'     => $format_time( $current_clock_out ),
+					'break_minutes' => (int) $current_break,
+				),
+				'api' => array(
+					'clock_in'      => $format_time( $api_start ),
+					'clock_out'     => $format_time( $api_end ),
+					'break_minutes' => (int) $current_break,
+				),
+			),
+			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+		)
+	);
+}
+
+// Default: preview only (no DB writes)
+wp_send_json_success(
+	array(
+		'message' => 'Reset preview loaded.',
+		'preview' => array(
+			'current' => array(
+				'clock_in'      => $format_time( $current_clock_in ),
+				'clock_out'     => $format_time( $current_clock_out ),
+				'break_minutes' => (int) $current_break,
+			),
+			'api' => array(
+				'clock_in'      => $format_time( $api_start ),
+				'clock_out'     => $format_time( $api_end ),
+				'break_minutes' => (int) $current_break,
+			),
+		),
+	)
+);
+
+}
+
+/*
+ * AJAX handler: Approve a single timesheet entry (local only).
+ * - Updates wp_wiw_timesheet_entries.status from pending -> approved
+ * - Writes a log entry using the ENTRY ID
+ */
+public function ajax_local_approve_entry() {
+
+    // Capability (local-only approve)
+    // Admins always allowed. Clients allowed if they have a client account number on their profile.
+    if ( ! is_user_logged_in() ) {
+        wp_send_json_error( array( 'message' => 'Not logged in.' ), 401 );
+    }
+
+    if ( ! current_user_can( 'manage_options' ) ) {
+        $current_user_id = get_current_user_id();
+        $client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+        $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
+
+        if ( $client_id === '' ) {
+            wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
+        }
+    }
+
+
+    // Nonce
+    check_ajax_referer( 'wiw_local_approve_entry', 'security' );
+
+    global $wpdb;
+
+    $entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
+    if ( ! $entry_id ) {
+        wp_send_json_error( array( 'message' => 'Invalid entry ID.' ), 400 );
+    }
+
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_headers = $wpdb->prefix . 'wiw_timesheets';
+
+    // Load entry
+    $entry = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$table_entries} WHERE id = %d",
+            $entry_id
+        )
+    );
+
+    if ( ! $entry ) {
+        wp_send_json_error( array( 'message' => 'Entry not found.' ), 404 );
+    }
+
+    $timesheet_id = (int) ( $entry->timesheet_id ?? 0 );
+    if ( ! $timesheet_id ) {
+        wp_send_json_error( array( 'message' => 'Timesheet ID missing on entry.' ), 400 );
+    }
+
+    // Load header
+    $header = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$table_headers} WHERE id = %d",
+            $timesheet_id
+        )
+    );
+
+    if ( ! $header ) {
+        wp_send_json_error( array( 'message' => 'Timesheet header not found.' ), 404 );
+    }
+
+    // Prevent changes if finalized
+    if ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ) {
+        wp_send_json_error( array( 'message' => 'This timesheet has been finalized. Changes are not allowed.' ), 403 );
+    }
+
+    $old_status = strtolower( (string) ( $entry->status ?? 'pending' ) );
+    if ( $old_status === 'approved' ) {
+        wp_send_json_success( array( 'message' => 'Entry already approved.' ) );
+    }
+
+    $now = current_time( 'mysql' );
+
+    // Approve the entry
+    $updated = $wpdb->update(
+        $table_entries,
+        array(
+            'status'     => 'approved',
+            'updated_at' => $now,
+        ),
+        array( 'id' => $entry_id ),
+        array( '%s', '%s' ),
+        array( '%d' )
+    );
+
+    if ( false === $updated ) {
+        wp_send_json_error( array( 'message' => 'Failed to approve entry in database.' ), 500 );
+    }
+
+    // Log the approval (optional but recommended for audit trail)
+    try {
+        $current_user = wp_get_current_user();
+
+        $this->insert_local_edit_log( array(
+            'timesheet_id'           => (int) $timesheet_id,
+            'entry_id'               => (int) $entry_id,
+            'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
+            'edit_type'              => 'Approved Time Record',
+            'old_value'              => (string) ( $entry->status ?? 'pending' ),
+            'new_value'              => 'approved',
+            'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
+            'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
+            'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
+            'employee_id'            => (int) ( $header->employee_id ?? 0 ),
+            'employee_name'          => (string) ( $header->employee_name ?? '' ),
+            'location_id'            => (int) ( $header->location_id ?? 0 ),
+            'location_name'          => (string) ( $header->location_name ?? '' ),
+            'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
+            'created_at'             => $now,
+        ) );
+    } catch ( Exception $e ) {
+        // Do not fail approval if logging fails
+    }
+
+    wp_send_json_success( array(
+        'message' => 'Entry approved.',
+    ) );
+}
+
 /**
  * Admin-post handler: Finalize (Sign Off) a local timesheet.
  * - Requires all daily entries to be approved
@@ -2655,112 +3199,6 @@ public function handle_finalize_local_timesheet() {
     wp_safe_redirect( add_query_arg( 'finalize_success', '1', $redirect_back ) );
     exit;
 }
-
-// === WIWTS APPROVE TIME RECORD HANDLER ADD START ===
-public function ajax_local_approve_entry() {
-    if ( ! current_user_can( 'manage_options' ) ) {
-        wp_send_json_error( array( 'message' => 'Permission denied.' ), 403 );
-    }
-
-    check_ajax_referer( 'wiw_local_approve_entry', 'security' );
-
-    global $wpdb;
-
-    $entry_id = isset( $_POST['entry_id'] ) ? absint( $_POST['entry_id'] ) : 0;
-    if ( ! $entry_id ) {
-        wp_send_json_error( array( 'message' => 'Invalid entry ID.' ) );
-    }
-
-    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
-    $table_headers = $wpdb->prefix . 'wiw_timesheets';
-
-    $entry = $wpdb->get_row(
-        $wpdb->prepare(
-            "SELECT * FROM {$table_entries} WHERE id = %d",
-            $entry_id
-        )
-    );
-
-    if ( ! $entry ) {
-        wp_send_json_error( array( 'message' => 'Entry not found.' ) );
-    }
-
-    $old_status = (string) ( $entry->status ?? 'pending' );
-    if ( strtolower( $old_status ) === 'approved' ) {
-        wp_send_json_success(
-            array(
-                'message' => 'Already approved.',
-                'status'  => 'approved',
-            )
-        );
-    }
-
-    $timesheet_id = (int) ( $entry->timesheet_id ?? 0 );
-    if ( ! $timesheet_id ) {
-        wp_send_json_error( array( 'message' => 'Timesheet ID missing for entry.' ) );
-    }
-
-    $header = $wpdb->get_row(
-        $wpdb->prepare(
-            "SELECT * FROM {$table_headers} WHERE id = %d",
-            $timesheet_id
-        )
-    );
-
-    if ( ! $header ) {
-        wp_send_json_error( array( 'message' => 'Timesheet header not found.' ) );
-    }
-
-    if ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ) {
-        wp_send_json_error( array( 'message' => 'This timesheet has been finalized. Approvals are not allowed.' ), 403 );
-    }
-
-    $now = current_time( 'mysql' );
-
-    $updated = $wpdb->update(
-        $table_entries,
-        array(
-            'status'     => 'approved',
-            'updated_at' => $now,
-        ),
-        array( 'id' => $entry_id ),
-        array( '%s', '%s' ),
-        array( '%d' )
-    );
-
-    if ( false === $updated ) {
-        wp_send_json_error( array( 'message' => 'Database update failed for approval.' ) );
-    }
-
-    // Log approval in edit logs
-    $current_user = wp_get_current_user();
-
-    $this->insert_local_edit_log( array(
-        'timesheet_id'           => (int) $timesheet_id,
-        'entry_id'               => (int) $entry_id,
-        'wiw_time_id'            => (int) ( $entry->wiw_time_id ?? 0 ),
-        'edit_type'              => 'Approved Time Record',
-        'old_value'              => (string) $old_status,
-        'new_value'              => 'approved',
-        'edited_by_user_id'      => (int) ( $current_user->ID ?? 0 ),
-        'edited_by_user_login'   => (string) ( $current_user->user_login ?? '' ),
-        'edited_by_display_name' => (string) ( $current_user->display_name ?? '' ),
-        'employee_id'            => (int) ( $header->employee_id ?? 0 ),
-        'employee_name'          => (string) ( $header->employee_name ?? '' ),
-        'location_id'            => (int) ( $header->location_id ?? 0 ),
-        'location_name'          => (string) ( $header->location_name ?? '' ),
-        'week_start_date'        => (string) ( $header->week_start_date ?? '' ),
-        'created_at'             => $now,
-    ) );
-
-    wp_send_json_success(
-        array(
-            'message' => 'Time record approved.',
-            'status'  => 'approved',
-        )
-    );
-}
-// === WIWTS APPROVE TIME RECORD HANDLER ADD END ===
 
 }
 
