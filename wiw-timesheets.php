@@ -716,13 +716,39 @@ if ( strtolower( $status_raw ) === 'resolved' ) {
 		$out .= '<td ' . $cell_style . '>' . esc_html( $updated ) . '</td>';
 		$out .= '</tr>';
 
-		// Special follow-up row for flag 104 (placeholder).
-		if ( (string) $type === '104' ) {
-			$out .= '<tr class="wiw-flag-followup wiw-flag-followup-104">';
-			$out .= '<td ' . $cell_style . ' colspan="4"><strong>Approve Additional Hours</strong></td>';
-			$out .= '<td ' . $cell_style . '><button type="button" class="wiw-btn secondary wiw-flag-104-confirm-btn" title="Placeholder">Confirm</button></td>';
-			$out .= '</tr>';
+// Special follow-up row for flag 104 (Confirm Additional Hours).
+if ( (string) $type === '104' ) {
+
+	$extra_hours_text = 'N/A';
+
+	if ( ! empty( $fg->scheduled_end ) && ! empty( $fg->clock_out ) ) {
+		try {
+			$scheduled_end_dt = new DateTime( $fg->scheduled_end );
+			$clock_out_dt    = new DateTime( $fg->clock_out );
+
+			if ( $clock_out_dt > $scheduled_end_dt ) {
+				$diff_seconds = $clock_out_dt->getTimestamp() - $scheduled_end_dt->getTimestamp();
+				$diff_hours   = round( $diff_seconds / 3600, 2 );
+				$extra_hours_text = number_format( $diff_hours, 2 );
+			}
+		} catch ( Exception $e ) {
+			// Leave as N/A if parsing fails
 		}
+	}
+
+$out .= '<tr class="wiw-flag-followup wiw-flag-followup-104">';
+$out .= '<td ' . $cell_style . ' colspan="4">'
+	. '<span class="wiw-flag-icon" aria-hidden="true" style="margin-right:6px;">⏱️</span>'
+	. '<strong>Confirm Additional Time</strong> '
+	. '(Another <strong>' . esc_html( $extra_hours_text ) . '</strong> hours after the scheduled shift end time will become payable)'
+	. '</td>';
+$out .= '<td ' . $cell_style . '>'
+	. '<button type="button" class="wiw-btn secondary wiw-flag-104-confirm-btn" title="Placeholder">Confirm</button> '
+	. '<button type="button" class="wiw-btn secondary wiw-flag-104-deny-btn" title="Placeholder">Deny</button>'
+	. '</td>';
+$out .= '</tr>';
+
+}
 
 	}
 
@@ -1523,8 +1549,12 @@ private function get_scoped_flags_for_timesheet( $client_id, $timesheet_id ) {
 		return array();
 	}
 
-	$sql = "
-		SELECT f.*, e.date AS shift_date
+$sql = "
+		SELECT
+			f.*,
+			e.date AS shift_date,
+			e.scheduled_end,
+			e.clock_out
 		FROM {$table_flags} f
 		INNER JOIN {$table_entries} e ON e.wiw_time_id = f.wiw_time_id
 		WHERE e.timesheet_id = %d
