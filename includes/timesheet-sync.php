@@ -68,15 +68,20 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                 $active_flags['101'] = 'Clocked in more than 15 minutes before scheduled start';
             }
 
-            // 103: clocked in after scheduled start
-// 103: clocked in more than 15 minutes after scheduled start
-// Normalize both to minute precision so exact matches don't false-flag due to seconds.
-$sched_start_ts = $sched_start_ts - ( $sched_start_ts % 60 );
-$clock_in_ts    = $clock_in_ts - ( $clock_in_ts % 60 );
+            // 107 / 103: clock-in after scheduled start (minute precision)
+            // Normalize both to minute precision so exact matches don't false-flag due to seconds.
+            $sched_start_ts = $sched_start_ts - ( $sched_start_ts % 60 );
+            $clock_in_ts    = $clock_in_ts - ( $clock_in_ts % 60 );
 
-if ( $clock_in_ts > ( $sched_start_ts + ( 15 * 60 ) ) ) {
-    $active_flags['103'] = 'Clocked in more than 15 minutes after scheduled start';
-}
+            // 107: late, but 15 minutes or less
+            if ( $clock_in_ts > $sched_start_ts && $clock_in_ts <= ( $sched_start_ts + ( 15 * 60 ) ) ) {
+                $active_flags['107'] = 'Clocked in less than 15 minutes after scheduled start';
+            }
+
+            // 103: more than 15 minutes late
+            if ( $clock_in_ts > ( $sched_start_ts + ( 15 * 60 ) ) ) {
+                $active_flags['103'] = 'Clocked in more than 15 minutes after scheduled start';
+            }
 
         }
 
