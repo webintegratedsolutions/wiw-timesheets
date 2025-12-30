@@ -659,6 +659,7 @@ if ( empty( $flags ) ) {
 	$out .= '<table class="wp-list-table widefat fixed striped" style="margin:0;">';
 	$out .= '<thead><tr>';
 	$out .= '<th style="width:110px;">Type</th>';
+	$out .= '<th style="width:130px;">Shift Date</th>';
 	$out .= '<th>Description</th>';
 	$out .= '<th style="width:120px;">Status</th>';
 	$out .= '<th style="width:220px;">Updated</th>';
@@ -666,9 +667,10 @@ if ( empty( $flags ) ) {
 	$out .= '<tbody>';
 
 	foreach ( $flags as $fg ) {
-		$type   = isset( $fg->flag_type ) ? (string) $fg->flag_type : '';
-		$desc   = isset( $fg->description ) ? (string) $fg->description : '';
-		$status = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+		$type       = isset( $fg->flag_type ) ? (string) $fg->flag_type : '';
+		$shift_date = isset( $fg->shift_date ) ? (string) $fg->shift_date : '';
+		$desc       = isset( $fg->description ) ? (string) $fg->description : '';
+		$status     = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
 
 		$updated_raw = isset( $fg->updated_at ) ? (string) $fg->updated_at : '';
 		$updated     = $updated_raw !== '' ? $this->wiw_format_datetime_local_pretty( $updated_raw ) : 'N/A';
@@ -683,6 +685,7 @@ if ( empty( $flags ) ) {
 
 		$out .= '<tr style="' . esc_attr( $row_style ) . '">';
 		$out .= '<td ' . $cell_style . '><strong>' . esc_html( $type !== '' ? $type : 'N/A' ) . '</strong></td>';
+		$out .= '<td ' . $cell_style . '>' . esc_html( $shift_date !== '' ? $shift_date : 'N/A' ) . '</td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $desc !== '' ? $desc : 'N/A' ) . '</td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $status !== '' ? $status : 'N/A' ) . '</td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $updated ) . '</td>';
@@ -1462,13 +1465,14 @@ private function get_scoped_flags_for_timesheet( $client_id, $timesheet_id ) {
 	}
 
 	$sql = "
-		SELECT f.*
+		SELECT f.*, e.date AS shift_date
 		FROM {$table_flags} f
 		INNER JOIN {$table_entries} e ON e.wiw_time_id = f.wiw_time_id
 		WHERE e.timesheet_id = %d
 		  AND e.location_id = %d
 		ORDER BY
 			CASE WHEN f.flag_status = 'resolved' THEN 1 ELSE 0 END ASC,
+			e.date DESC,
 			f.updated_at DESC,
 			f.id DESC
 	";
