@@ -55,9 +55,12 @@ $table_flags         = $wpdb->prefix . 'wiw_timesheet_flags';
 		scheduled_hours DECIMAL(10,2) NOT NULL DEFAULT 0.00,
 		clocked_hours DECIMAL(10,2) NOT NULL DEFAULT 0.00,
 		payable_hours DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+		additional_hours DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+		extra_time_status VARCHAR(20) NOT NULL DEFAULT 'unset',
 		scheduled_start DATETIME NULL,
 		scheduled_end DATETIME NULL,
 		status VARCHAR(50) NOT NULL DEFAULT 'pending',
+
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		PRIMARY KEY  (id),

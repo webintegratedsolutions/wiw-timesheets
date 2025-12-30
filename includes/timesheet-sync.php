@@ -564,6 +564,27 @@ try {
                     $clocked_hours_local // fallback is the already-computed clocked hours
                 );
 
+                // Additional hours = Clock Out minus Scheduled End (hours), if Clock Out is later.
+                $additional_hours_local = 0.00;
+                if ( ! empty( $scheduled_end_local ) && ! empty( $clock_out_local ) ) {
+                    try {
+                        $dt_sched_end = new DateTime( (string) $scheduled_end_local );
+                        $dt_clock_out = new DateTime( (string) $clock_out_local );
+
+                        $dt_sched_end->setTimezone( $wp_timezone );
+                        $dt_clock_out->setTimezone( $wp_timezone );
+
+                        if ( $dt_clock_out > $dt_sched_end ) {
+                            $additional_hours_local = round(
+                                ( $dt_clock_out->getTimestamp() - $dt_sched_end->getTimestamp() ) / 3600,
+                                2
+                            );
+                        }
+                    } catch ( Exception $e ) {
+                        $additional_hours_local = 0.00;
+                    }
+                }
+
                 // Compute scheduled hours (same logic as Sched. Hrs column) for flag comparisons.
                 // Compute scheduled hours for this entry (used for DB + flag 109).
                 $scheduled_hours_local_for_entry = (float) ( $time_entry->scheduled_duration ?? 0.0 );
@@ -594,11 +615,21 @@ try {
                     'clocked_hours'   => round( $clocked_hours_local, 2 ),
                     'payable_hours'   => round( $payable_hours_local, 2 ),
 
+                    'additional_hours'  => round( (float) $additional_hours_local, 2 ),
+                    'extra_time_status' => 'unset',
+
                     'status'          => 'pending',
                     'updated_at'      => $now,
+
                 ];
 
                 if ( $entry_id ) {
+
+                    // Preserve existing confirmed/denied status on resync.
+                    if ( isset( $entry_data['extra_time_status'] ) ) {
+                        unset( $entry_data['extra_time_status'] );
+                    }
+
                     $wpdb->update(
                         $table_timesheet_entries,
                         $entry_data,

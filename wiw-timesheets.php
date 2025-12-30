@@ -668,7 +668,7 @@ $flag_icon = $has_unresolved_flags ? '🟠' : '🟢';
 $flag_count = is_array( $flags ) ? count( $flags ) : 0;
 
 $out .= '<details class="wiw-flags" style="margin:12px 0 22px;">';
-$out .= '<summary>' . $flag_icon . ' Click to Expand: Flags</summary>';
+$out .= '<summary>' . $flag_icon . ' Click to Expand: Flags and Additional Time</summary>';
 $out .= '<div style="padding-top:8px;">';
 
 if ( empty( $flags ) ) {
