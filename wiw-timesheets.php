@@ -287,16 +287,16 @@ $ts_updated = ( $ts_header && isset( $ts_header->updated_at ) ) ? (string) $ts_h
 $ts_total_sched  = ( $ts_header && isset( $ts_header->total_scheduled_hours ) ) ? (string) $ts_header->total_scheduled_hours : '0.00';
 $ts_total_clock  = ( $ts_header && isset( $ts_header->total_clocked_hours ) ) ? (string) $ts_header->total_clocked_hours : '0.00';
 
-// Optional: sum payable hours from daily records view/table (matches backend data where available).
+// Optional: sum payable hours from entries table (source of truth for daily rows).
 $ts_total_payable = '0.00';
 if ( $timesheet_id_for_period !== '' ) {
 	global $wpdb;
-	$table_daily = $wpdb->prefix . 'wiw_daily_records';
-	$sum_payable = $wpdb->get_var(
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+	$sum_payable   = $wpdb->get_var(
 		$wpdb->prepare(
-			"SELECT SUM(payable_hours) FROM {$table_daily} WHERE timesheet_id = %d AND location_id = %s",
+			"SELECT SUM(payable_hours) FROM {$table_entries} WHERE timesheet_id = %d AND location_id = %d",
 			absint( $timesheet_id_for_period ),
-			$client_id
+			absint( $client_id )
 		)
 	);
 	if ( $sum_payable !== null && $sum_payable !== '' ) {
@@ -1266,30 +1266,28 @@ if ( current_user_can( 'manage_options' ) ) {
  * (No admin bypass; the shortcode is assumed to be used on a secure client page.)
  */
 private function get_scoped_local_timesheets( $client_id ) {
-    global $wpdb;
+	global $wpdb;
 
-    $table_ts    = $wpdb->prefix . 'wiw_timesheets';
-    $table_daily = $wpdb->prefix . 'wiw_daily_records';
+	$table_ts = $wpdb->prefix . 'wiw_timesheets';
 
-    $client_id = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
-    if ( $client_id === '' ) {
-        return array();
-    }
+	$client_id = absint( $client_id );
+	if ( $client_id <= 0 ) {
+		return array();
+	}
 
-$sql = "
-    SELECT ts.*,
-           0 AS daily_record_count
-    FROM {$table_ts} ts
-    WHERE ts.location_id = %s
-    ORDER BY ts.week_start_date DESC, ts.id DESC
-";
+	$sql = "
+		SELECT ts.*,
+			   0 AS daily_record_count
+		FROM {$table_ts} ts
+		WHERE ts.location_id = %d
+		ORDER BY ts.week_start_date DESC, ts.id DESC
+	";
 
-    $prepared = $wpdb->prepare( $sql, $client_id );
+	$prepared = $wpdb->prepare( $sql, $client_id );
 
-$results = $wpdb->get_results( $prepared );
+	$results = $wpdb->get_results( $prepared );
 
-return $results;
-
+	return $results;
 }
 
 /**
@@ -3151,7 +3149,6 @@ public function ajax_client_reset_entry_from_api() {
 	}
 
 	$table_entries  = $wpdb->prefix . 'wiw_timesheet_entries';
-	$table_headers  = $wpdb->prefix . 'wiw_timesheet_headers';
 	$table_flags    = $wpdb->prefix . 'wiw_timesheet_flags';
 	$table_logs     = $wpdb->prefix . 'wiw_timesheet_edit_logs';
 
