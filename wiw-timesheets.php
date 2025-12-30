@@ -501,9 +501,23 @@ $details_html .= '</table>';
 $details_html .= '</div>';
 $details_html .= '</details>';
 
-$is_approved      = ( strtolower( (string) $status ) === 'approved' );
-$approve_disabled = $is_approved ? ' disabled="disabled"' : '';
-$approve_label    = $is_approved ? 'Approved' : 'Approve';
+$is_approved   = ( strtolower( (string) $status ) === 'approved' );
+$approve_label = $is_approved ? 'Approved' : 'Approve';
+
+// If Clock In/Out is N/A on the row, prevent approval (client UI).
+$missing_clock_in  = ( (string) $clock_in_display === '' );
+$missing_clock_out = ( (string) $clock_out_display === '' );
+
+$approve_title = '';
+if ( $missing_clock_in && $missing_clock_out ) {
+	$approve_title = ' title="Missing Clock In/Out Times"';
+} elseif ( $missing_clock_in ) {
+	$approve_title = ' title="Missing Clock In Time"';
+} elseif ( $missing_clock_out ) {
+	$approve_title = ' title="Missing Clock Out Time"';
+}
+
+$approve_disabled = ( $is_approved || $missing_clock_in || $missing_clock_out ) ? ' disabled="disabled"' : '';
 
 // Unresolved flags (use the same Description text shown in the expandable Flags table).
 // Cached by Timesheet ID to avoid repeated queries per row.
@@ -545,7 +559,7 @@ $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direc
 if ( ! $is_approved ) {
     $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
 }
-$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_title . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
 $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" style="display:none;">Reset</button>';
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
@@ -670,13 +684,18 @@ if ( empty( $flags ) ) {
 		$type       = isset( $fg->flag_type ) ? (string) $fg->flag_type : '';
 		$shift_date = isset( $fg->shift_date ) ? (string) $fg->shift_date : '';
 		$desc       = isset( $fg->description ) ? (string) $fg->description : '';
-		$status     = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+		$status_raw = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+
+$status = 'Unresolved';
+if ( strtolower( $status_raw ) === 'resolved' ) {
+	$status = 'Resolved';
+}
 
 		$updated_raw = isset( $fg->updated_at ) ? (string) $fg->updated_at : '';
 		$updated     = $updated_raw !== '' ? $this->wiw_format_datetime_local_pretty( $updated_raw ) : 'N/A';
 
 		// Orange for unresolved, green for resolved (requested).
-		$row_style = ( $status === 'resolved' )
+		$row_style = ( $status === 'Resolved' )
 			? 'background:#dff0d8;'
 			: 'background:#fff3cd;';
 
