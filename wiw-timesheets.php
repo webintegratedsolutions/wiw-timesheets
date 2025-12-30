@@ -3584,9 +3584,78 @@ $api_break = (int) $default_break_runtime;
 			}
 		}
 
-		// --- START LOGGING ---
-		// (Existing logging block kept as-is; no changes needed here for this fix)
-		// --- END LOGGING ---
+		// --- START LOGGING (Reset) ---
+		$user = wp_get_current_user();
+
+		$normalize_time_hm = function ( $val ) {
+			$val = is_string( $val ) ? trim( $val ) : '';
+			if ( $val === '' ) {
+				return '';
+			}
+
+			// If value looks like "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD HH:MM"
+			if ( strlen( $val ) >= 16 && $val[4] === '-' && $val[7] === '-' ) {
+				return substr( $val, 11, 5 ); // HH:MM
+			}
+
+			// If value already looks like "HH:MM" or "H:MM"
+			if ( preg_match( '/^\d{1,2}:\d{2}$/', $val ) ) {
+				$parts = explode( ':', $val );
+				$h = str_pad( (string) (int) $parts[0], 2, '0', STR_PAD_LEFT );
+				return $h . ':' . $parts[1];
+			}
+
+			return $val;
+		};
+
+		$changes = array(
+			'Clock in (Reset)'   => array( (string) ( $current_clock_in ?? '' ), (string) ( $new_clock_in_db ?? '' ) ),
+			'Clock out (Reset)'  => array( (string) ( $current_clock_out ?? '' ), (string) ( $new_clock_out_db ?? '' ) ),
+			'Break Mins (Reset)' => array( (string) (int) ( $current_break ?? 0 ), (string) (int) ( $api_break ?? 0 ) ),
+		);
+
+		foreach ( $changes as $edit_type => $pair ) {
+			$old_val = (string) ( $pair[0] ?? '' );
+			$new_val = (string) ( $pair[1] ?? '' );
+
+			// Only log if there is a real change (normalize time precision differences).
+			if ( $edit_type === 'Clock in (Reset)' || $edit_type === 'Clock out (Reset)' ) {
+				$old_cmp = $normalize_time_hm( $old_val );
+				$new_cmp = $normalize_time_hm( $new_val );
+				if ( $old_cmp === $new_cmp ) {
+					continue;
+				}
+
+				// Store normalized values to match UI expectations.
+				$old_val = $old_cmp;
+				$new_val = $new_cmp;
+			} else {
+				if ( $old_val === $new_val ) {
+					continue;
+				}
+			}
+
+			$this->insert_local_edit_log(
+				array(
+					'timesheet_id'           => (int) ( $entry->timesheet_id ?? 0 ),
+					'entry_id'               => (int) $entry_id,
+					'wiw_time_id'            => (int) $wiw_time_id,
+					'edit_type'              => (string) $edit_type,
+					'old_value'              => (string) $old_val,
+					'new_value'              => (string) $new_val,
+					'edited_by_user_id'      => (int) ( $user->ID ?? 0 ),
+					'edited_by_user_login'   => (string) ( $user->user_login ?? '' ),
+					'edited_by_display_name' => (string) ( $user->display_name ?? '' ),
+					'employee_id'            => (int) ( $entry->employee_id ?? 0 ),
+					'employee_name'          => (string) ( $entry->employee_name ?? '' ),
+					'location_id'            => (int) ( $entry->location_id ?? 0 ),
+					'location_name'          => (string) ( $entry->location_name ?? '' ),
+					'week_start_date'        => (string) ( $entry->week_start_date ?? '' ),
+					'created_at'             => (string) current_time( 'mysql' ),
+				)
+			);
+		}
+		// --- END LOGGING (Reset) ---
 
 		// Update entry row (NOW includes break_minutes)
 		$updated = $wpdb->update(
