@@ -1296,23 +1296,24 @@ return $results;
  * Fetch daily records for a given timesheet ID from the compatibility table/view.
  * Scoped by location_id to ensure client isolation.
  */
-private function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id ) {
+function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id ) {
     global $wpdb;
 
-    $table_daily = $wpdb->prefix . 'wiw_daily_records';
+    // Daily rows live in wiw_timesheet_entries (created by install.php and filled by timesheet-sync.php).
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
-    $client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+    $client_id    = absint( $client_id );
     $timesheet_id = absint( $timesheet_id );
 
-    if ( $client_id === '' || $timesheet_id <= 0 ) {
+    if ( $client_id <= 0 || $timesheet_id <= 0 ) {
         return array();
     }
 
     $sql = "
         SELECT *
-        FROM {$table_daily}
+        FROM {$table_entries}
         WHERE timesheet_id = %d
-          AND location_id = %s
+          AND location_id = %d
         ORDER BY date ASC, id ASC
     ";
 
@@ -1452,22 +1453,22 @@ private function get_scoped_edit_logs_for_timesheet( $client_id, $timesheet_id )
 private function get_scoped_flags_for_timesheet( $client_id, $timesheet_id ) {
 	global $wpdb;
 
-	$table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
-	$table_daily = $wpdb->prefix . 'wiw_daily_records';
+	$table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
-	$client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+	$client_id    = absint( $client_id );
 	$timesheet_id = absint( $timesheet_id );
 
-	if ( $client_id === '' || $timesheet_id <= 0 ) {
+	if ( $client_id <= 0 || $timesheet_id <= 0 ) {
 		return array();
 	}
 
 	$sql = "
 		SELECT f.*
 		FROM {$table_flags} f
-		INNER JOIN {$table_daily} d ON d.wiw_time_id = f.wiw_time_id
-		WHERE d.timesheet_id = %d
-		  AND d.location_id = %s
+		INNER JOIN {$table_entries} e ON e.wiw_time_id = f.wiw_time_id
+		WHERE e.timesheet_id = %d
+		  AND e.location_id = %d
 		ORDER BY
 			CASE WHEN f.flag_status = 'resolved' THEN 1 ELSE 0 END ASC,
 			f.updated_at DESC,
