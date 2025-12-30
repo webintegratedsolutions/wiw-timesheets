@@ -715,6 +715,15 @@ if ( strtolower( $status_raw ) === 'resolved' ) {
 		$out .= '<td ' . $cell_style . '>' . esc_html( $status !== '' ? $status : 'N/A' ) . '</td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $updated ) . '</td>';
 		$out .= '</tr>';
+
+		// Special follow-up row for flag 104 (placeholder).
+		if ( (string) $type === '104' ) {
+			$out .= '<tr class="wiw-flag-followup wiw-flag-followup-104">';
+			$out .= '<td ' . $cell_style . ' colspan="4"><strong>Approve Additional Hours</strong></td>';
+			$out .= '<td ' . $cell_style . '><button type="button" class="wiw-btn secondary wiw-flag-104-confirm-btn" title="Placeholder">Confirm</button></td>';
+			$out .= '</tr>';
+		}
+
 	}
 
 	$out .= '</tbody></table>';
