@@ -435,7 +435,13 @@ if ( empty( $daily_rows ) ) {
         $status_raw = isset( $dr->status ) ? (string) $dr->status : '';
         $status     = strtolower( trim( $status_raw ) );
 
-        $out .= '<tr>';
+        // Raw scheduled HH:MM for edit defaults.
+        $scheduled_start     = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
+        $scheduled_end       = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
+        $scheduled_start_raw = ( $scheduled_start && strlen( $scheduled_start ) >= 16 ) ? substr( $scheduled_start, 11, 5 ) : '';
+        $scheduled_end_raw   = ( $scheduled_end && strlen( $scheduled_end ) >= 16 ) ? substr( $scheduled_end, 11, 5 ) : '';
+
+        $out .= '<tr data-sched-start="' . esc_attr( $scheduled_start_raw ) . '" data-sched-end="' . esc_attr( $scheduled_end_raw ) . '">';
         $out .= '<td>' . esc_html( $date_display ) . '</td>';
 $out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
 
@@ -843,6 +849,28 @@ $out .= '<script>
       e.preventDefault();
       var row = closestRow(t);
       if (!row) return;
+
+      // If Clock In/Out is N/A (blank input), default to scheduled start/end.
+      var schedStart = row.getAttribute("data-sched-start") || "";
+      var schedEnd   = row.getAttribute("data-sched-end") || "";
+
+      var cellIn  = row.querySelector("td.wiw-client-cell-clock-in");
+      var cellOut = row.querySelector("td.wiw-client-cell-clock-out");
+
+      if (cellIn){
+        var inInput = cellIn.querySelector("input.wiw-client-edit");
+        if (inInput && !inInput.value && schedStart){
+          inInput.value = schedStart;
+        }
+      }
+
+      if (cellOut){
+        var outInput = cellOut.querySelector("input.wiw-client-edit");
+        if (outInput && !outInput.value && schedEnd){
+          outInput.value = schedEnd;
+        }
+      }
+
       setEditing(row, true);
       return;
     }
