@@ -453,12 +453,12 @@ $clock_out_raw = ( $clock_out && strlen( (string) $clock_out ) >= 16 ) ? substr(
 $clock_in_display  = $this->wiw_format_time_local( $clock_in );
 $clock_out_display = $this->wiw_format_time_local( $clock_out );
 
-$out .= '<td class="wiw-client-cell-clock-in" data-orig="' . esc_attr( $clock_in_raw ) . '">'
+$out .= '<td class="wiw-client-cell-clock-in" data-orig="' . esc_attr( $clock_in_raw ) . '" data-orig-view="' . esc_attr( $clock_in_display !== '' ? $clock_in_display : 'N/A' ) . '">'
     . '<span class="wiw-client-view">' . esc_html( $clock_in_display !== '' ? $clock_in_display : 'N/A' ) . '</span>'
     . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr( $clock_in_raw ) . '" style="display:none; width:80px;" />'
     . '</td>';
 
-$out .= '<td class="wiw-client-cell-clock-out" data-orig="' . esc_attr( $clock_out_raw ) . '">'
+$out .= '<td class="wiw-client-cell-clock-out" data-orig="' . esc_attr( $clock_out_raw ) . '" data-orig-view="' . esc_attr( $clock_out_display !== '' ? $clock_out_display : 'N/A' ) . '">'
     . '<span class="wiw-client-view">' . esc_html( $clock_out_display !== '' ? $clock_out_display : 'N/A' ) . '</span>'
     . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr( $clock_out_raw ) . '" style="display:none; width:80px;" />'
     . '</td>';
@@ -826,9 +826,10 @@ $out .= '<script>
       var cell = cells[i];
       if (!cell) continue;
 
-      var orig = cell.getAttribute("data-orig") || "";
-      var input = cell.querySelector("input.wiw-client-edit");
-      var view  = cell.querySelector("span.wiw-client-view");
+      var orig     = cell.getAttribute("data-orig") || "";
+      var origView = cell.getAttribute("data-orig-view") || "";
+      var input    = cell.querySelector("input.wiw-client-edit");
+      var view     = cell.querySelector("span.wiw-client-view");
 
       if (input) input.value = orig;
 
@@ -836,9 +837,11 @@ $out .= '<script>
         if (cell.classList.contains("wiw-client-cell-break")){
           view.textContent = orig ? orig : "0";
         } else {
-          view.textContent = orig ? orig : "N/A";
+          // Always restore the formatted 12-hour display (what the user originally saw).
+          view.textContent = origView ? origView : "N/A";
         }
       }
+
     }
   }
 
