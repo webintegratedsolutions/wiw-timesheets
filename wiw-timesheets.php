@@ -687,6 +687,13 @@ if ( empty( $flags ) ) {
 	$out .= '<tbody>';
 
 	foreach ( $flags as $fg ) {
+
+	// Clients should not see flag_type 109 (admins still see them).
+	$flag_type_raw = isset( $fg->flag_type ) ? trim( (string) $fg->flag_type ) : '';
+	if ( ! current_user_can( 'manage_options' ) && preg_match( '/^109\b/', $flag_type_raw ) ) {
+		continue;
+	}
+
 		$type       = isset( $fg->flag_type ) ? (string) $fg->flag_type : '';
 		$shift_date = isset( $fg->shift_date ) ? (string) $fg->shift_date : '';
 		$desc       = isset( $fg->description ) ? (string) $fg->description : '';
