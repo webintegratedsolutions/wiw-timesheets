@@ -3038,17 +3038,50 @@ public function ajax_client_update_entry() {
 		}
 	}
 
+	// Calculate additional_hours = Clock Out minus Scheduled End (hours), if Clock Out is later.
+	$scheduled_end_str  = ! empty( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+	$final_clock_out_str = $out_blank
+		? ''
+		: ( $out_valid ? (string) $new_clock_out : ( ! empty( $entry->clock_out ) ? (string) $entry->clock_out : '' ) );
+
+	$additional_hours = 0.00;
+	if ( $scheduled_end_str !== '' && $final_clock_out_str !== '' ) {
+		try {
+			$dt_sched_end = new DateTime( $scheduled_end_str, $tz );
+			$dt_out       = new DateTime( $final_clock_out_str, $tz );
+
+			if ( $dt_out > $dt_sched_end ) {
+				$additional_hours = round(
+					( $dt_out->getTimestamp() - $dt_sched_end->getTimestamp() ) / 3600,
+					2
+				);
+			}
+		} catch ( Exception $e ) {
+			$additional_hours = 0.00;
+		}
+	}
+
 	// Update entry row:
 	// - If blank => store NULL (N/A)
 	// - If valid => store new datetime
 	$update_data = array(
-		'clock_in'      => $in_blank ? null : $new_clock_in,
-		'clock_out'     => $out_blank ? null : $new_clock_out,
-		'break_minutes' => (int) $break_minutes,
-		'clocked_hours' => (float) $clocked_hours,
-		'payable_hours' => (float) $payable_hours,
-		'updated_at'    => current_time( 'mysql' ),
+		'clock_in'         => $in_blank ? null : $new_clock_in,
+		'clock_out'        => $out_blank ? null : $new_clock_out,
+		'break_minutes'    => (int) $break_minutes,
+		'clocked_hours'    => (float) $clocked_hours,
+		'payable_hours'    => (float) $payable_hours,
+		'additional_hours' => (float) $additional_hours,
+		'updated_at'       => current_time( 'mysql' ),
 	);
+
+	// If additional hours changed after being confirmed/denied, reset status back to unset.
+	$old_additional = isset( $entry->additional_hours ) ? round( (float) $entry->additional_hours, 2 ) : 0.00;
+	$new_additional = round( (float) $additional_hours, 2 );
+	$extra_status   = isset( $entry->extra_time_status ) ? strtolower( (string) $entry->extra_time_status ) : 'unset';
+
+	if ( $extra_status !== 'unset' && $old_additional !== $new_additional ) {
+		$update_data['extra_time_status'] = 'unset';
+	}
 
     // --- LOGGING (match backend admin behavior) ---
 $now          = current_time( 'mysql' );
