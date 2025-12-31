@@ -1028,6 +1028,31 @@ if (isPreviewOnly) {
 ap.disabled = true;
 ap.textContent = "Applying...";
 
+// Ensure spinner keyframes exist (add once)
+(function(){
+  if (!document.getElementById("wiwts-spin-style")) {
+    var st = document.createElement("style");
+    st.id = "wiwts-spin-style";
+    st.textContent = "@keyframes wiwts-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
+    document.head.appendChild(st);
+  }
+})();
+
+// Add spinner (DOM-safe, no innerHTML)
+try {
+  // Remove any previous spinner if present
+  var oldSp = ap.querySelector(".wiwts-spinner");
+  if (oldSp) { oldSp.remove(); }
+
+  var sp = document.createElement("span");
+  sp.className = "wiwts-spinner";
+  sp.setAttribute("aria-hidden", "true");
+  sp.style.cssText = "display:inline-block;width:14px;height:14px;margin-left:6px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:wiwts-spin 0.8s linear infinite;vertical-align:-2px;";
+  ap.appendChild(sp);
+} catch (e) {
+  // If anything goes wrong, keep plain text only
+}
+
 // Disable Close button while applying
 if (c1) {
   c1.disabled = true;
@@ -1051,9 +1076,18 @@ if (c1) {
         if (!resp2 || !resp2.success) {
           var m = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
           alert(m);
-          ap.disabled = false;
-          ap.textContent = "Apply Reset";
-          return;
+ap.disabled = false;
+ap.textContent = "Apply Reset";
+
+// Re-enable Close button on failure
+if (c1) {
+  c1.disabled = false;
+  c1.style.opacity = "";
+  c1.style.cursor = "";
+}
+
+return;
+
         }
         window.location.reload();
       })
