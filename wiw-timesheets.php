@@ -576,7 +576,7 @@ if ( $wiwts_show_admin_reset_under_approved ) {
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" title="Preview reset (no changes yet)">Reset</button>';
 } else {
     // Existing behavior: only shown when user enters edit mode.
-    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" style="display:none;">Reset</button>';
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" style="display:none;">Reset</button>';
 }
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
 $actions_html .= '</div>';
@@ -1455,7 +1455,7 @@ $out .= '
     </div>
 
     <p style="margin:10px 0 14px;">
-      This is a <strong>preview only</strong>. No values will be changed yet.
+      Review the changes below. Click <strong>Apply Reset</strong> to update the saved values.
     </p>
 
     <div id="wiwts-reset-preview-body" style="background:#f6f7f7;border:1px solid #dcdcde;border-radius:8px;padding:12px;white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;font-size:13px;"></div>
