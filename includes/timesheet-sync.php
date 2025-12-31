@@ -379,19 +379,23 @@ try {
     continue;
 }
 
-            $key = "{$user_id}|{$week_start}|{$location_id}";
+            $key = "{$user_id}|{$week_start}";
 
             if ( ! isset( $grouped[ $key ] ) ) {
-                $grouped[ $key ] = [
-                    'employee_id'           => $user_id,
-                    'employee_name'         => $employee_name,
-                    'location_id'           => $location_id,
-                    'location_name'         => $location_name,
-                    'week_start_date'       => $week_start,
-                    'records'               => [],
-                    'total_clocked_hours'   => 0.0,
-                    'total_scheduled_hours' => 0.0,
-                ];
+$grouped[ $key ] = [
+    'employee_id'           => $user_id,
+    'employee_name'         => $employee_name,
+
+    // Timesheet headers are no longer grouped by location.
+    'location_id'           => 0,
+    'location_name'         => 'All Locations',
+
+    'week_start_date'       => $week_start,
+    'records'               => [],
+    'total_clocked_hours'   => 0.0,
+    'total_scheduled_hours' => 0.0,
+];
+
             }
 
             // ---------------- LOCAL-ONLY BREAK RULE ----------------
@@ -442,11 +446,10 @@ try {
 
             $header_id = $wpdb->get_var(
                 $wpdb->prepare(
-                    "SELECT id FROM {$table_timesheets}
-                     WHERE employee_id = %d AND week_start_date = %s AND location_id = %d",
-                    $employee_id,
-                    $week_start_date,
-                    $location_id
+"SELECT id FROM {$table_timesheets}
+ WHERE employee_id = %d AND week_start_date = %s",
+$employee_id,
+$week_start_date
                 )
             );
 
