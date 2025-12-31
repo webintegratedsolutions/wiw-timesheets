@@ -523,7 +523,11 @@ if ( $missing_clock_in && $missing_clock_out ) {
 	$approve_title = ' title="Missing Clock Out Time"';
 }
 
+// Disable Approve button if already approved or missing clock in/out.
 $approve_disabled = ( $is_approved || $missing_clock_in || $missing_clock_out ) ? ' disabled="disabled"' : '';
+
+// Admin front-end: show a disabled Reset button under Approved (non-functional for now).
+$wiwts_show_admin_reset_under_approved = ( $is_approved && current_user_can( 'manage_options' ) );
 
 // Unresolved flags (use the same Description text shown in the expandable Flags table).
 // Cached by Timesheet ID to avoid repeated queries per row.
@@ -567,7 +571,13 @@ if ( ! $is_approved ) {
 }
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_title . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
 $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
-$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" style="display:none;">Reset</button>';
+if ( $wiwts_show_admin_reset_under_approved ) {
+    // Visible but disabled so it cannot run any JS/AJAX yet.
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" disabled="disabled" title="Reset (coming soon)">Reset</button>';
+} else {
+    // Existing behavior: only shown when user enters edit mode.
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" style="display:none;">Reset</button>';
+}
 $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
 $actions_html .= '</div>';
 
