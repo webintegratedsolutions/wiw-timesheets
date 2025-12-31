@@ -1025,8 +1025,15 @@ if (isPreviewOnly) {
         return;
       }
 
-      ap.disabled = true;
-      ap.textContent = "Applying...";
+ap.disabled = true;
+ap.textContent = "Applying...";
+
+// Disable Close button while applying
+if (c1) {
+  c1.disabled = true;
+  c1.style.opacity = "0.6";
+  c1.style.cursor = "not-allowed";
+}
 
       var formData2 = new FormData();
       formData2.append("action", "wiw_client_reset_entry_from_api");
