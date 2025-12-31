@@ -977,7 +977,7 @@ msg += "\nClock In: " + (p.current && p.current.clock_in ? p.current.clock_in : 
 msg += "\nClock Out: " + (p.current && p.current.clock_out ? p.current.clock_out : "N/A");
 msg += "\nBreak (Min): " + (p.current && typeof p.current.break_minutes !== "undefined" ? p.current.break_minutes : "0");
 
-msg += "\n\nFrom WIW (Would Reset To):";
+msg += "\n\nFrom When I Work (Would Reset To):";
 msg += "\nClock In: " + (p.api && p.api.clock_in ? p.api.clock_in : "N/A");
 msg += "\nClock Out: " + (p.api && p.api.clock_out ? p.api.clock_out : "N/A");
 msg += "\nBreak (Min): " + (p.api && typeof p.api.break_minutes !== "undefined" ? p.api.break_minutes : "0");
@@ -1449,10 +1449,9 @@ $out .= '
   <div id="wiwts-reset-preview-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);"></div>
   <div role="dialog" aria-modal="true" aria-labelledby="wiwts-reset-preview-title"
        style="position:relative;max-width:720px;margin:6vh auto;background:#fff;border-radius:10px;padding:18px 18px 14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-      <h3 id="wiwts-reset-preview-title" style="margin:0;font-size:18px;">Reset Preview</h3>
-      <button type="button" class="wiw-btn secondary" id="wiwts-reset-preview-close-top">Close</button>
-    </div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+  <h3 id="wiwts-reset-preview-title" style="margin:0;font-size:18px;">Reset Preview</h3>
+</div>
 
     <p style="margin:10px 0 14px;">
       Review the changes below. Click <strong>Apply Reset</strong> to update the saved values.
@@ -1461,8 +1460,8 @@ $out .= '
     <div id="wiwts-reset-preview-body" style="background:#f6f7f7;border:1px solid #dcdcde;border-radius:8px;padding:12px;white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;font-size:13px;"></div>
 
 <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
-  <button type="button" class="wiw-btn" id="wiwts-reset-preview-apply">Apply Reset</button>
-  <button type="button" class="wiw-btn secondary" id="wiwts-reset-preview-close">Close</button>
+  <button type="button" class="wiw-btn" id="wiwts-reset-preview-apply" style="padding:8px 14px;min-width:110px;text-align:center;">Apply Reset</button>
+  <button type="button" class="wiw-btn secondary" id="wiwts-reset-preview-close" style="padding:8px 14px;min-width:110px;text-align:center;">Close</button>
 </div>
 
   </div>
