@@ -573,7 +573,7 @@ $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-appr
 $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
 if ( $wiwts_show_admin_reset_under_approved ) {
     // Visible but disabled so it cannot run any JS/AJAX yet.
-    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" disabled="disabled" title="Reset (coming soon)">Reset</button>';
+$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" title="Preview reset (no changes yet)">Reset</button>';
 } else {
     // Existing behavior: only shown when user enters edit mode.
     $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" style="display:none;">Reset</button>';
@@ -981,6 +981,41 @@ msg += "\nClock In: " + (p.api && p.api.clock_in ? p.api.clock_in : "N/A");
 msg += "\nClock Out: " + (p.api && p.api.clock_out ? p.api.clock_out : "N/A");
 msg += "\nBreak (Min): " + (p.api && typeof p.api.break_minutes !== "undefined" ? p.api.break_minutes : "0");
 
+// If this Reset button is marked as preview-only (approved admin reset), show modal and stop here.
+var isPreviewOnly = (t && t.getAttribute && t.getAttribute("data-reset-preview-only") === "1");
+
+if (isPreviewOnly) {
+  var modal = document.getElementById("wiwts-reset-preview-modal");
+  var body  = document.getElementById("wiwts-reset-preview-body");
+  if (!modal || !body) {
+    alert(msg); // fallback
+    return;
+  }
+
+  body.textContent = msg;
+
+  function closeModal(){
+    modal.style.display = "none";
+    document.removeEventListener("keydown", onKeyDown);
+  }
+  function onKeyDown(ev){
+    if (ev.key === "Escape") { closeModal(); }
+  }
+
+  modal.style.display = "block";
+  document.addEventListener("keydown", onKeyDown);
+
+  var b = document.getElementById("wiwts-reset-preview-backdrop");
+  var c1 = document.getElementById("wiwts-reset-preview-close");
+  var c2 = document.getElementById("wiwts-reset-preview-close-top");
+  if (b)  b.onclick  = closeModal;
+  if (c1) c1.onclick = closeModal;
+  if (c2) c2.onclick = closeModal;
+
+  return;
+}
+
+// Existing behavior for normal (edit-mode) reset button:
 if (!window.confirm(msg + "\n\nApply this reset now?")) {
   return;
 }
@@ -1361,7 +1396,32 @@ if ( current_user_can( 'manage_options' ) ) {
     $out .= '</form>';
     $out .= '</div>';
 
-    $out .= '<hr style="margin:40px 0;" />';
+// Reset Preview Modal (safe preview only — no reset applied)
+$out .= '
+<div id="wiwts-reset-preview-modal" style="display:none;position:fixed;inset:0;z-index:99999;">
+  <div id="wiwts-reset-preview-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);"></div>
+  <div role="dialog" aria-modal="true" aria-labelledby="wiwts-reset-preview-title"
+       style="position:relative;max-width:720px;margin:6vh auto;background:#fff;border-radius:10px;padding:18px 18px 14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+      <h3 id="wiwts-reset-preview-title" style="margin:0;font-size:18px;">Reset Preview</h3>
+      <button type="button" class="wiw-btn secondary" id="wiwts-reset-preview-close-top">Close</button>
+    </div>
+
+    <p style="margin:10px 0 14px;">
+      This is a <strong>preview only</strong>. No values will be changed yet.
+    </p>
+
+    <div id="wiwts-reset-preview-body" style="background:#f6f7f7;border:1px solid #dcdcde;border-radius:8px;padding:12px;white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;font-size:13px;"></div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+      <button type="button" class="wiw-btn secondary" id="wiwts-reset-preview-close">Close</button>
+    </div>
+  </div>
+</div>
+';
+
+$out .= '<hr style="margin:40px 0;" />';
+
 
     return $out;
 }
@@ -3318,7 +3378,9 @@ public function ajax_client_reset_entry_from_api() {
 			return 'N/A';
 		}
 		try {
-			$dt = new DateTime( $datetime_str );
+			// IMPORTANT: Local DB datetime strings have no timezone offset.
+			// Interpret them as WP/site timezone to avoid a 5-hour shift (UTC -> local).
+			$dt = new DateTime( $datetime_str, $tz );
 			$dt->setTimezone( $tz );
 			return strtolower( $dt->format( 'g:i a' ) );
 		} catch ( Exception $e ) {
