@@ -1006,14 +1006,60 @@ if (isPreviewOnly) {
   modal.style.display = "block";
   document.addEventListener("keydown", onKeyDown);
 
-  var b = document.getElementById("wiwts-reset-preview-backdrop");
+  var b  = document.getElementById("wiwts-reset-preview-backdrop");
   var c1 = document.getElementById("wiwts-reset-preview-close");
   var c2 = document.getElementById("wiwts-reset-preview-close-top");
+  var ap = document.getElementById("wiwts-reset-preview-apply");
+
   if (b)  b.onclick  = closeModal;
   if (c1) c1.onclick = closeModal;
   if (c2) c2.onclick = closeModal;
 
+  // Wire Apply Reset for admin preview-only reset (same backend action as client reset).
+  if (ap) {
+    ap.disabled = false;
+    ap.textContent = "Apply Reset";
+
+    ap.onclick = function() {
+      if (!window.confirm("Apply this reset now? This will overwrite the saved Clock In/Out and Break values.")) {
+        return;
+      }
+
+      ap.disabled = true;
+      ap.textContent = "Applying...";
+
+      var formData2 = new FormData();
+      formData2.append("action", "wiw_client_reset_entry_from_api");
+      formData2.append("security", nonceR);
+      formData2.append("entry_id", entryId);
+      formData2.append("apply_reset", "1");
+
+      fetch(ajaxUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        body: formData2
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(resp2) {
+        if (!resp2 || !resp2.success) {
+          var m = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
+          alert(m);
+          ap.disabled = false;
+          ap.textContent = "Apply Reset";
+          return;
+        }
+        window.location.reload();
+      })
+      .catch(function() {
+        alert("Reset failed (network error).");
+        ap.disabled = false;
+        ap.textContent = "Apply Reset";
+      });
+    };
+  }
+
   return;
+
 }
 
 // Existing behavior for normal (edit-mode) reset button:
@@ -1414,9 +1460,11 @@ $out .= '
 
     <div id="wiwts-reset-preview-body" style="background:#f6f7f7;border:1px solid #dcdcde;border-radius:8px;padding:12px;white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;font-size:13px;"></div>
 
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
-      <button type="button" class="wiw-btn secondary" id="wiwts-reset-preview-close">Close</button>
-    </div>
+<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+  <button type="button" class="wiw-btn" id="wiwts-reset-preview-apply">Apply Reset</button>
+  <button type="button" class="wiw-btn secondary" id="wiwts-reset-preview-close">Close</button>
+</div>
+
   </div>
 </div>
 ';
@@ -3726,6 +3774,9 @@ $api_break = (int) $default_break_runtime;
 			'Clock in (Reset)'   => array( (string) ( $current_clock_in ?? '' ), (string) ( $new_clock_in_db ?? '' ) ),
 			'Clock out (Reset)'  => array( (string) ( $current_clock_out ?? '' ), (string) ( $new_clock_out_db ?? '' ) ),
 			'Break Mins (Reset)' => array( (string) (int) ( $current_break ?? 0 ), (string) (int) ( $api_break ?? 0 ) ),
+
+			// Reset should return approved entries to pending.
+			'Status (Reset)'     => array( (string) ( $entry->status ?? 'pending' ), 'pending' ),
 		);
 
 		foreach ( $changes as $edit_type => $pair ) {
@@ -3780,10 +3831,14 @@ $api_break = (int) $default_break_runtime;
 				'break_minutes' => (int) $api_break,
 				'clocked_hours' => (float) $clocked_hours,
 				'payable_hours' => (float) $payable_hours,
+
+				// Reset should return approved entries to pending.
+				'status'        => 'pending',
+
 				'updated_at'    => current_time( 'mysql' ),
 			),
 			array( 'id' => $entry_id ),
-			array( '%s', '%s', '%d', '%f', '%f', '%s' ),
+			array( '%s', '%s', '%d', '%f', '%f', '%s', '%s' ),
 			array( '%d' )
 		);
 
@@ -3807,10 +3862,14 @@ $api_break = (int) $default_break_runtime;
 				$table_headers,
 				array(
 					'total_clocked_hours' => (float) round( $total_clocked, 2 ),
+
+					// Reset should return approved timesheets to pending.
+					'status'              => 'pending',
+
 					'updated_at'          => current_time( 'mysql' ),
 				),
 				array( 'id' => $timesheet_id ),
-				array( '%f', '%s' ),
+				array( '%f', '%s', '%s' ),
 				array( '%d' )
 			);
 		}
