@@ -741,8 +741,9 @@ if ( (string) $type === '104' ) {
 
 	if ( ! empty( $fg->scheduled_end ) && ! empty( $fg->clock_out ) ) {
 		try {
-			$scheduled_end_dt = new DateTime( $fg->scheduled_end );
-			$clock_out_dt    = new DateTime( $fg->clock_out );
+$tz = wp_timezone();
+$scheduled_end_dt = new DateTime( (string) $fg->scheduled_end, $tz );
+$clock_out_dt     = new DateTime( (string) $fg->clock_out, $tz );
 
 			if ( $clock_out_dt > $scheduled_end_dt ) {
 				$diff_seconds = $clock_out_dt->getTimestamp() - $scheduled_end_dt->getTimestamp();
