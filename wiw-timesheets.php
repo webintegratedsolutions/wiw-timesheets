@@ -433,15 +433,17 @@ if ( empty( $daily_rows ) ) {
         $date_display = isset( $dr->date ) ? (string) $dr->date : 'N/A';
 
         // When we hit week 2 for the first time, insert the Week 2 heading row.
-        if ( $current_week === 1 && $week2_start && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date_display ) && $date_display >= $week2_start ) {
-            $current_week = 2;
+if ( $current_week === 1 && $week2_start && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date_display ) && $date_display >= $week2_start ) {
+    $current_week = 2;
 
-            if ( $week2_start && $week2_end ) {
-                $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-                $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">Week Of: ' . esc_html( $week2_start ) . ' to ' . esc_html( $week2_end ) . '</td>';
-                $out .= '</tr>';
-            }
-        }
+    // Print Week 2 header only if we actually reached a Week 2 row.
+    if ( ! $printed_week2_header && $week2_start && $week2_end ) {
+        $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
+        $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">Week Of: ' . esc_html( $week2_start ) . ' to ' . esc_html( $week2_end ) . '</td>';
+        $out .= '</tr>';
+        $printed_week2_header = true;
+    }
+}
 
         $sched_start = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
         $sched_end   = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
