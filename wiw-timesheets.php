@@ -412,7 +412,15 @@ if ( empty( $daily_rows ) ) {
     // Render one row per daily record, subdivided into two weekly sections within the pay period.
     $pay_period_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
     $pay_period_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
-    $pay_period       = $pay_period_start . ( $pay_period_end ? ' to ' . $pay_period_end : '' );
+$pay_period = $pay_period_start . ( $pay_period_end ? ' to ' . $pay_period_end : '' );
+
+// Helper to format Y-m-d dates as "December 07, 2025"
+$format_week_date = function( $ymd ) {
+	if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) ) {
+		return $ymd;
+	}
+	return wp_date( 'F d, Y', strtotime( $ymd ) );
+};
 
     // Week boundaries (Sun–Sat) within the pay period.
     $week1_start = $pay_period_start;
@@ -422,12 +430,36 @@ if ( empty( $daily_rows ) ) {
 
     $current_week = 1;
 
-    // Week 1 heading row (spans all columns in this table)
-    if ( $week1_start && $week1_end ) {
-        $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-        $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">Week Of: ' . esc_html( $week1_start ) . ' to ' . esc_html( $week1_end ) . '</td>';
-        $out .= '</tr>';
-    }
+$current_week = 1;
+
+// Track whether we ever reached week 2 (prevents undefined variable notices)
+$printed_week2_header = false;
+
+// Detect whether each week actually has at least one entry row.
+$has_week1_rows = false;
+$has_week2_rows = false;
+
+foreach ( $daily_rows as $dr_check ) {
+	$d = isset( $dr_check->date ) ? (string) $dr_check->date : '';
+	if ( preg_match( '/^\d{4}-\d{2}-\d{2}$/', $d ) ) {
+		if ( $week2_start && $d >= $week2_start ) {
+			$has_week2_rows = true;
+		} else {
+			$has_week1_rows = true;
+		}
+	}
+}
+
+// Week 1 heading row (ONLY if week 1 actually has rows)
+if ( $has_week1_rows && $week1_start && $week1_end ) {
+	$out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
+	$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">Week Of: '
+		. esc_html( $format_week_date( $week1_start ) )
+		. ' to '
+		. esc_html( $format_week_date( $week1_end ) )
+		. '</td>';
+	$out .= '</tr>';
+}
 
     foreach ( $daily_rows as $dr ) {
         $date_display = isset( $dr->date ) ? (string) $dr->date : 'N/A';
@@ -439,7 +471,11 @@ if ( $current_week === 1 && $week2_start && preg_match( '/^\d{4}-\d{2}-\d{2}$/',
     // Print Week 2 header only if we actually reached a Week 2 row.
     if ( ! $printed_week2_header && $week2_start && $week2_end ) {
         $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-        $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">Week Of: ' . esc_html( $week2_start ) . ' to ' . esc_html( $week2_end ) . '</td>';
+$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">Week Of: '
+	. esc_html( $format_week_date( $week2_start ) )
+	. ' to '
+	. esc_html( $format_week_date( $week2_end ) )
+	. '</td>';
         $out .= '</tr>';
         $printed_week2_header = true;
     }
