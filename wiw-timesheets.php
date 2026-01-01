@@ -409,13 +409,39 @@ if ( empty( $daily_rows ) ) {
     $out .= '</tr>';
 
 } else {
-    // Render one row per daily record (matches Local Timesheets view behavior).
-    foreach ( $daily_rows as $dr ) {
-        $week_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
-        $week_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
-        $pay_period = $week_start . ( $week_end ? ' to ' . $week_end : '' );
+    // Render one row per daily record, subdivided into two weekly sections within the pay period.
+    $pay_period_start = isset( $ts->week_start_date ) ? (string) $ts->week_start_date : '';
+    $pay_period_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
+    $pay_period       = $pay_period_start . ( $pay_period_end ? ' to ' . $pay_period_end : '' );
 
+    // Week boundaries (Sun–Sat) within the pay period.
+    $week1_start = $pay_period_start;
+    $week1_end   = $week1_start ? gmdate( 'Y-m-d', strtotime( $week1_start . ' +6 days' ) ) : '';
+    $week2_start = $week1_start ? gmdate( 'Y-m-d', strtotime( $week1_start . ' +7 days' ) ) : '';
+    $week2_end   = $pay_period_end ? $pay_period_end : ( $week1_start ? gmdate( 'Y-m-d', strtotime( $week1_start . ' +13 days' ) ) : '' );
+
+    $current_week = 1;
+
+    // Week 1 heading row (spans all columns in this table)
+    if ( $week1_start && $week1_end ) {
+        $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
+        $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">Week Of: ' . esc_html( $week1_start ) . ' to ' . esc_html( $week1_end ) . '</td>';
+        $out .= '</tr>';
+    }
+
+    foreach ( $daily_rows as $dr ) {
         $date_display = isset( $dr->date ) ? (string) $dr->date : 'N/A';
+
+        // When we hit week 2 for the first time, insert the Week 2 heading row.
+        if ( $current_week === 1 && $week2_start && preg_match( '/^\d{4}-\d{2}-\d{2}$/', $date_display ) && $date_display >= $week2_start ) {
+            $current_week = 2;
+
+            if ( $week2_start && $week2_end ) {
+                $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
+                $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">Week Of: ' . esc_html( $week2_start ) . ' to ' . esc_html( $week2_end ) . '</td>';
+                $out .= '</tr>';
+            }
+        }
 
         $sched_start = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
         $sched_end   = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
@@ -1520,29 +1546,45 @@ $out .= '<hr style="margin:40px 0;" />';
  * Fetch local timesheets from DB, always scoped to a client account number.
  * (No admin bypass; the shortcode is assumed to be used on a secure client page.)
  */
-private function get_scoped_local_timesheets( $client_id ) {
+function get_scoped_local_timesheets( $client_id ) {
 	global $wpdb;
 
-	$table_ts = $wpdb->prefix . 'wiw_timesheets';
+	$table_ts      = $wpdb->prefix . 'wiw_timesheets';
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
 	$client_id = absint( $client_id );
+
+	// Admins: show all timesheets (headers are now All Locations / location_id = 0).
+	if ( current_user_can( 'manage_options' ) ) {
+		$sql = "
+			SELECT ts.*,
+			       (SELECT COUNT(*) FROM {$table_entries} e WHERE e.timesheet_id = ts.id) AS daily_record_count
+			FROM {$table_ts} ts
+			ORDER BY ts.week_start_date DESC, ts.id DESC
+		";
+		return $wpdb->get_results( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+	}
+
+	// Clients: show only timesheets that contain at least one entry for their location_id (= client_id).
 	if ( $client_id <= 0 ) {
 		return array();
 	}
 
-	$sql = "
+	$sql = $wpdb->prepare(
+		"
 		SELECT ts.*,
-			   0 AS daily_record_count
+		       COUNT(e.id) AS daily_record_count
 		FROM {$table_ts} ts
-		WHERE ts.location_id = %d
+		INNER JOIN {$table_entries} e
+		        ON e.timesheet_id = ts.id
+		       AND e.location_id = %d
+		GROUP BY ts.id
 		ORDER BY ts.week_start_date DESC, ts.id DESC
-	";
+		",
+		$client_id
+	);
 
-	$prepared = $wpdb->prepare( $sql, $client_id );
-
-	$results = $wpdb->get_results( $prepared );
-
-	return $results;
+	return $wpdb->get_results( $sql );
 }
 
 /**
@@ -1550,29 +1592,49 @@ private function get_scoped_local_timesheets( $client_id ) {
  * Scoped by location_id to ensure client isolation.
  */
 function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id ) {
-    global $wpdb;
+	global $wpdb;
 
-    // Daily rows live in wiw_timesheet_entries (created by install.php and filled by timesheet-sync.php).
-    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
-    $client_id    = absint( $client_id );
-    $timesheet_id = absint( $timesheet_id );
+	$client_id    = absint( $client_id );
+	$timesheet_id = absint( $timesheet_id );
 
-    if ( $client_id <= 0 || $timesheet_id <= 0 ) {
-        return array();
-    }
+	if ( $timesheet_id <= 0 ) {
+		return array();
+	}
 
-    $sql = "
-        SELECT *
-        FROM {$table_entries}
-        WHERE timesheet_id = %d
-          AND location_id = %d
-        ORDER BY date ASC, id ASC
-    ";
+	// Admins: show all entries for the timesheet (all locations).
+	if ( current_user_can( 'manage_options' ) ) {
+		$sql = $wpdb->prepare(
+			"
+			SELECT *
+			FROM {$table_entries}
+			WHERE timesheet_id = %d
+			ORDER BY date ASC, id ASC
+			",
+			$timesheet_id
+		);
+		return $wpdb->get_results( $sql );
+	}
 
-    $prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+	// Clients: restrict entries to their location_id (= client_id).
+	if ( $client_id <= 0 ) {
+		return array();
+	}
 
-    return $wpdb->get_results( $prepared );
+	$sql = $wpdb->prepare(
+		"
+		SELECT *
+		FROM {$table_entries}
+		WHERE timesheet_id = %d
+		  AND location_id = %d
+		ORDER BY date ASC, id ASC
+		",
+		$timesheet_id,
+		$client_id
+	);
+
+	return $wpdb->get_results( $sql );
 }
 
     /**
