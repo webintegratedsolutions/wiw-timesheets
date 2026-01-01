@@ -930,7 +930,6 @@ $totals_map[ $tid ] = array(
                 <thead>
 <tr>
     <th width="2%">ID</th>
-    <th width="13%">Pay Period</th>
     <th width="6%">Date</th>
 
     <th width="11%">Sched. Start/End</th>
@@ -953,7 +952,7 @@ $totals_map[ $tid ] = array(
                 <tbody>
                 <?php foreach ( $grouped as $employee_name => $weeks ) : ?>
                     <tr class="wiw-employee-header">
-                        <td colspan="13" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                        <td colspan="12" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
                             👤 Employee: <?php echo esc_html( $employee_name ); ?>
                         </td>
                     </tr>
@@ -988,7 +987,7 @@ if ( ! empty( $bundle['rows'][0]->week_end_date ) ) {
                         }
                         ?>
                         <tr class="wiw-period-total">
-                            <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
+                            <td colspan="6" style="background-color: #f0f0ff; font-weight: bold;">
                                 📅 Pay Period: <?php echo esc_html( $week_start ); ?> to <?php echo esc_html( $week_end ); ?>
                             </td>
                             <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( (int) $week_break ); ?></td>
@@ -1036,12 +1035,6 @@ $fmt_range = function( $start, $end, $separator ) use ( $fmt_time ) {
                             ?>
                             <tr>
                                 <td><?php echo esc_html( $tid ); ?></td>
-                                <td>
-                                    <?php echo esc_html( $row->week_start_date ); ?>
-                                    <?php if ( ! empty( $row->week_end_date ) ) : ?>
-                                        &nbsp;to&nbsp;<?php echo esc_html( $row->week_end_date ); ?>
-                                    <?php endif; ?>
-                                </td>
 <td><?php echo esc_html( $min_date ); ?></td>
 
 <?php
