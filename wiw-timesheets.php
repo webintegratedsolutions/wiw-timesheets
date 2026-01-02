@@ -346,9 +346,42 @@ $out .= '<tr><th>Actions</th><td>' . $actions_html . '</td></tr>';
 $out .= '</tbody></table>';
 }
 
-        $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;">';
+// === WIWTS ADMIN DAILY TABLE LOCATION COLUMN START ===
+$is_admin_front     = current_user_can( 'manage_options' );
+$daily_table_colspan = $is_admin_front ? 10 : 9;
+// === WIWTS ADMIN DAILY TABLE LOCATION COLUMN END ===
+
+// === WIWTS DAILY TABLE COL WIDTHS START ===
+$is_admin_front      = current_user_can( 'manage_options' );
+$daily_table_colspan = $is_admin_front ? 10 : 9;
+
+// Make Location + Sched. Start/End slightly wider than the other columns.
+// Column order (admin): 0 Shift Date, 1 Location, 2 Sched. Start/End, ...
+// Column order (client): 0 Shift Date, 1 Sched. Start/End, ...
+$wide_pct     = 13.0;
+$wide_indices = $is_admin_front ? array( 1, 2 ) : array( 1 );
+
+$remaining_pct = 100.0 - ( $wide_pct * count( $wide_indices ) );
+$normal_cols   = (int) $daily_table_colspan - count( $wide_indices );
+$normal_pct    = ( $normal_cols > 0 ) ? ( $remaining_pct / $normal_cols ) : 0.0;
+
+$out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;table-layout:fixed;width:100%;">';
+$out .= '<colgroup>';
+
+for ( $i = 0; $i < (int) $daily_table_colspan; $i++ ) {
+	$pct = in_array( $i, $wide_indices, true ) ? $wide_pct : $normal_pct;
+	$out .= '<col style="width:' . esc_attr( round( (float) $pct, 4 ) ) . '%;">';
+}
+
+$out .= '</colgroup>';
+// === WIWTS DAILY TABLE COL WIDTHS END ===
+
         $out .= '<thead><tr>';
+
 $out .= '<th>Shift Date</th>';
+if ( $is_admin_front ) {
+	$out .= '<th>Location</th>';
+}
 $out .= '<th>Sched. Start/End</th>';
 $out .= '<th>Clock In</th>';
 $out .= '<th>Clock Out</th>';
@@ -397,6 +430,9 @@ if ( empty( $daily_rows ) ) {
 
     $out .= '<tr>';
     $out .= '<td>N/A</td>';
+    if ( $is_admin_front ) {
+        $out .= '<td>' . esc_html( $location_name !== '' ? $location_name : 'N/A' ) . '</td>';
+    }
     $out .= '<td>N/A</td>';
     $out .= '<td>N/A</td>';
     $out .= '<td>N/A</td>';
@@ -452,7 +488,7 @@ foreach ( $daily_rows as $dr_check ) {
 // Week 1 heading row (ONLY if week 1 actually has rows)
 if ( $has_week1_rows && $week1_start && $week1_end ) {
 	$out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-	$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">🗓️ Week Of: '
+		$out .= '<td colspan="' . (int) $daily_table_colspan . '" style="padding:8px 10px;font-weight:600;">🗓️ Week Of: '
 		. esc_html( $format_week_date( $week1_start ) )
 		. ' to '
 		. esc_html( $format_week_date( $week1_end ) )
@@ -470,7 +506,7 @@ if ( $current_week === 1 && $week2_start && preg_match( '/^\d{4}-\d{2}-\d{2}$/',
     // Print Week 2 header only if we actually reached a Week 2 row.
     if ( ! $printed_week2_header && $week2_start && $week2_end ) {
         $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">🗓️ Week Of: '
+$out .= '<td colspan="' . (int) $daily_table_colspan . '" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">🗓️ Week Of: '
 	. esc_html( $format_week_date( $week2_start ) )
 	. ' to '
 	. esc_html( $format_week_date( $week2_end ) )
@@ -505,7 +541,16 @@ $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px 
         $scheduled_end_raw   = ( $scheduled_end && strlen( $scheduled_end ) >= 16 ) ? substr( $scheduled_end, 11, 5 ) : '';
 
         $out .= '<tr data-sched-start="' . esc_attr( $scheduled_start_raw ) . '" data-sched-end="' . esc_attr( $scheduled_end_raw ) . '">';
-        $out .= '<td>' . esc_html( $date_display ) . '</td>';
+                $out .= '<td>' . esc_html( $date_display ) . '</td>';
+
+        if ( $is_admin_front ) {
+			$row_location_name = ( isset( $dr->location_name ) && (string) $dr->location_name !== '' )
+				? (string) $dr->location_name
+				: ( $location_name !== '' ? (string) $location_name : 'N/A' );
+
+            $out .= '<td>' . esc_html( $row_location_name ) . '</td>';
+        }
+
 $out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
 
 // Raw HH:MM for edit inputs (local DATETIME -> HH:MM)
