@@ -2028,7 +2028,9 @@ private function get_scoped_edit_logs_for_timesheet( $client_id, $timesheet_id )
 
 /**
  * Fetch flags for a given timesheet ID.
- * Scoped by location_id to ensure client isolation.
+ *
+ * Clients: Scoped by location_id to ensure client isolation.
+ * Admins: No location scoping (show all flags for the timesheet).
  *
  * Flags table is keyed by wiw_time_id, so we join to daily records to
  * get only flags that belong to this timesheet.
@@ -2039,31 +2041,58 @@ private function get_scoped_flags_for_timesheet( $client_id, $timesheet_id ) {
 	$table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
 	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
-	$client_id    = absint( $client_id );
 	$timesheet_id = absint( $timesheet_id );
+	$is_admin     = current_user_can( 'manage_options' );
 
-	if ( $client_id <= 0 || $timesheet_id <= 0 ) {
+	if ( $timesheet_id <= 0 ) {
 		return array();
 	}
 
-$sql = "
-		SELECT
-			f.*,
-			e.date AS shift_date,
-			e.scheduled_end,
-			e.clock_out
-		FROM {$table_flags} f
-		INNER JOIN {$table_entries} e ON e.wiw_time_id = f.wiw_time_id
-		WHERE e.timesheet_id = %d
-		  AND e.location_id = %d
-		ORDER BY
-			CASE WHEN f.flag_status = 'resolved' THEN 1 ELSE 0 END ASC,
-			e.date DESC,
-			f.updated_at DESC,
-			f.id DESC
-	";
+	// Client scoping safety: if not admin and no client_id, return none.
+	$client_id = is_scalar( $client_id ) ? absint( $client_id ) : 0;
+	if ( ! $is_admin && $client_id <= 0 ) {
+		return array();
+	}
 
-	$prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+	// Build SQL with conditional scoping.
+	if ( $is_admin ) {
+		$sql = "
+			SELECT
+				f.*,
+				e.date AS shift_date,
+				e.scheduled_end,
+				e.clock_out
+			FROM {$table_flags} f
+			INNER JOIN {$table_entries} e ON e.wiw_time_id = f.wiw_time_id
+			WHERE e.timesheet_id = %d
+			ORDER BY
+				CASE WHEN f.flag_status = 'resolved' THEN 1 ELSE 0 END ASC,
+				e.date DESC,
+				f.updated_at DESC,
+				f.id DESC
+		";
+
+		$prepared = $wpdb->prepare( $sql, $timesheet_id );
+	} else {
+		$sql = "
+			SELECT
+				f.*,
+				e.date AS shift_date,
+				e.scheduled_end,
+				e.clock_out
+			FROM {$table_flags} f
+			INNER JOIN {$table_entries} e ON e.wiw_time_id = f.wiw_time_id
+			WHERE e.timesheet_id = %d
+			  AND e.location_id = %d
+			ORDER BY
+				CASE WHEN f.flag_status = 'resolved' THEN 1 ELSE 0 END ASC,
+				e.date DESC,
+				f.updated_at DESC,
+				f.id DESC
+		";
+
+		$prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
+	}
 
 	return $wpdb->get_results( $prepared );
 }
