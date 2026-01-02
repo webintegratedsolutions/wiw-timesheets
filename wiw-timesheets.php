@@ -580,13 +580,19 @@ $clock_out_raw = ( $clock_out && strlen( (string) $clock_out ) >= 16 ) ? substr(
 $clock_in_display  = $this->wiw_format_time_local( $clock_in );
 $clock_out_display = $this->wiw_format_time_local( $clock_out );
 
+// UI-only label: when display is empty (currently shows N/A), show "Missing" in red.
+$clock_in_view_text   = ( $clock_in_display !== '' ) ? $clock_in_display : 'Missing';
+$clock_out_view_text  = ( $clock_out_display !== '' ) ? $clock_out_display : 'Missing';
+$clock_in_view_style  = ( $clock_in_display !== '' ) ? '' : ' style="color:#b32d2e;font-weight:600;"';
+$clock_out_view_style = ( $clock_out_display !== '' ) ? '' : ' style="color:#b32d2e;font-weight:600;"';
+
 $out .= '<td class="wiw-client-cell-clock-in" data-orig="' . esc_attr( $clock_in_raw ) . '" data-orig-view="' . esc_attr( $clock_in_display !== '' ? $clock_in_display : 'N/A' ) . '">'
-    . '<span class="wiw-client-view">' . esc_html( $clock_in_display !== '' ? $clock_in_display : 'N/A' ) . '</span>'
+. '<span class="wiw-client-view"' . $clock_in_view_style . '>' . esc_html( $clock_in_view_text ) . '</span>'
     . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr( $clock_in_raw ) . '" style="display:none; width:80px;" />'
     . '</td>';
 
 $out .= '<td class="wiw-client-cell-clock-out" data-orig="' . esc_attr( $clock_out_raw ) . '" data-orig-view="' . esc_attr( $clock_out_display !== '' ? $clock_out_display : 'N/A' ) . '">'
-    . '<span class="wiw-client-view">' . esc_html( $clock_out_display !== '' ? $clock_out_display : 'N/A' ) . '</span>'
+. '<span class="wiw-client-view"' . $clock_out_view_style . '>' . esc_html( $clock_out_view_text ) . '</span>'
     . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr( $clock_out_raw ) . '" style="display:none; width:80px;" />'
     . '</td>';
 
