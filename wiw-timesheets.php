@@ -942,7 +942,7 @@ $out .= '<td ' . $cell_style . ' colspan="4">'
 			} else {
 				$post_url = esc_url( admin_url( 'admin-post.php' ) );
 
-				$actions_html .= '<form method="post" action="' . $post_url . '" style="display:inline-block;margin-right:6px;">'
+                $actions_html .= '<form method="post" action="' . $post_url . '" style="display:inline-block;margin-right:6px;" onsubmit="return confirm(\'Are you sure you want to confirm this additional time?\');">'
 					. '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
 					. '<input type="hidden" name="decision" value="confirm" />'
 					. '<input type="hidden" name="wiw_time_id" value="' . esc_attr( $flag104_time_id ) . '" />'
