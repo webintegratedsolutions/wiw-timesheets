@@ -331,9 +331,7 @@ $out .= '<tr><th style="width:180px;">Created/Updated</th><td>'
     . esc_html( $updated_display )
     . '</td></tr>';
 
-$out .= '<tr><th>Location</th><td>'
-    . '<span class="wiw-muted">' . esc_html( $loc_address ) . '</span>'
-    . '</td></tr>';
+// (Location row removed)
 
 $out .= '<tr><th>Totals</th><td>'
     . 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
@@ -3794,7 +3792,7 @@ if ( $scheduled_hours <= 0.0 ) {
 	}
 }
 
-$default_break = ( $scheduled_hours >= 5.0 ) ? 60 : 0;
+$default_break = ( $scheduled_hours > 5.0 ) ? 60 : 0;
 
 	// Fetch authoritative WIW time record (preview + apply)
 	$endpoint = "times/{$wiw_time_id}";
@@ -3992,7 +3990,7 @@ if ( $basis_hours <= 0.0 ) {
 if ( $basis_hours <= 0.0 ) {
 	$default_break_runtime = 60;
 } else {
-	$default_break_runtime = ( $basis_hours >= 5.0 ) ? 60 : 0;
+	$default_break_runtime = ( $basis_hours > 5.0 ) ? 60 : 0;
 }
 
 // Always use the enforced default for reset break minutes
@@ -4028,11 +4026,16 @@ $api_break = (int) $default_break_runtime;
 		}
 
 		// Recompute clocked/payable hours only if both times exist and are ordered.
-		$break_minutes = (int) $api_break;
-		$clocked_hours = 0.00;
-		$payable_hours = 0.00;
+$break_minutes = (int) $api_break;
 
-		if ( $new_clock_in_db && $new_clock_out_db ) {
+// Default to existing stored values so Reset never overwrites to 0.00
+// if API end_time is missing or parsing fails.
+$clocked_hours        = isset( $entry->clocked_hours ) ? (float) $entry->clocked_hours : 0.00;
+$payable_hours        = isset( $entry->payable_hours ) ? (float) $entry->payable_hours : 0.00;
+$additional_hours     = isset( $entry->additional_hours ) ? (float) $entry->additional_hours : 0.00;
+$did_recompute_hours  = false;
+
+if ( $new_clock_in_db && $new_clock_out_db ) {
 			try {
 				$dt_in  = new DateTime( $new_clock_in_db, $tz );
 				$dt_out = new DateTime( $new_clock_out_db, $tz );
@@ -4044,10 +4047,59 @@ $api_break = (int) $default_break_runtime;
 						$break_minutes = 0;
 					}
 
-					$payable_minutes = max( 0, $total_minutes - $break_minutes );
+$clocked_hours = (float) ( $total_minutes / 60 );
 
-					$clocked_hours = (float) ( $total_minutes / 60 );
-					$payable_hours = (float) ( $payable_minutes / 60 );
+// Payable hours must be based on SCHEDULED hours minus break (not clocked hours minus break).
+if ( ! empty( $entry->scheduled_start ) && ! empty( $entry->scheduled_end ) ) {
+	try {
+		$dt_sched_start = new DateTime( (string) $entry->scheduled_start, $tz );
+		$dt_sched_end   = new DateTime( (string) $entry->scheduled_end, $tz );
+
+		if ( $dt_sched_end > $dt_sched_start ) {
+			$sched_interval = $dt_sched_start->diff( $dt_sched_end );
+			$sched_minutes  = ( $sched_interval->days * 1440 ) + ( $sched_interval->h * 60 ) + $sched_interval->i;
+
+			// Apply break against scheduled minutes.
+			if ( $break_minutes > $sched_minutes ) {
+				$break_minutes = 0;
+			}
+
+			$payable_minutes = max( 0, $sched_minutes - $break_minutes );
+			$payable_hours   = (float) ( $payable_minutes / 60 );
+
+			// We successfully recomputed payable from schedule.
+			$did_recompute_hours = true;
+		}
+// Recompute additional_hours (Clock Out minus Scheduled End) when possible.
+$additional_hours = 0.00;
+if ( ! empty( $entry->scheduled_end ) ) {
+	try {
+		$dt_sched_end = new DateTime( (string) $entry->scheduled_end, $tz );
+		if ( $dt_out > $dt_sched_end ) {
+			$additional_hours = (float) ( ( $dt_out->getTimestamp() - $dt_sched_end->getTimestamp() ) / 3600 );
+		}
+	} catch ( Exception $e ) {
+		// Keep additional_hours as 0.00
+	}
+}       
+	} catch ( Exception $e ) {
+		// If schedule parse fails, do not overwrite payable/additional
+	}
+}
+
+					// Recompute additional_hours (Clock Out minus Scheduled End) when possible.
+					$additional_hours = 0.00;
+					if ( ! empty( $entry->scheduled_end ) ) {
+						try {
+							$dt_sched_end = new DateTime( (string) $entry->scheduled_end, $tz );
+							if ( $dt_out > $dt_sched_end ) {
+								$additional_hours = (float) ( ( $dt_out->getTimestamp() - $dt_sched_end->getTimestamp() ) / 3600 );
+							}
+						} catch ( Exception $e ) {
+							// Keep additional_hours as 0.00
+						}
+					}
+
 				}
 			} catch ( Exception $e ) {
 				// Keep 0.00 values
@@ -4131,22 +4183,37 @@ $api_break = (int) $default_break_runtime;
 		// --- END LOGGING (Reset) ---
 
 		// Update entry row (NOW includes break_minutes)
+// Update entry row (NOW includes break_minutes)
+		$update_data = array(
+			'clock_in'          => $new_clock_in_db,
+			'clock_out'         => $new_clock_out_db,
+			'break_minutes'     => (int) $api_break,
+			'extra_time_status' => 'unset',
+
+			// Reset should return approved entries to pending.
+			'status'            => 'pending',
+
+			'updated_at'        => current_time( 'mysql' ),
+		);
+
+		$update_formats = array( '%s', '%s', '%d', '%s', '%s', '%s' );
+
+		// Only overwrite hours if we successfully recomputed them from API times
+		if ( $did_recompute_hours ) {
+			$update_data['clocked_hours']    = (float) $clocked_hours;
+			$update_data['payable_hours']    = (float) $payable_hours;
+			$update_data['additional_hours'] = (float) $additional_hours;
+
+			$update_formats[] = '%f';
+			$update_formats[] = '%f';
+			$update_formats[] = '%f';
+		}
+
 		$updated = $wpdb->update(
 			$table_entries,
-			array(
-				'clock_in'      => $new_clock_in_db,
-				'clock_out'     => $new_clock_out_db,
-				'break_minutes' => (int) $api_break,
-				'clocked_hours' => (float) $clocked_hours,
-				'payable_hours' => (float) $payable_hours,
-
-				// Reset should return approved entries to pending.
-				'status'        => 'pending',
-
-				'updated_at'    => current_time( 'mysql' ),
-			),
+			$update_data,
 			array( 'id' => $entry_id ),
-			array( '%s', '%s', '%d', '%f', '%f', '%s', '%s' ),
+			$update_formats,
 			array( '%d' )
 		);
 
