@@ -272,9 +272,7 @@ if ( current_user_can( 'manage_options' ) ) {
         . esc_html( $pay_period_label . $ts_label )
         . '</h3>';
 } else {
-    $out .= '<h3 style="margin:12px 0 8px;">🗓️ Shifts from: '
-        . esc_html( $pay_period_label )
-        . '</h3>';
+    // Client front-end view: intentionally hide the "Shifts from" header.
 }
 
 // Timesheet Details (shown between Pay Period header and the table)
@@ -453,7 +451,7 @@ foreach ( $daily_rows as $dr_check ) {
 // Week 1 heading row (ONLY if week 1 actually has rows)
 if ( $has_week1_rows && $week1_start && $week1_end ) {
 	$out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-	$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">Week Of: '
+	$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">🗓️ Week Of: '
 		. esc_html( $format_week_date( $week1_start ) )
 		. ' to '
 		. esc_html( $format_week_date( $week1_end ) )
@@ -471,7 +469,7 @@ if ( $current_week === 1 && $week2_start && preg_match( '/^\d{4}-\d{2}-\d{2}$/',
     // Print Week 2 header only if we actually reached a Week 2 row.
     if ( ! $printed_week2_header && $week2_start && $week2_end ) {
         $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">Week Of: '
+$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">🗓️ Week Of: '
 	. esc_html( $format_week_date( $week2_start ) )
 	. ' to '
 	. esc_html( $format_week_date( $week2_end ) )
