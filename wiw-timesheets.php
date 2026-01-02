@@ -365,7 +365,11 @@ $remaining_pct = 100.0 - ( $wide_pct * count( $wide_indices ) );
 $normal_cols   = (int) $daily_table_colspan - count( $wide_indices );
 $normal_pct    = ( $normal_cols > 0 ) ? ( $remaining_pct / $normal_cols ) : 0.0;
 
-$out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;table-layout:fixed;width:100%;">';
+if ( ! current_user_can( 'manage_options' )) {
+    $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;width:100%;">';
+} else {
+    $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;table-layout:fixed;width:100%;">';
+}
 $out .= '<colgroup>';
 
 for ( $i = 0; $i < (int) $daily_table_colspan; $i++ ) {
@@ -382,7 +386,7 @@ $out .= '<th>Shift Date</th>';
 if ( $is_admin_front ) {
 	$out .= '<th>Location</th>';
 }
-$out .= '<th>Sched. Start/End</th>';
+$out .= '<th style="width:180px; white-space:nowrap;">Sched. Start/End</th>';
 $out .= '<th>Clock In</th>';
 $out .= '<th>Clock Out</th>';
 $out .= '<th>Break (Min)</th>';
@@ -570,7 +574,7 @@ if ( ! $printed_week2_header && $week2_start && $week2_end ) {
             $out .= '<td>' . esc_html( $row_location_name ) . '</td>';
         }
 
-$out .= '<td>' . esc_html( $sched_start_end ) . '</td>';
+$out .= '<td style="min-width:180px; white-space:nowrap;">' . esc_html( $sched_start_end ) . '</td>';
 
 // Raw HH:MM for edit inputs (local DATETIME -> HH:MM)
 $clock_in_raw  = ( $clock_in && strlen( (string) $clock_in ) >= 16 ) ? substr( (string) $clock_in, 11, 5 ) : '';

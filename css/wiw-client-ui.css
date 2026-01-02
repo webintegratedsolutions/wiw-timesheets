@@ -161,3 +161,15 @@
 	border: 0;
 	border-top: 1px solid #ccd0d4;
 }
+
+/* Prevent line breaks and allow column to expand */
+.wiw-col-sched {
+	min-width: 200px;
+	white-space: nowrap;
+}
+
+/* Optional: keep table from forcing wraps */
+.wiw-nowrap {
+	white-space: nowrap;
+}
+
