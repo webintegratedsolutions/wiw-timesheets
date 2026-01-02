@@ -3898,19 +3898,54 @@ $default_break = ( $scheduled_hours > 5.0 ) ? 60 : 0;
 		);
 	}
 
-	$time_obj = null;
-	if ( isset( $result->time ) ) {
+// Normalize WhenIWork response shape (often wrapped like { time: {...} }).
+$time_obj = null;
+if ( is_object( $result ) ) {
+	if ( isset( $result->time ) && is_object( $result->time ) ) {
 		$time_obj = $result->time;
-	} elseif ( is_object( $result ) ) {
-		$time_obj = $result;
+	} elseif ( isset( $result->times ) && is_array( $result->times ) && ! empty( $result->times ) ) {
+		$time_obj = $result->times[0];
+	} else {
+		$time_obj = $result; // fallback if API returns the time object directly
 	}
+}
 
 	$api_start = '';
 	$api_end   = '';
 
+	// Pull start/end from WIW time record. Some WIW responses may use alternate key names.
 	if ( $time_obj ) {
-		$api_start = isset( $time_obj->start_time ) ? (string) $time_obj->start_time : '';
-		$api_end   = isset( $time_obj->end_time ) ? (string) $time_obj->end_time : '';
+		// Start time (primary)
+		if ( isset( $time_obj->start_time ) ) {
+			$api_start = (string) $time_obj->start_time;
+		}
+
+		// End time (primary)
+		if ( isset( $time_obj->end_time ) ) {
+			$api_end = (string) $time_obj->end_time;
+		}
+
+		// End time (fallback keys - defensive)
+		if ( $api_end === '' ) {
+			if ( isset( $time_obj->stop_time ) ) {
+				$api_end = (string) $time_obj->stop_time;
+			} elseif ( isset( $time_obj->ended_at ) ) {
+				$api_end = (string) $time_obj->ended_at;
+			} elseif ( isset( $time_obj->end_at ) ) {
+				$api_end = (string) $time_obj->end_at;
+			} elseif ( isset( $time_obj->stop_at ) ) {
+				$api_end = (string) $time_obj->stop_at;
+			}
+		}
+
+		// Start time (fallback keys - defensive)
+		if ( $api_start === '' ) {
+			if ( isset( $time_obj->start_at ) ) {
+				$api_start = (string) $time_obj->start_at;
+			} elseif ( isset( $time_obj->started_at ) ) {
+				$api_start = (string) $time_obj->started_at;
+			}
+		}
 	}
 
 	// IMPORTANT: break minutes to reset to.
@@ -4133,51 +4168,59 @@ if ( $new_clock_in_db && $new_clock_out_db ) {
 				$dt_in  = new DateTime( $new_clock_in_db, $tz );
 				$dt_out = new DateTime( $new_clock_out_db, $tz );
 
-				if ( $dt_out > $dt_in ) {
+if ( $dt_out > $dt_in ) {
 					$total_minutes = (int) round( ( $dt_out->getTimestamp() - $dt_in->getTimestamp() ) / 60 );
 
 					if ( $break_minutes < 0 ) {
 						$break_minutes = 0;
 					}
 
-$clocked_hours = (float) ( $total_minutes / 60 );
+					// Match Sync logic: clocked hours = (clock_out - clock_in) minus break minutes.
+					$adjusted_minutes = $total_minutes - (int) $break_minutes;
+					if ( $adjusted_minutes < 0 ) {
+						$adjusted_minutes = 0;
+					}
 
-// Payable hours must be based on SCHEDULED hours minus break (not clocked hours minus break).
-if ( ! empty( $entry->scheduled_start ) && ! empty( $entry->scheduled_end ) ) {
-	try {
+					$clocked_hours = round( (float) ( $adjusted_minutes / 60 ), 2 );
+
+// Payable hours should match Sync behavior: actual worked window clamped to scheduled bounds, minus break.
+// - If clock_out is before scheduled_end => payable is deducted.
+// - If clock_in is after scheduled_start => payable is deducted.
+try {
+	$pay_start = $dt_in;
+	$pay_end   = $dt_out;
+
+	if ( ! empty( $entry->scheduled_start ) ) {
 		$dt_sched_start = new DateTime( (string) $entry->scheduled_start, $tz );
-		$dt_sched_end   = new DateTime( (string) $entry->scheduled_end, $tz );
-
-		if ( $dt_sched_end > $dt_sched_start ) {
-			$sched_interval = $dt_sched_start->diff( $dt_sched_end );
-			$sched_minutes  = ( $sched_interval->days * 1440 ) + ( $sched_interval->h * 60 ) + $sched_interval->i;
-
-			// Apply break against scheduled minutes.
-			if ( $break_minutes > $sched_minutes ) {
-				$break_minutes = 0;
-			}
-
-			$payable_minutes = max( 0, $sched_minutes - $break_minutes );
-			$payable_hours   = (float) ( $payable_minutes / 60 );
-
-			// We successfully recomputed payable from schedule.
-			$did_recompute_hours = true;
+		if ( $dt_sched_start > $pay_start ) {
+			$pay_start = $dt_sched_start;
 		}
-// Recompute additional_hours (Clock Out minus Scheduled End) when possible.
-$additional_hours = 0.00;
-if ( ! empty( $entry->scheduled_end ) ) {
-	try {
+	}
+
+	if ( ! empty( $entry->scheduled_end ) ) {
 		$dt_sched_end = new DateTime( (string) $entry->scheduled_end, $tz );
-		if ( $dt_out > $dt_sched_end ) {
-			$additional_hours = (float) ( ( $dt_out->getTimestamp() - $dt_sched_end->getTimestamp() ) / 3600 );
+		if ( $dt_sched_end < $pay_end ) {
+			$pay_end = $dt_sched_end;
 		}
-	} catch ( Exception $e ) {
-		// Keep additional_hours as 0.00
 	}
-}       
-	} catch ( Exception $e ) {
-		// If schedule parse fails, do not overwrite payable/additional
+
+	if ( $pay_end > $pay_start ) {
+		$payable_minutes_raw = (int) round( ( $pay_end->getTimestamp() - $pay_start->getTimestamp() ) / 60 );
+		$payable_minutes     = max( 0, $payable_minutes_raw - (int) $break_minutes );
+		$payable_hours       = round( (float) ( $payable_minutes / 60 ), 2 );
+
+		$did_recompute_hours = true;
+	} else {
+		// If clamping results in invalid window, fall back to clocked logic.
+		$payable_minutes = max( 0, (int) $total_minutes - (int) $break_minutes );
+		$payable_hours   = round( (float) ( $payable_minutes / 60 ), 2 );
+		$did_recompute_hours = true;
 	}
+} catch ( Exception $e ) {
+	// If schedule parse fails, fall back to clocked logic.
+	$payable_minutes = max( 0, (int) $total_minutes - (int) $break_minutes );
+	$payable_hours   = round( (float) ( $payable_minutes / 60 ), 2 );
+	$did_recompute_hours = true;
 }
 
 					// Recompute additional_hours (Clock Out minus Scheduled End) when possible.
@@ -4290,12 +4333,27 @@ if ( ! empty( $entry->scheduled_end ) ) {
 		);
 
 		$update_formats = array( '%s', '%s', '%d', '%s', '%s', '%s' );
+        // Consistency guard: if reset results in no clock_out, we cannot keep prior computed hours.
+// Prevent impossible states like "Clock Out: N/A" but "Clocked Hrs: 4.75".
+if ( empty( $new_clock_out_db ) ) {
+	$clocked_hours       = 0.00;
+	$payable_hours       = 0.00;
+	$additional_hours    = 0.00;
+	$did_recompute_hours = true; // triggers the overwrite-hours block below
+}
 
 		// Only overwrite hours if we successfully recomputed them from API times
-		if ( $did_recompute_hours ) {
+if ( $did_recompute_hours ) {
 			$update_data['clocked_hours']    = (float) $clocked_hours;
 			$update_data['payable_hours']    = (float) $payable_hours;
 			$update_data['additional_hours'] = (float) $additional_hours;
+
+			// Match Sync expectation: ensure scheduled_hours is populated from scheduled_start/end span when known.
+			// (Reset previously did not write scheduled_hours at all, leaving old/zero values behind.)
+			if ( isset( $scheduled_hours ) && (float) $scheduled_hours > 0.0 ) {
+				$update_data['scheduled_hours'] = (float) round( (float) $scheduled_hours, 2 );
+				$update_formats[]              = '%f';
+			}
 
 			$update_formats[] = '%f';
 			$update_formats[] = '%f';
@@ -4310,9 +4368,35 @@ if ( ! empty( $entry->scheduled_end ) ) {
 			array( '%d' )
 		);
 
-		if ( false === $updated ) {
-			wp_send_json_error( array( 'message' => 'Reset failed: could not update entry.' ), 500 );
-		}
+// $wpdb->update returns:
+// - false on SQL error
+// - 0 if no rows matched/changed (e.g., wrong entry_id or values identical)
+// - 1+ on success
+if ( false === $updated ) {
+	wp_send_json_error(
+		array(
+			'message' => 'Reset failed: could not update entry (SQL error).',
+			'error'   => $wpdb->last_error,
+		),
+		500
+	);
+}
+
+// If nothing updated, do NOT treat as success—this usually means the entry_id was wrong.
+if ( 0 === (int) $updated ) {
+	$check_status = $wpdb->get_var(
+		$wpdb->prepare( "SELECT status FROM {$table_entries} WHERE id = %d", $entry_id )
+	);
+
+	wp_send_json_error(
+		array(
+			'message'       => 'Reset failed: no rows were updated (entry id mismatch or unchanged).',
+			'entry_id'      => (int) $entry_id,
+			'current_status'=> is_null( $check_status ) ? 'not_found' : (string) $check_status,
+		),
+		409
+	);
+}
 
 		// Recalculate timesheet header total_clocked_hours for this timesheet_id
 		$timesheet_id = isset( $entry->timesheet_id ) ? absint( $entry->timesheet_id ) : 0;
