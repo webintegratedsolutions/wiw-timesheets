@@ -70,8 +70,11 @@ class WIW_Timesheet_Manager {
         add_shortcode( 'wiw_timesheets_client', array( $this, 'render_client_ui' ) );
 
         // NEW: Client Filter UI Shortcode
-        add_shortcode( 'wiw_timesheets_client_filter', array( $this, 'render_client_filter_ui' ) );
+add_shortcode( 'wiw_timesheets_client_filter', array( $this, 'render_client_filter_ui' ) );
 
+// === WIWTS FLAG 104 CONFIRM/DENY POST HOOKS START ===
+add_action( 'admin_post_wiwts_flag104_extra_time', array( $this, 'handle_flag104_extra_time_action' ) );
+// === WIWTS FLAG 104 CONFIRM/DENY POST HOOKS END ===
 
         // 3. Handle AJAX requests for viewing/adjusting/approving (Crucial for interaction)
         // REMOVED: add_action( 'wp_ajax_wiw_fetch_timesheets', array( $this, 'handle_fetch_timesheets' ) );
@@ -823,10 +826,70 @@ $out .= '<td ' . $cell_style . ' colspan="4">'
 	. '<strong>Confirm Additional Time</strong> '
 	. '(Another <strong>' . esc_html( $extra_hours_text ) . '</strong> hours after the scheduled shift end time will become payable)'
 	. '</td>';
-$out .= '<td ' . $cell_style . '>'
-	. '<button type="button" class="wiw-btn secondary wiw-flag-104-confirm-btn" title="Placeholder">Confirm</button> '
-	. '<button type="button" class="wiw-btn secondary wiw-flag-104-deny-btn" title="Placeholder">Deny</button>'
-	. '</td>';
+// === WIWTS FLAG 104 ACTIONS CELL START ===
+			$actions_html     = '';
+			$flag104_time_id  = isset( $fg->wiw_time_id ) ? absint( $fg->wiw_time_id ) : 0;
+			$flag104_status   = 'unset';
+
+			if ( $flag104_time_id > 0 ) {
+				global $wpdb;
+
+				$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+				$is_admin      = current_user_can( 'manage_options' );
+
+				$where_sql = "WHERE wiw_time_id = %d";
+				$params    = array( $flag104_time_id );
+
+				if ( ! $is_admin ) {
+					$current_user_id = get_current_user_id();
+					$client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+					$client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
+
+					if ( $client_id !== '' ) {
+						$where_sql .= " AND location_id = %d";
+						$params[]  = absint( $client_id );
+					} else {
+						// No client scope available; do not allow rendering actions.
+						$where_sql .= " AND 1 = 0";
+					}
+				}
+
+				$sql      = "SELECT extra_time_status FROM {$table_entries} {$where_sql} LIMIT 1";
+				$prepared = $wpdb->prepare( $sql, $params );
+				$row      = $wpdb->get_row( $prepared );
+
+				if ( $row && isset( $row->extra_time_status ) && $row->extra_time_status !== '' ) {
+					$flag104_status = (string) $row->extra_time_status;
+				}
+			}
+
+			if ( $flag104_status === 'confirmed' ) {
+				$actions_html = '<button type="button" class="wiw-btn secondary" disabled style="opacity:0.6;cursor:not-allowed;">Confirmed</button>';
+			} elseif ( $flag104_status === 'denied' ) {
+				$actions_html = '<button type="button" class="wiw-btn secondary" disabled style="opacity:0.6;cursor:not-allowed;">Denied</button>';
+			} else {
+				$post_url = esc_url( admin_url( 'admin-post.php' ) );
+
+				$actions_html .= '<form method="post" action="' . $post_url . '" style="display:inline-block;margin-right:6px;">'
+					. '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
+					. '<input type="hidden" name="decision" value="confirm" />'
+					. '<input type="hidden" name="wiw_time_id" value="' . esc_attr( $flag104_time_id ) . '" />'
+					. wp_nonce_field( 'wiwts_flag104_extra_time', 'wiwts_flag104_nonce', true, false )
+					. '<button type="submit" class="wiw-btn secondary">Confirm</button>'
+					. '</form>';
+
+				$actions_html .= '<form method="post" action="' . $post_url . '" style="display:inline-block;">'
+					. '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
+					. '<input type="hidden" name="decision" value="deny" />'
+					. '<input type="hidden" name="wiw_time_id" value="' . esc_attr( $flag104_time_id ) . '" />'
+					. wp_nonce_field( 'wiwts_flag104_extra_time', 'wiwts_flag104_nonce', true, false )
+					. '<button type="submit" class="wiw-btn secondary">Deny</button>'
+					. '</form>';
+			}
+
+			$out .= '<td ' . $cell_style . '>' . $actions_html . '</td>';
+			// === WIWTS FLAG 104 ACTIONS CELL END ===
+
 $out .= '</tr>';
 
 }
@@ -1419,6 +1482,113 @@ if (!ok) {
 return $out;
 
 }
+
+// === WIWTS FLAG 104 EXTRA TIME ACTION HANDLER START ===
+/**
+ * Client UI: Handle Confirm/Deny for Flag Type 104 (extra time).
+ *
+ * Updates wp_wiw_timesheet_entries.extra_time_status:
+ *  - unset (default) -> confirmed / denied
+ * Also adjusts payable_hours to include additional_hours when confirmed.
+ */
+public function handle_flag104_extra_time_action() {
+    if ( ! is_user_logged_in() ) {
+        wp_die( 'You must be logged in to perform this action.' );
+    }
+
+    // Nonce check.
+    if ( ! isset( $_POST['wiwts_flag104_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['wiwts_flag104_nonce'] ) ), 'wiwts_flag104_extra_time' ) ) {
+        wp_die( 'Security check failed.' );
+    }
+
+    $decision    = isset( $_POST['decision'] ) ? sanitize_text_field( wp_unslash( $_POST['decision'] ) ) : '';
+    $wiw_time_id = isset( $_POST['wiw_time_id'] ) ? absint( $_POST['wiw_time_id'] ) : 0;
+
+    $redirect = wp_get_referer();
+    if ( ! $redirect ) {
+        $redirect = home_url( '/' );
+    }
+
+    if ( $wiw_time_id <= 0 || ( $decision !== 'confirm' && $decision !== 'deny' ) ) {
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    global $wpdb;
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+    $is_admin = current_user_can( 'manage_options' );
+
+    // Client scoping: clients can only act on entries for their own location/client_account_number.
+    $where_sql = "WHERE wiw_time_id = %d";
+    $params    = array( $wiw_time_id );
+
+    if ( ! $is_admin ) {
+        $current_user_id = get_current_user_id();
+        $client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+        $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
+
+        if ( $client_id === '' ) {
+            wp_safe_redirect( $redirect );
+            exit;
+        }
+
+        $where_sql .= " AND location_id = %d";
+        $params[] = absint( $client_id );
+    }
+
+    $sql      = "SELECT id, payable_hours, additional_hours, extra_time_status FROM {$table_entries} {$where_sql} LIMIT 1";
+    $prepared = $wpdb->prepare( $sql, $params );
+    $entry    = $wpdb->get_row( $prepared );
+
+    if ( ! $entry || empty( $entry->id ) ) {
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    $current_status   = isset( $entry->extra_time_status ) ? (string) $entry->extra_time_status : 'unset';
+    $payable_hours    = isset( $entry->payable_hours ) ? (float) $entry->payable_hours : 0.0;
+    $additional_hours = isset( $entry->additional_hours ) ? (float) $entry->additional_hours : 0.0;
+
+    // Compute new values robustly even if a status was already applied earlier.
+    if ( $decision === 'confirm' ) {
+        $new_status = 'confirmed';
+
+        if ( $current_status === 'confirmed' ) {
+            $new_payable = $payable_hours;
+        } else {
+            $new_payable = $payable_hours + $additional_hours;
+        }
+    } else {
+        $new_status = 'denied';
+
+        if ( $current_status === 'confirmed' ) {
+            $new_payable = max( 0, $payable_hours - $additional_hours );
+        } else {
+            $new_payable = $payable_hours;
+        }
+    }
+
+    // Normalize to 2 decimals.
+    $new_payable = round( (float) $new_payable, 2 );
+
+    $wpdb->update(
+        $table_entries,
+        array(
+            'extra_time_status' => $new_status,
+            'payable_hours'     => $new_payable,
+            'updated_at'        => current_time( 'mysql' ),
+        ),
+        array( 'id' => (int) $entry->id ),
+        array( '%s', '%f', '%s' ),
+        array( '%d' )
+    );
+
+    wp_safe_redirect( $redirect );
+    exit;
+}
+// === WIWTS FLAG 104 EXTRA TIME ACTION HANDLER END ===
+
 
 /**
  * Front-end shortcode: [wiw_timesheets_client_filter]
