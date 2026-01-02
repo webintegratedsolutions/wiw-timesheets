@@ -358,7 +358,7 @@ $daily_table_colspan = $is_admin_front ? 10 : 9;
 // Make Location + Sched. Start/End slightly wider than the other columns.
 // Column order (admin): 0 Shift Date, 1 Location, 2 Sched. Start/End, ...
 // Column order (client): 0 Shift Date, 1 Sched. Start/End, ...
-$wide_pct     = 13.0;
+$wide_pct     = 13.1;
 $wide_indices = $is_admin_front ? array( 1, 2 ) : array( 1 );
 
 $remaining_pct = 100.0 - ( $wide_pct * count( $wide_indices ) );
@@ -486,9 +486,10 @@ foreach ( $daily_rows as $dr_check ) {
 }
 
 // Week 1 heading row (ONLY if week 1 actually has rows)
-if ( $has_week1_rows && $week1_start && $week1_end ) {
+// Print Week 1 header only for client view (hide for admin front-end UI)
+if ( ! current_user_can( 'manage_options' ) && $has_week1_rows && $week1_start && $week1_end ) {
 	$out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-		$out .= '<td colspan="' . (int) $daily_table_colspan . '" style="padding:8px 10px;font-weight:600;">🗓️ Week Of: '
+	$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">🗓️ Week Of: '
 		. esc_html( $format_week_date( $week1_start ) )
 		. ' to '
 		. esc_html( $format_week_date( $week1_end ) )
@@ -504,21 +505,39 @@ if ( $current_week === 1 && $week2_start && preg_match( '/^\d{4}-\d{2}-\d{2}$/',
     $current_week = 2;
 
     // Print Week 2 header only if we actually reached a Week 2 row.
-    if ( ! $printed_week2_header && $week2_start && $week2_end ) {
-        $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-$out .= '<td colspan="' . (int) $daily_table_colspan . '" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">🗓️ Week Of: '
-	. esc_html( $format_week_date( $week2_start ) )
-	. ' to '
-	. esc_html( $format_week_date( $week2_end ) )
-	. '</td>';
-        $out .= '</tr>';
-        $printed_week2_header = true;
-    }
+// Print Week 2 header only for client view (hide for admin front-end UI).
+if ( ! $printed_week2_header && $week2_start && $week2_end ) {
+
+	// Admin front-end UI: do not print the Week Of row, but mark as handled.
+	if ( current_user_can( 'manage_options' ) ) {
+		$printed_week2_header = true;
+	} else {
+		$out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
+		$out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">🗓️ Week Of: '
+			. esc_html( $format_week_date( $week2_start ) )
+			. ' to '
+			. esc_html( $format_week_date( $week2_end ) )
+			. '</td>';
+		$out .= '</tr>';
+
+		$printed_week2_header = true;
+	}
+}
+
 }
 
         $sched_start = isset( $dr->scheduled_start ) ? (string) $dr->scheduled_start : '';
         $sched_end   = isset( $dr->scheduled_end ) ? (string) $dr->scheduled_end : '';
         $sched_start_end = $this->wiw_format_time_range_local( $sched_start, $sched_end );
+
+        // Admin front-end UI only: remove space before am/pm (e.g. "8:30 am" → "8:30am")
+        if ( current_user_can( 'manage_options' ) ) {
+            $sched_start_end = str_replace(
+                array( ' am', ' pm', ' AM', ' PM' ),
+                array( 'am', 'pm', 'AM', 'PM' ),
+                $sched_start_end
+            );
+        }
 
         $clock_in  = isset( $dr->clock_in ) ? (string) $dr->clock_in : '';
         $clock_out = isset( $dr->clock_out ) ? (string) $dr->clock_out : '';
