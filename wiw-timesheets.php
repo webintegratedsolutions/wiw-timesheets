@@ -4966,26 +4966,75 @@ if ( $new_104_status === 'active' && ( $rows_104 === 0 || $rows_104 === false ) 
 }
 
 // Same pattern for flag 107.
-// Safe reset behavior: mirror 104 status so the DB stays consistent with the extra time gating workflow.
-$new_107_status = $new_104_status;
+// Flag 107 should reopen on reset when additional time exists and has not been confirmed/denied.
+// Use LIKE '107%' because some installs store flag_type with suffix text.
+$add_hours_raw_107 = isset( $entry->additional_hours ) ? (string) $entry->additional_hours : '';
+$add_hours_107     = ( $add_hours_raw_107 === '' ) ? 0.0 : (float) $add_hours_raw_107;
 
-$rows_107 = $wpdb->update(
-	$table_flags,
-	array( 'flag_status' => $new_107_status ),
-	array(
-		'wiw_time_id' => (int) $wiw_time_id,
-		'flag_type'   => 107,
-	),
-	array( '%s' ),
-	array( '%d', '%d' )
+$extra_status_107 = '';
+if ( isset( $entry->extra_time_status ) ) {
+	$extra_status_107 = strtolower( trim( (string) $entry->extra_time_status ) );
+}
+
+// Active when additional time exists AND status is unset/empty.
+$new_107_status = ( $add_hours_107 > 0.01 && ( $extra_status_107 === '' || $extra_status_107 === 'unset' ) )
+	? 'active'
+	: 'resolved';
+
+// Update any existing 107* flag rows.
+$wpdb->query(
+	$wpdb->prepare(
+		"UPDATE {$table_flags}
+		 SET flag_status = %s
+		 WHERE wiw_time_id = %d
+		   AND flag_type LIKE %s",
+		$new_107_status,
+		(int) $wiw_time_id,
+		'107%'
+	)
 );
 
-if ( $new_107_status === 'active' && ( $rows_107 === 0 || $rows_107 === false ) ) {
+// If it should be active and no 107* row exists yet, insert a clean 107 row.
+if ( $new_107_status === 'active' ) {
 	$existing_107_id = (int) $wpdb->get_var(
 		$wpdb->prepare(
-			"SELECT id FROM {$table_flags} WHERE wiw_time_id = %d AND flag_type = %d LIMIT 1",
+			"SELECT id FROM {$table_flags}
+			 WHERE wiw_time_id = %d
+			   AND flag_type LIKE %s
+			 LIMIT 1",
 			(int) $wiw_time_id,
-			107
+			'107%'
+		)
+	);
+
+	if ( $existing_107_id <= 0 ) {
+		$now_mysql = current_time( 'mysql' );
+
+		$wpdb->insert(
+			$table_flags,
+			array(
+				'wiw_time_id'  => (int) $wiw_time_id,
+				'flag_type'    => '107',
+				'description'  => 'Additional time requires confirmation',
+				'flag_status'  => 'active',
+				'created_at'   => $now_mysql,
+				'updated_at'   => $now_mysql,
+			),
+			array( '%d', '%s', '%s', '%s', '%s', '%s' )
+		);
+	}
+}
+
+// If it should be active and no 107* row exists yet, insert a clean 107 row.
+if ( $new_107_status === 'active' ) {
+	$existing_107_id = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT id FROM {$table_flags}
+			 WHERE wiw_time_id = %d
+			   AND flag_type LIKE %s
+			 LIMIT 1",
+			(int) $wiw_time_id,
+			'107%'
 		)
 	);
 
