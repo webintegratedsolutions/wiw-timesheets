@@ -4763,7 +4763,7 @@ if ( ! empty( $wiw_time_id ) ) {
 		array( '%d', '%d' )
 	);
     
-    // Same pattern for flag 105 (missing clock-in).
+// Same pattern for flag 105 (missing clock-in).
 $clock_in_raw  = is_string( $new_clock_in_db ) ? trim( (string) $new_clock_in_db ) : '';
 $is_missing_in = ( $clock_in_raw === '' || $clock_in_raw === '0000-00-00 00:00:00' );
 
@@ -4780,6 +4780,68 @@ $wpdb->update(
 	array( '%d', '%d' )
 );
 
+}
+
+// Same pattern for flag 103 (clocked in more than 15 minutes after scheduled start).
+$clock_in_raw_103     = is_string( $new_clock_in_db ) ? trim( (string) $new_clock_in_db ) : '';
+$sched_start_raw_103  = isset( $entry->scheduled_start ) ? trim( (string) $entry->scheduled_start ) : '';
+
+$is_missing_in_103    = ( $clock_in_raw_103 === '' || $clock_in_raw_103 === '0000-00-00 00:00:00' );
+$is_missing_start_103 = ( $sched_start_raw_103 === '' || $sched_start_raw_103 === '0000-00-00 00:00:00' );
+
+$new_103_status = 'resolved';
+
+if ( ! $is_missing_in_103 && ! $is_missing_start_103 ) {
+	$clock_in_ts_103    = strtotime( $clock_in_raw_103 );
+	$sched_start_ts_103 = strtotime( $sched_start_raw_103 );
+
+	// Only evaluate if both parse cleanly.
+	if ( $clock_in_ts_103 !== false && $sched_start_ts_103 !== false ) {
+		$threshold_ts_103 = $sched_start_ts_103 + ( 15 * 60 );
+
+		// "More than 15 minutes after" => strictly greater than scheduled_start + 15min.
+		$new_103_status = ( $clock_in_ts_103 > $threshold_ts_103 ) ? 'active' : 'resolved';
+	}
+}
+
+// Update existing 103 flag row if present.
+$rows_103 = $wpdb->update(
+	$table_flags,
+	array( 'flag_status' => $new_103_status ),
+	array(
+		'wiw_time_id' => (int) $wiw_time_id,
+		'flag_type'   => 103,
+	),
+	array( '%s' ),
+	array( '%d', '%d' )
+);
+
+// If it should be active and no row exists yet, insert it (sync normally creates it, but be safe).
+if ( $new_103_status === 'active' && ( $rows_103 === 0 || $rows_103 === false ) ) {
+	$existing_103_id = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT id FROM {$table_flags} WHERE wiw_time_id = %d AND flag_type = %d LIMIT 1",
+			(int) $wiw_time_id,
+			103
+		)
+	);
+
+	if ( $existing_103_id <= 0 ) {
+		$now_mysql = current_time( 'mysql' );
+
+		$wpdb->insert(
+			$table_flags,
+			array(
+				'wiw_time_id' => (int) $wiw_time_id,
+				'flag_type'   => '103',
+				'description' => 'Clocked in more than 15 minutes after scheduled start',
+				'flag_status' => 'active',
+				'created_at'  => $now_mysql,
+				'updated_at'  => $now_mysql,
+			),
+			array( '%d', '%s', '%s', '%s', '%s', '%s' )
+		);
+	}
 }
 
 // Same pattern for flag 102 (clocked out before scheduled end).
