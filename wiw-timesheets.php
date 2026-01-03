@@ -874,23 +874,36 @@ if ( strtolower( $status_raw ) === 'resolved' ) {
 // Special follow-up row for flag 104 (Confirm Additional Hours).
 if ( (string) $type === '104' ) {
 
-	$extra_hours_text = 'N/A';
+	$extra_hours_text        = 'N/A';
+	$show_flag104_followup   = false;
 
 	if ( ! empty( $fg->scheduled_end ) && ! empty( $fg->clock_out ) ) {
 		try {
-$tz = wp_timezone();
-$scheduled_end_dt = new DateTime( (string) $fg->scheduled_end, $tz );
-$clock_out_dt     = new DateTime( (string) $fg->clock_out, $tz );
+			$tz = wp_timezone();
+			$scheduled_end_dt = new DateTime( (string) $fg->scheduled_end, $tz );
+			$clock_out_dt     = new DateTime( (string) $fg->clock_out, $tz );
 
-			if ( $clock_out_dt > $scheduled_end_dt ) {
-				$diff_seconds = $clock_out_dt->getTimestamp() - $scheduled_end_dt->getTimestamp();
-				$diff_hours   = round( $diff_seconds / 3600, 2 );
-				$extra_hours_text = number_format( $diff_hours, 2 );
+			$diff_seconds = $clock_out_dt->getTimestamp() - $scheduled_end_dt->getTimestamp();
+
+			// Only show this follow-up row if clock-out is more than 15 minutes after scheduled end.
+			if ( $diff_seconds > 0 ) {
+				$diff_minutes = (int) floor( $diff_seconds / 60 );
+
+				if ( $diff_minutes > 15 ) {
+					$diff_hours        = round( $diff_seconds / 3600, 2 );
+					$extra_hours_text  = number_format( $diff_hours, 2 );
+					$show_flag104_followup = true;
+				}
 			}
 		} catch ( Exception $e ) {
-			// Leave as N/A if parsing fails
+			// Leave hidden if parsing fails
 		}
 	}
+
+	// Gate: do not render the special follow-up row unless threshold is met.
+	if ( ! $show_flag104_followup ) {
+		// Do nothing (skip rendering this special row).
+	} else {
 
 // === WIWTS FLAG 104 ROW START ===
 $actions_html     = '';
@@ -924,11 +937,11 @@ if ( $flag104_time_id > 0 ) {
 // Change wording based on confirmed status (UI only).
 // Change wording based on additional time status (UI only).
 if ( $flag104_status === 'confirmed' ) {
-	$payable_tense = 'became payable';
+	$payable_tense = 'became payable.';
 } elseif ( $flag104_status === 'denied' ) {
 	$payable_tense = 'were denied.';
 } else {
-	$payable_tense = 'will become payable';
+	$payable_tense = 'will become payable.';
 }
 
 $out .= '<tr class="wiw-flag-followup wiw-flag-followup-104">';
@@ -968,6 +981,8 @@ $out .= '<td ' . $cell_style . '>' . $actions_html . '</td>';
 
 $out .= '</tr>';
 // === WIWTS FLAG 104 ROW END ===
+
+} // <-- add this line to close the new "else {"
 
 }
 
