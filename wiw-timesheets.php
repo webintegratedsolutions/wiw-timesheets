@@ -117,15 +117,7 @@ public function render_client_ui() {
     $client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
     $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
 
-    // Always show the client account number for now (debug).
-        // Role indicator shown at the top of the client UI output.
-    $current_user_role_label = 'Client';
-    if ( current_user_can( 'manage_options' ) ) {
-        $current_user_role_label = 'Administrator';
-    }
-
     $out  = '<div class="wiw-client-timesheets">';
-    $out .= '<div class="wiw-client-role-indicator" style="margin:0 0 10px 0;font-size:13px;color:#555;">Logged in as: <strong>' . esc_html( $current_user_role_label ) . '</strong></div>';
     $out .= '<div id="wiwts-client-ajax" data-ajax-url="' . esc_attr( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '" data-nonce-approve="' . esc_attr( wp_create_nonce( 'wiw_local_approve_entry' ) ) . '" data-nonce-reset="' . esc_attr( wp_create_nonce( 'wiw_client_reset_entry_from_api' ) ) . '"></div>';
 
     if ( $client_id === '' ) {
