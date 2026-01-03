@@ -906,12 +906,26 @@ if ( preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $newv_norm ) ) {
         	$out .= '</div>';
 $out .= '</details>';
 }
+
 // Expandable flags (per-timesheet, shown under each daily table when that timesheet is open).
 $flags = $this->get_scoped_flags_for_timesheet( $client_id, absint( $timesheet_id_for_period ) );
 
-$has_unresolved_flags = false;
-if ( ! empty( $flags ) ) {
+// Build the set of flags visible in this UI.
+// Clients do not see flag_type 109 or 107 (admins still see them).
+$flags_visible = array();
+if ( is_array( $flags ) ) {
 	foreach ( $flags as $fg ) {
+		$flag_type_raw = isset( $fg->flag_type ) ? trim( (string) $fg->flag_type ) : '';
+		if ( ! current_user_can( 'manage_options' ) && preg_match( '/^(109|107)\b/', $flag_type_raw ) ) {
+			continue;
+		}
+		$flags_visible[] = $fg;
+	}
+}
+
+$has_unresolved_flags = false;
+if ( ! empty( $flags_visible ) ) {
+	foreach ( $flags_visible as $fg ) {
 		$status = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
 		if ( $status !== 'resolved' ) {
 			$has_unresolved_flags = true;
@@ -920,14 +934,14 @@ if ( ! empty( $flags ) ) {
 	}
 }
 
-$flag_icon = $has_unresolved_flags ? '🟠' : '🟢';
-$flag_count = is_array( $flags ) ? count( $flags ) : 0;
+$flag_icon  = $has_unresolved_flags ? '🟠' : '🟢';
+$flag_count = is_array( $flags_visible ) ? count( $flags_visible ) : 0;
 
 $out .= '<details class="wiw-flags" style="margin:12px 0 22px;">';
 $out .= '<summary>' . $flag_icon . ' Click to Expand: Flags and Additional Time</summary>';
 $out .= '<div style="padding-top:8px;">';
 
-if ( empty( $flags ) ) {
+if ( empty( $flags_visible ) ) {
 	$out .= '<p class="description" style="margin:0;">No flags found for this timesheet.</p>';
 } else {
 	// Border wrapper (requested).
@@ -942,14 +956,7 @@ if ( empty( $flags ) ) {
 	$out .= '</tr></thead>';
 	$out .= '<tbody>';
 
-	foreach ( $flags as $fg ) {
-
-	// Clients should not see flag_type 109 or 107 (admins still see them).
-	$flag_type_raw = isset( $fg->flag_type ) ? trim( (string) $fg->flag_type ) : '';
-	if ( ! current_user_can( 'manage_options' ) && preg_match( '/^(109|107)\b/', $flag_type_raw ) ) {
-		continue;
-	}
-
+	foreach ( $flags_visible as $fg ) {
 
 		$type       = isset( $fg->flag_type ) ? (string) $fg->flag_type : '';
 		$shift_date = isset( $fg->shift_date ) ? (string) $fg->shift_date : '';
