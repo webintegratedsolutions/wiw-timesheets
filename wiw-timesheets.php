@@ -148,14 +148,62 @@ $timesheets = $this->get_scoped_local_timesheets( $client_id, $filter_status );
 
 // Defaults
 $employee_label   = 'All Employees';
-$pay_period_label = 'All Pay Periods';
+$pay_period_label = 'All Periods';
 
-// Determine employee label from data
+// Determine employee label (must reflect selected employee even when result count is 0)
 if ( $filter_emp !== '' ) {
+
+    $employee_label = 'Selected Employee';
+
+    // First try to grab the name from any loaded timesheets (fast path).
     foreach ( $timesheets as $ts_row ) {
         if ( isset( $ts_row->employee_id ) && (string) $ts_row->employee_id === (string) $filter_emp ) {
-            $employee_label = $ts_row->employee_name ?? 'Selected Employee';
+            $employee_label = $ts_row->employee_name ?? $employee_label;
             break;
+        }
+    }
+
+    // If still not resolved (common when status filter yields 0 rows), look it up from the DB.
+    if ( $employee_label === 'Selected Employee' ) {
+
+        global $wpdb;
+
+        $table_ts      = $wpdb->prefix . 'wiw_timesheets';
+        $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+        if ( $is_frontend_admin ) {
+
+            $db_name = $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT employee_name
+                     FROM {$table_ts}
+                     WHERE employee_id = %s
+                     ORDER BY id DESC
+                     LIMIT 1",
+                    (string) $filter_emp
+                )
+            );
+
+        } else {
+
+            // Client scoping: ensure the employee name comes from a timesheet that has entries for this client location.
+            $db_name = $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT ts.employee_name
+                     FROM {$table_ts} ts
+                     INNER JOIN {$table_entries} e ON e.timesheet_id = ts.id
+                     WHERE ts.employee_id = %s
+                       AND e.location_id = %d
+                     ORDER BY ts.id DESC
+                     LIMIT 1",
+                    (string) $filter_emp,
+                    absint( $client_id )
+                )
+            );
+        }
+
+        if ( is_string( $db_name ) && $db_name !== '' ) {
+            $employee_label = $db_name;
         }
     }
 }
@@ -168,35 +216,90 @@ if ( $filter_period !== '' ) {
     }
 }
 
-// Count timesheets AFTER filters
-$filtered_count = 0;
-foreach ( $timesheets as $ts_row ) {
-    $row_emp_id = isset( $ts_row->employee_id ) ? (string) $ts_row->employee_id : '';
-    $row_ws     = isset( $ts_row->week_start_date ) ? (string) $ts_row->week_start_date : '';
-    $row_we     = isset( $ts_row->week_end_date ) ? (string) $ts_row->week_end_date : '';
-    $row_period = $row_ws . '|' . $row_we;
+// Count TIMESHEET ENTRY records AFTER filters (wp_wiw_timesheet_entries.status, employee, period scope)
+global $wpdb;
 
-    if ( $filter_emp !== '' && $row_emp_id !== (string) $filter_emp ) {
-        continue;
-    }
-    if ( $filter_period !== '' && $row_period !== (string) $filter_period ) {
-        continue;
-    }
-    $filtered_count++;
+$table_ts      = $wpdb->prefix . 'wiw_timesheets';
+$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+$where   = array();
+$params  = array();
+
+// Join condition
+$where[] = "e.timesheet_id = ts.id";
+
+// Status filter (applies to entries table)
+if ( $filter_status !== '' ) {
+    $where[]  = "e.status = %s";
+    $params[] = (string) $filter_status;
 }
 
-$timesheet_word = ( $filtered_count === 1 ) ? 'timesheet' : 'timesheets';
+// Client scoping: entries.location_id must match the client id (admins see all)
+if ( ! $is_frontend_admin ) {
+    $where[]  = "e.location_id = %d";
+    $params[] = absint( $client_id );
+}
+
+// Employee filter (comes from timesheets table)
+if ( $filter_emp !== '' ) {
+    $where[]  = "ts.employee_id = %s";
+    $params[] = (string) $filter_emp;
+}
+
+// Pay Period filter (admin front-end only; period is week_start|week_end)
+if ( $is_frontend_admin && $filter_period !== '' && strpos( $filter_period, '|' ) !== false ) {
+    list( $p_start, $p_end ) = array_map( 'trim', explode( '|', (string) $filter_period, 2 ) );
+
+    if ( $p_start !== '' && $p_end !== '' ) {
+        $where[]  = "ts.week_start_date = %s";
+        $params[] = $p_start;
+
+        $where[]  = "ts.week_end_date = %s";
+        $params[] = $p_end;
+    }
+}
+
+$where_sql = implode( ' AND ', $where );
+
+$sql = "
+    SELECT COUNT(*) 
+    FROM {$table_entries} e
+    INNER JOIN {$table_ts} ts ON e.timesheet_id = ts.id
+    WHERE {$where_sql}
+";
+
+// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+$records_count = (int) $wpdb->get_var( $wpdb->prepare( $sql, $params ) );
+
+// Build labels for message based on filters
+$status_label = '';
+if ( $filter_status === 'pending' ) {
+    $status_label = 'pending ';
+} elseif ( $filter_status === 'approved' ) {
+    $status_label = 'approved ';
+} elseif ( $filter_status === 'archived' ) {
+    $status_label = 'archived ';
+} else {
+    $status_label = ''; // All Records
+}
+
+$record_word = ( $records_count === 1 ) ? 'record' : 'records';
+$verb_word   = ( $records_count === 1 ) ? 'was' : 'were';
+
+$msg  = 'A total of ';
+$msg .= '<strong>' . esc_html( (string) $records_count ) . '</strong> ';
+$msg .= esc_html( $status_label . 'timesheet ' . $record_word ) . ' ';
+$msg .= esc_html( $verb_word ) . ' found for ';
+$msg .= esc_html( $employee_label );
+
+if ( $is_frontend_admin ) {
+    $msg .= ' and ' . esc_html( $pay_period_label );
+}
+
+$msg .= '.';
 
 // Output summary
-$out .= '<p class="wiw-muted" style="margin:6px 0 12px; font-size:13px; font-weight:normal;">'
-    . 'Total of '
-    . '<strong>' . esc_html( $filtered_count . ' ' . $timesheet_word . ' found' ) . '</strong>'
-    . ' for '
-    . esc_html( $employee_label )
-    . ' and '
-    . esc_html( $pay_period_label )
-    . '.'
-    . '</p>';
+$out .= '<p class="wiw-muted" style="margin:6px 0 12px; font-size:13px; font-weight:normal;">' . $msg . '</p>';
 
     if ( empty( $timesheets ) ) {
         $out .= '<p>No timesheets found for your account.</p>';
