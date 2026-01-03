@@ -137,8 +137,12 @@ public function render_client_ui() {
 $timesheets = $this->get_scoped_local_timesheets( $client_id );
 
 // Filter-aware summary (count reflects filtered results)
-$filter_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
-$filter_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
+$filter_emp = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+
+// Only allow Pay Period filtering for frontend admins.
+$filter_period = current_user_can( 'manage_options' ) && isset( $_GET['wiw_period'] )
+    ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) )
+    : '';
 
 // Defaults
 $employee_label   = 'All Employees';
@@ -1706,7 +1710,13 @@ public function render_client_filter_ui() {
 
 // Current selections from query string (used to dynamically repopulate options).
 $selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
-$selected_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
+$is_frontend_admin = current_user_can( 'manage_options' );
+
+// Current selections from query string (used to dynamically repopulate options).
+$selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+$selected_period = $is_frontend_admin && isset( $_GET['wiw_period'] )
+    ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) )
+    : '';
 
 // Build dynamic option sets based on selection.
 // - If employee selected: show only periods that exist for that employee.
@@ -1780,18 +1790,11 @@ foreach ( $timesheets as $ts ) {
     $out .= '</select>';
     $out .= '</div>';
 
+if ( $is_frontend_admin ) {
     $out .= '<div>';
-if ( current_user_can( 'manage_options' ) ) {
     $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Pay Period</label>';
-} else {
-    $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Shifts from:</label>';
-}
     $out .= '<select id="wiw_period" name="wiw_period">';
-if ( current_user_can( 'manage_options' ) ) {
     $out .= '<option value="">All Pay Periods</option>';
-} else {
-    $out .= '<option value="">Anytime</option>';
-}
     foreach ( $periods as $pkey => $plabel ) {
         $out .= '<option value="' . esc_attr( $pkey ) . '"' . selected( $selected_period, $pkey, false ) . '>'
             . esc_html( $plabel )
@@ -1799,10 +1802,12 @@ if ( current_user_can( 'manage_options' ) ) {
     }
     $out .= '</select>';
     $out .= '</div>';
+}
 
     $out .= '<div>';
     $out .= '<button type="submit" class="wiw-btn">Filter</button> ';
-    $out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( array( 'wiw_emp', 'wiw_period' ), $action_url ) ) . '">Reset</a>';
+$reset_args = $is_frontend_admin ? array( 'wiw_emp', 'wiw_period' ) : array( 'wiw_emp' );
+$out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( $reset_args, $action_url ) ) . '">Reset</a>';
     $out .= '</div>';
 
     $out .= '</form>';
