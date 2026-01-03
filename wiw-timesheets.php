@@ -1708,12 +1708,15 @@ public function render_client_filter_ui() {
         return '';
     }
 
-// Current selections from query string (used to dynamically repopulate options).
-$selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+// Determine if user is frontend admin (can see Pay Period filter).
 $is_frontend_admin = current_user_can( 'manage_options' );
 
 // Current selections from query string (used to dynamically repopulate options).
-$selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+$selected_status = isset( $_GET['wiw_status'] )
+    ? sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) )
+    : 'pending';
+    $selected_emp    = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
+$selected_period = isset( $_GET['wiw_period'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) ) : '';
 $selected_period = $is_frontend_admin && isset( $_GET['wiw_period'] )
     ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) )
     : '';
@@ -1759,8 +1762,7 @@ foreach ( $timesheets as $ts ) {
         if ( $selected_emp === '' || $eid === $selected_emp ) {
             $periods[ $pkey ] = $plabel;
         }
-    }
-}
+    }}
 
     // Sort options for nicer UX.
     asort( $employees, SORT_NATURAL | SORT_FLAG_CASE );
@@ -1777,11 +1779,21 @@ foreach ( $timesheets as $ts ) {
 
     $out  = '<div class="wiw-client-timesheets" style="margin-bottom:14px;">';
     $out .= '<form method="get" action="' . esc_url( $action_url ) . '" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">';
+// Timesheet Records filter (UI only for now; functionality will be added in a later step).
+$out .= '<div>';
+$out .= '<label for="wiw_status" style="display:block;font-weight:600;margin-bottom:4px;">Timesheet Records:</label>';
+$out .= '<select id="wiw_status" name="wiw_status" style="min-width:200px;">';
+$out .= '<option value="pending"' . selected( $selected_status, 'pending', false ) . '>Pending</option>';
+$out .= '<option value="approved"' . selected( $selected_status, 'approved', false ) . '>Approved</option>';
+$out .= '<option value="archived"' . selected( $selected_status, 'archived', false ) . '>Archived</option>';
+$out .= '<option value=""' . selected( $selected_status, '', false ) . '>All Records</option>';
+$out .= '</select>';
+$out .= '</div>';
 
     $out .= '<div>';
     $out .= '<label for="wiw_emp" style="display:block;font-weight:600;margin-bottom:4px;">Employee</label>';
     $out .= '<select id="wiw_emp" name="wiw_emp">';
-    $out .= '<option value="">All Employees</option>';
+    $out .= '<option value="">All Employees:</option>';
     foreach ( $employees as $eid => $ename ) {
         $out .= '<option value="' . esc_attr( $eid ) . '"' . selected( $selected_emp, $eid, false ) . '>'
             . esc_html( $ename )
@@ -1794,7 +1806,7 @@ if ( $is_frontend_admin ) {
     $out .= '<div>';
     $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Pay Period</label>';
     $out .= '<select id="wiw_period" name="wiw_period">';
-    $out .= '<option value="">All Pay Periods</option>';
+    $out .= '<option value="">All Pay Periods:</option>';
     foreach ( $periods as $pkey => $plabel ) {
         $out .= '<option value="' . esc_attr( $pkey ) . '"' . selected( $selected_period, $pkey, false ) . '>'
             . esc_html( $plabel )
@@ -1806,8 +1818,12 @@ if ( $is_frontend_admin ) {
 
     $out .= '<div>';
     $out .= '<button type="submit" class="wiw-btn">Filter</button> ';
-$reset_args = $is_frontend_admin ? array( 'wiw_emp', 'wiw_period' ) : array( 'wiw_emp' );
+$reset_args = $is_frontend_admin
+    ? array( 'wiw_status', 'wiw_emp', 'wiw_period' )
+    : array( 'wiw_status', 'wiw_emp' );
+
 $out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( $reset_args, $action_url ) ) . '">Reset</a>';
+
     $out .= '</div>';
 
     $out .= '</form>';
