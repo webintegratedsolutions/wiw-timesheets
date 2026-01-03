@@ -892,77 +892,82 @@ $clock_out_dt     = new DateTime( (string) $fg->clock_out, $tz );
 		}
 	}
 
+// === WIWTS FLAG 104 ROW START ===
+$actions_html     = '';
+$flag104_time_id  = isset( $fg->wiw_time_id ) ? absint( $fg->wiw_time_id ) : 0;
+$flag104_status   = 'unset';
+
+if ( $flag104_time_id > 0 ) {
+	$where_sql = "WHERE wiw_time_id = %d";
+	$params    = array( $flag104_time_id );
+
+	if ( $current_user_role_label === 'Client' ) {
+		// Client scope: only allow action rows for their own location.
+		if ( isset( $client_id ) && absint( $client_id ) > 0 ) {
+			$where_sql .= " AND location_id = %d";
+			$params[]  = absint( $client_id );
+		} else {
+			// No client scope available; do not allow rendering actions.
+			$where_sql .= " AND 1 = 0";
+		}
+	}
+
+	$sql      = "SELECT extra_time_status FROM {$table_entries} {$where_sql} LIMIT 1";
+	$prepared = $wpdb->prepare( $sql, $params );
+	$row      = $wpdb->get_row( $prepared );
+
+	if ( $row && isset( $row->extra_time_status ) && $row->extra_time_status !== '' ) {
+		$flag104_status = (string) $row->extra_time_status;
+	}
+}
+
+// Change wording based on confirmed status (UI only).
+// Change wording based on additional time status (UI only).
+if ( $flag104_status === 'confirmed' ) {
+	$payable_tense = 'became payable';
+} elseif ( $flag104_status === 'denied' ) {
+	$payable_tense = 'were denied.';
+} else {
+	$payable_tense = 'will become payable';
+}
+
 $out .= '<tr class="wiw-flag-followup wiw-flag-followup-104">';
 $out .= '<td ' . $cell_style . ' colspan="4">'
 	. '<span class="wiw-flag-icon" aria-hidden="true" style="margin-right:6px;">⏱️</span>'
 	. '<strong>Confirm Additional Time</strong> '
-	. '(Another <strong>' . esc_html( $extra_hours_text ) . '</strong> hours after the scheduled shift end time will become payable)'
+	. '(Another <strong>' . esc_html( $extra_hours_text ) . '</strong> hours after the scheduled shift end time ' . $payable_tense . ')'
 	. '</td>';
+
 // === WIWTS FLAG 104 ACTIONS CELL START ===
-			$actions_html     = '';
-			$flag104_time_id  = isset( $fg->wiw_time_id ) ? absint( $fg->wiw_time_id ) : 0;
-			$flag104_status   = 'unset';
+if ( $flag104_status === 'confirmed' ) {
+	$actions_html = '<button type="button" class="wiw-btn secondary" disabled="disabled" style="opacity:0.6;cursor:not-allowed;">Confirmed</button>';
+} elseif ( $flag104_status === 'denied' ) {
+	$actions_html = '<button type="button" class="wiw-btn secondary" disabled="disabled" style="opacity:0.6;cursor:not-allowed;">Denied</button>';
+} else {
+	$post_url = esc_url( admin_url( 'admin-post.php' ) );
 
-			if ( $flag104_time_id > 0 ) {
-				global $wpdb;
+	$actions_html .= '<form method="post" action="' . $post_url . '" style="display:inline-block;margin-right:6px;" onsubmit="return confirm(\'Are you sure you want to confirm this additional time?\');">'
+		. '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
+		. '<input type="hidden" name="decision" value="confirm" />'
+		. '<input type="hidden" name="wiw_time_id" value="' . esc_attr( $flag104_time_id ) . '" />'
+		. wp_nonce_field( 'wiwts_flag104_extra_time', 'wiwts_flag104_nonce', true, false )
+		. '<button type="submit" class="wiw-btn secondary">Confirm</button>'
+		. '</form>';
 
-				$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
-				$is_admin      = current_user_can( 'manage_options' );
+	$actions_html .= '<form method="post" action="' . $post_url . '" style="display:inline-block;" onsubmit="return confirm(\'Are you sure you want to deny this additional time?\');">'
+		. '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
+		. '<input type="hidden" name="decision" value="deny" />'
+		. '<input type="hidden" name="wiw_time_id" value="' . esc_attr( $flag104_time_id ) . '" />'
+		. wp_nonce_field( 'wiwts_flag104_extra_time', 'wiwts_flag104_nonce', true, false )
+		. '<button type="submit" class="wiw-btn secondary">Deny</button>'
+		. '</form>';
+}
 
-				$where_sql = "WHERE wiw_time_id = %d";
-				$params    = array( $flag104_time_id );
-
-				if ( ! $is_admin ) {
-					$current_user_id = get_current_user_id();
-					$client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
-					$client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
-
-					if ( $client_id !== '' ) {
-						$where_sql .= " AND location_id = %d";
-						$params[]  = absint( $client_id );
-					} else {
-						// No client scope available; do not allow rendering actions.
-						$where_sql .= " AND 1 = 0";
-					}
-				}
-
-				$sql      = "SELECT extra_time_status FROM {$table_entries} {$where_sql} LIMIT 1";
-				$prepared = $wpdb->prepare( $sql, $params );
-				$row      = $wpdb->get_row( $prepared );
-
-				if ( $row && isset( $row->extra_time_status ) && $row->extra_time_status !== '' ) {
-					$flag104_status = (string) $row->extra_time_status;
-				}
-			}
-
-			if ( $flag104_status === 'confirmed' ) {
-				$actions_html = '<button type="button" class="wiw-btn secondary" disabled style="opacity:0.6;cursor:not-allowed;">Confirmed</button>';
-			} elseif ( $flag104_status === 'denied' ) {
-				$actions_html = '<button type="button" class="wiw-btn secondary" disabled style="opacity:0.6;cursor:not-allowed;">Denied</button>';
-			} else {
-				$post_url = esc_url( admin_url( 'admin-post.php' ) );
-
-                $actions_html .= '<form method="post" action="' . $post_url . '" style="display:inline-block;margin-right:6px;" onsubmit="return confirm(\'Are you sure you want to confirm this additional time?\');">'
-					. '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
-					. '<input type="hidden" name="decision" value="confirm" />'
-					. '<input type="hidden" name="wiw_time_id" value="' . esc_attr( $flag104_time_id ) . '" />'
-					. wp_nonce_field( 'wiwts_flag104_extra_time', 'wiwts_flag104_nonce', true, false )
-					. '<button type="submit" class="wiw-btn secondary">Confirm</button>'
-					. '</form>';
-
-				$actions_html .= '<form method="post" action="' . $post_url . '" style="display:inline-block;">'
-					. '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
-					. '<input type="hidden" name="decision" value="deny" />'
-					. '<input type="hidden" name="wiw_time_id" value="' . esc_attr( $flag104_time_id ) . '" />'
-					. wp_nonce_field( 'wiwts_flag104_extra_time', 'wiwts_flag104_nonce', true, false )
-					. '<button type="submit" class="wiw-btn secondary">Deny</button>'
-					. '</form>';
-			}
-
-			$out .= '<td ' . $cell_style . '>' . $actions_html . '</td>';
-			// === WIWTS FLAG 104 ACTIONS CELL END ===
+$out .= '<td ' . $cell_style . '>' . $actions_html . '</td>';
+// === WIWTS FLAG 104 ACTIONS CELL END ===
 
 $out .= '</tr>';
+// === WIWTS FLAG 104 ROW END ===
 
 }
 
