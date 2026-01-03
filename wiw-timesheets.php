@@ -1552,11 +1552,11 @@ if (!ok) {
     return;
   }
 
-  var newTotal = (resp && resp.data && resp.data.total_clocked_hours !== undefined)
-    ? resp.data.total_clocked_hours
+  var newPayable = (resp && resp.data && resp.data.payable_hours !== undefined)
+    ? resp.data.payable_hours
     : "";
 
-  alert("Saved successfully.\n\nNew Total Clocked Hours: " + newTotal);
+  alert("Saved successfully.\n\nUpdated Payable Hrs: " + newPayable);
 
   window.location.reload();
 })
@@ -3789,6 +3789,7 @@ if ( $old_break !== $new_break ) {
 	wp_send_json_success(
 		array(
 			'message'             => 'Saved.',
+			'payable_hours'       => (float) round( $payable_hours, 2 ),
 			'total_clocked_hours' => (float) round( $total_clocked, 2 ),
 		)
 	);
