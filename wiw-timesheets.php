@@ -4904,6 +4904,161 @@ if ( $new_102_status === 'active' && ( $rows_102 === 0 || $rows_102 === false ) 
 	}
 }
 
+// Same pattern for flag 104 (clocked out more than 15 minutes after scheduled end).
+$clock_out_raw_104   = is_string( $new_clock_out_db ) ? trim( (string) $new_clock_out_db ) : '';
+$sched_end_raw_104   = isset( $entry->scheduled_end ) ? trim( (string) $entry->scheduled_end ) : '';
+
+$is_missing_out_104  = ( $clock_out_raw_104 === '' || $clock_out_raw_104 === '0000-00-00 00:00:00' );
+$is_missing_end_104  = ( $sched_end_raw_104 === '' || $sched_end_raw_104 === '0000-00-00 00:00:00' );
+
+$new_104_status = 'resolved';
+
+if ( ! $is_missing_out_104 && ! $is_missing_end_104 ) {
+	$clock_out_ts_104 = strtotime( $clock_out_raw_104 );
+	$sched_end_ts_104 = strtotime( $sched_end_raw_104 );
+
+	if ( $clock_out_ts_104 !== false && $sched_end_ts_104 !== false ) {
+		$threshold_ts_104 = $sched_end_ts_104 + ( 15 * 60 );
+
+		// "More than 15 minutes after scheduled end" => strictly greater than scheduled_end + 15min.
+		$new_104_status = ( $clock_out_ts_104 > $threshold_ts_104 ) ? 'active' : 'resolved';
+	}
+}
+
+// Update existing 104 flag if present.
+$rows_104 = $wpdb->update(
+	$table_flags,
+	array( 'flag_status' => $new_104_status ),
+	array(
+		'wiw_time_id' => (int) $wiw_time_id,
+		'flag_type'   => 104,
+	),
+	array( '%s' ),
+	array( '%d', '%d' )
+);
+
+// If it should be active and no row exists yet, insert it (sync normally creates it, but be safe).
+if ( $new_104_status === 'active' && ( $rows_104 === 0 || $rows_104 === false ) ) {
+	$existing_104_id = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT id FROM {$table_flags} WHERE wiw_time_id = %d AND flag_type = %d LIMIT 1",
+			(int) $wiw_time_id,
+			104
+		)
+	);
+
+	if ( $existing_104_id <= 0 ) {
+		$now_mysql = current_time( 'mysql' );
+
+		$wpdb->insert(
+			$table_flags,
+			array(
+				'wiw_time_id'  => (int) $wiw_time_id,
+				'flag_type'    => '104',
+				'description'  => 'Clocked out more than 15 minutes after scheduled end',
+				'flag_status'  => 'active',
+				'created_at'   => $now_mysql,
+				'updated_at'   => $now_mysql,
+			),
+			array( '%d', '%s', '%s', '%s', '%s', '%s' )
+		);
+	}
+}
+
+// Same pattern for flag 107.
+// Safe reset behavior: mirror 104 status so the DB stays consistent with the extra time gating workflow.
+$new_107_status = $new_104_status;
+
+$rows_107 = $wpdb->update(
+	$table_flags,
+	array( 'flag_status' => $new_107_status ),
+	array(
+		'wiw_time_id' => (int) $wiw_time_id,
+		'flag_type'   => 107,
+	),
+	array( '%s' ),
+	array( '%d', '%d' )
+);
+
+if ( $new_107_status === 'active' && ( $rows_107 === 0 || $rows_107 === false ) ) {
+	$existing_107_id = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT id FROM {$table_flags} WHERE wiw_time_id = %d AND flag_type = %d LIMIT 1",
+			(int) $wiw_time_id,
+			107
+		)
+	);
+
+	if ( $existing_107_id <= 0 ) {
+		$now_mysql = current_time( 'mysql' );
+
+		$wpdb->insert(
+			$table_flags,
+			array(
+				'wiw_time_id'  => (int) $wiw_time_id,
+				'flag_type'    => '107',
+				'description'  => 'Additional time requires confirmation',
+				'flag_status'  => 'active',
+				'created_at'   => $now_mysql,
+				'updated_at'   => $now_mysql,
+			),
+			array( '%d', '%s', '%s', '%s', '%s', '%s' )
+		);
+	}
+}
+
+// Same pattern for flag 109 (scheduled hours do not match payable hours).
+$sh_raw_109 = isset( $entry->scheduled_hours ) ? (string) $entry->scheduled_hours : '';
+$ph_raw_109 = isset( $entry->payable_hours ) ? (string) $entry->payable_hours : '';
+
+$sh_109 = ( $sh_raw_109 === '' ) ? null : (float) $sh_raw_109;
+$ph_109 = ( $ph_raw_109 === '' ) ? null : (float) $ph_raw_109;
+
+$new_109_status = 'resolved';
+
+if ( $sh_109 !== null && $ph_109 !== null ) {
+	// Compare at 2dp to avoid float noise.
+	$new_109_status = ( round( $sh_109, 2 ) !== round( $ph_109, 2 ) ) ? 'active' : 'resolved';
+}
+
+$rows_109 = $wpdb->update(
+	$table_flags,
+	array( 'flag_status' => $new_109_status ),
+	array(
+		'wiw_time_id' => (int) $wiw_time_id,
+		'flag_type'   => 109,
+	),
+	array( '%s' ),
+	array( '%d', '%d' )
+);
+
+if ( $new_109_status === 'active' && ( $rows_109 === 0 || $rows_109 === false ) ) {
+	$existing_109_id = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT id FROM {$table_flags} WHERE wiw_time_id = %d AND flag_type = %d LIMIT 1",
+			(int) $wiw_time_id,
+			109
+		)
+	);
+
+	if ( $existing_109_id <= 0 ) {
+		$now_mysql = current_time( 'mysql' );
+
+		$wpdb->insert(
+			$table_flags,
+			array(
+				'wiw_time_id'  => (int) $wiw_time_id,
+				'flag_type'    => '109',
+				'description'  => 'Scheduled Hours do not match with Payable Hours',
+				'flag_status'  => 'active',
+				'created_at'   => $now_mysql,
+				'updated_at'   => $now_mysql,
+			),
+			array( '%d', '%s', '%s', '%s', '%s', '%s' )
+		);
+	}
+}
+
 		// Recalculate timesheet header total_clocked_hours for this timesheet_id
 		$timesheet_id = isset( $entry->timesheet_id ) ? absint( $entry->timesheet_id ) : 0;
 
