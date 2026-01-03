@@ -134,15 +134,25 @@ public function render_client_ui() {
         return $out;
     }
 
-$timesheets = $this->get_scoped_local_timesheets( $client_id );
-
 // Filter-aware summary (count reflects filtered results)
+$is_frontend_admin = current_user_can( 'manage_options' );
+
+// Timesheet Records filter (applies to wp_wiw_timesheet_entries.status)
+$filter_status = isset( $_GET['wiw_status'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) ) : 'pending';
+$allowed_status = array( '', 'pending', 'approved', 'archived' );
+if ( ! in_array( $filter_status, $allowed_status, true ) ) {
+    $filter_status = 'pending';
+}
+
 $filter_emp = isset( $_GET['wiw_emp'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) ) : '';
 
-// Only allow Pay Period filtering for frontend admins.
-$filter_period = current_user_can( 'manage_options' ) && isset( $_GET['wiw_period'] )
+// Pay Period filter is frontend-admin only.
+$filter_period = ( $is_frontend_admin && isset( $_GET['wiw_period'] ) )
     ? sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) )
     : '';
+
+// Fetch only timesheets that have at least one matching entry (status-aware)
+$timesheets = $this->get_scoped_local_timesheets( $client_id, $filter_status );
 
 // Defaults
 $employee_label   = 'All Employees';
@@ -428,7 +438,7 @@ $out .= '<th>Actions</th>';
             $actions_html = '<span style="color:#666;">N/A</span>';
 
 $timesheet_id = isset( $ts->id ) ? absint( $ts->id ) : 0;
-$daily_rows   = $this->get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id );
+$daily_rows   = $this->get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id, $filter_status );
 
 // If no daily rows exist, still show a single summary row using the timesheet header.
 if ( empty( $daily_rows ) ) {
@@ -1865,7 +1875,7 @@ $out .= '<hr style="margin:40px 0;" />';
  * Fetch local timesheets from DB, always scoped to a client account number.
  * (No admin bypass; the shortcode is assumed to be used on a secure client page.)
  */
-function get_scoped_local_timesheets( $client_id ) {
+function get_scoped_local_timesheets( $client_id, $status_filter = '' ) {
 	global $wpdb;
 
 	$table_ts      = $wpdb->prefix . 'wiw_timesheets';
@@ -1874,34 +1884,82 @@ function get_scoped_local_timesheets( $client_id ) {
 	$client_id = absint( $client_id );
 
 	// Admins: show all timesheets (headers are now All Locations / location_id = 0).
-	if ( current_user_can( 'manage_options' ) ) {
-		$sql = "
-			SELECT ts.*,
-			       (SELECT COUNT(*) FROM {$table_entries} e WHERE e.timesheet_id = ts.id) AS daily_record_count
-			FROM {$table_ts} ts
-			ORDER BY ts.week_start_date DESC, ts.id DESC
-		";
-		return $wpdb->get_results( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-	}
+if ( current_user_can( 'manage_options' ) ) {
+
+    $status_filter = (string) $status_filter;
+
+    if ( $status_filter !== '' ) {
+        $sql = $wpdb->prepare(
+            "
+            SELECT ts.*,
+                   (SELECT COUNT(*) FROM {$table_entries} e WHERE e.timesheet_id = ts.id AND e.status = %s) AS daily_record_count
+            FROM {$table_ts} ts
+            WHERE EXISTS (
+                SELECT 1 FROM {$table_entries} e2
+                WHERE e2.timesheet_id = ts.id
+                  AND e2.status = %s
+            )
+            ORDER BY ts.week_start_date DESC, ts.id DESC
+            ",
+            $status_filter,
+            $status_filter
+        );
+        return $wpdb->get_results( $sql );
+    }
+
+    // All Records: no status constraint
+    $sql = "
+        SELECT ts.*,
+               (SELECT COUNT(*) FROM {$table_entries} e WHERE e.timesheet_id = ts.id) AS daily_record_count
+        FROM {$table_ts} ts
+        ORDER BY ts.week_start_date DESC, ts.id DESC
+    ";
+    return $wpdb->get_results( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+}
+
 
 	// Clients: show only timesheets that contain at least one entry for their location_id (= client_id).
 	if ( $client_id <= 0 ) {
 		return array();
 	}
 
-	$sql = $wpdb->prepare(
-		"
-		SELECT ts.*,
-		       COUNT(e.id) AS daily_record_count
-		FROM {$table_ts} ts
-		INNER JOIN {$table_entries} e
-		        ON e.timesheet_id = ts.id
-		       AND e.location_id = %d
-		GROUP BY ts.id
-		ORDER BY ts.week_start_date DESC, ts.id DESC
-		",
-		$client_id
-	);
+$status_filter = (string) $status_filter;
+
+if ( $status_filter !== '' ) {
+
+    $sql = $wpdb->prepare(
+        "
+        SELECT ts.*,
+               COUNT(e.id) AS daily_record_count
+        FROM {$table_ts} ts
+        INNER JOIN {$table_entries} e
+                ON e.timesheet_id = ts.id
+               AND e.location_id = %d
+               AND e.status = %s
+        GROUP BY ts.id
+        ORDER BY ts.week_start_date DESC, ts.id DESC
+        ",
+        $client_id,
+        $status_filter
+    );
+
+} else {
+
+    // All Records: no status constraint
+    $sql = $wpdb->prepare(
+        "
+        SELECT ts.*,
+               COUNT(e.id) AS daily_record_count
+        FROM {$table_ts} ts
+        INNER JOIN {$table_entries} e
+                ON e.timesheet_id = ts.id
+               AND e.location_id = %d
+        GROUP BY ts.id
+        ORDER BY ts.week_start_date DESC, ts.id DESC
+        ",
+        $client_id
+    );
+}
 
 	return $wpdb->get_results( $sql );
 }
@@ -1910,7 +1968,8 @@ function get_scoped_local_timesheets( $client_id ) {
  * Fetch daily records for a given timesheet ID from the compatibility table/view.
  * Scoped by location_id to ensure client isolation.
  */
-function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id ) {
+function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id, $status_filter = '' ) {
+
 	global $wpdb;
 
 	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
@@ -1922,8 +1981,27 @@ function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id ) {
 		return array();
 	}
 
+	$status_filter = (string) $status_filter;
+
 	// Admins: show all entries for the timesheet (all locations).
 	if ( current_user_can( 'manage_options' ) ) {
+
+		if ( $status_filter !== '' ) {
+			$sql = $wpdb->prepare(
+				"
+				SELECT *
+				FROM {$table_entries}
+				WHERE timesheet_id = %d
+				  AND status = %s
+				ORDER BY date ASC, id ASC
+				",
+				$timesheet_id,
+				$status_filter
+			);
+
+			return $wpdb->get_results( $sql );
+		}
+
 		$sql = $wpdb->prepare(
 			"
 			SELECT *
@@ -1933,12 +2011,27 @@ function get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id ) {
 			",
 			$timesheet_id
 		);
+
 		return $wpdb->get_results( $sql );
 	}
 
 	// Clients: restrict entries to their location_id (= client_id).
-	if ( $client_id <= 0 ) {
-		return array();
+	if ( $status_filter !== '' ) {
+		$sql = $wpdb->prepare(
+			"
+			SELECT *
+			FROM {$table_entries}
+			WHERE timesheet_id = %d
+			  AND location_id = %d
+			  AND status = %s
+			ORDER BY date ASC, id ASC
+			",
+			$timesheet_id,
+			$client_id,
+			$status_filter
+		);
+
+		return $wpdb->get_results( $sql );
 	}
 
 	$sql = $wpdb->prepare(
