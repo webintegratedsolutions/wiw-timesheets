@@ -417,7 +417,6 @@ if ( $timesheet_id_for_period !== '' ) {
 // Build Actions buttons (nonfunctional for now).
 $actions_html  = '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
 $actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="true">Sign Off</a>';
-$actions_html .= '<a href="#" class="wiw-btn secondary" onclick="return false;" aria-disabled="true">Reset</a>';
 $actions_html .= '</div>';
 
 if ( current_user_can( 'manage_options' ) ) {
