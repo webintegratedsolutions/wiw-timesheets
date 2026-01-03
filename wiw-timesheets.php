@@ -1883,6 +1883,20 @@ foreach ( $timesheets as $ts ) {
     $action_url = get_permalink();
 
     $out  = '<div class="wiw-client-timesheets" style="margin-bottom:14px;">';
+    // Dynamic header based on Timesheet Records filter.
+$selected_status = isset( $_GET['wiw_status'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) ) : 'pending';
+
+$heading_text = 'Timesheets Pending Approval';
+if ( $selected_status === 'approved' ) {
+    $heading_text = 'Approved Timesheets';
+} elseif ( $selected_status === 'archived' ) {
+    $heading_text = 'Archived Timesheets';
+} elseif ( $selected_status === '' ) {
+    $heading_text = 'All Timesheet Records';
+}
+
+$out .= '<h3 style="margin:0 8px 10px 0;font-size:18px;line-height:1.2;">' . esc_html( $heading_text ) . '</h3>';
+
 // Dynamic approval deadline: 8:00 a.m. on the Tuesday after the upcoming Saturday (week ends Saturday).
 $tz  = wp_timezone();
 $now = new DateTimeImmutable( 'now', $tz );
@@ -1896,7 +1910,7 @@ $deadline_tue = $week_end_sat->modify( '+3 days' );
 
 $deadline_label = wp_date( 'l, F j', $deadline_tue->getTimestamp(), $tz );
 
-$out .= '<p style="margin:0 0 12px;font-size:14px;line-height:1.4;">'
+$out .= '<p style="margin:0 0 20px;font-size:16px;line-height:1.4;">'
     . 'The approval deadline for this week 8:00 a.m. on <strong>' . esc_html( $deadline_label ) . '</strong>. '
     . 'Timesheets not edited or approved by this time will be considered approved.'
     . '</p>';
