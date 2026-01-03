@@ -46,25 +46,7 @@
 
 <?php $is_timesheet_approved = ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ); ?>
 
-<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: 10px 0 20px;">
-    <input type="hidden" name="action" value="wiw_reset_local_timesheet" />
-    <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( (int) $header->id ); ?>" />
-    <?php wp_nonce_field( 'wiw_reset_local_timesheet', 'wiw_reset_nonce' ); ?>
-
-    <?php if ( $is_timesheet_approved ) : ?>
-        <button type="button" class="button button-secondary" disabled="disabled"
-            style="opacity:0.6;cursor:not-allowed;"
-            title="This timesheet has been finalized and can no longer be reset.">
-            Timesheet Finalized
-        </button>
-    <?php else : ?>
-        <button type="submit" class="button button-secondary"
-            onclick="return confirm('Reset will discard ALL local edits for this timesheet and restore the original data from When I Work. Continue?');">
-            Reset from API
-        </button>
-    <?php endif; ?>
-</form>
-
+<?php /* Reset from API button removed from Local Timesheets (Database View) by request. */ ?>
 
                 <h2>Timesheet #<?php echo esc_html( $header->id ); ?> Details</h2>
                 <?php
