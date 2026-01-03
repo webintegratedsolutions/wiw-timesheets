@@ -4498,6 +4498,24 @@ if ( ! empty( $wiw_time_id ) ) {
 		array( '%s' ),
 		array( '%d', '%d' )
 	);
+    
+    // Same pattern for flag 105 (missing clock-in).
+$clock_in_raw  = is_string( $new_clock_in_db ) ? trim( (string) $new_clock_in_db ) : '';
+$is_missing_in = ( $clock_in_raw === '' || $clock_in_raw === '0000-00-00 00:00:00' );
+
+$new_105_status = $is_missing_in ? 'active' : 'resolved';
+
+$wpdb->update(
+	$table_flags,
+	array( 'flag_status' => $new_105_status ),
+	array(
+		'wiw_time_id' => (int) $wiw_time_id,
+		'flag_type'   => 105,
+	),
+	array( '%s' ),
+	array( '%d', '%d' )
+);
+
 }
 
 		// Recalculate timesheet header total_clocked_hours for this timesheet_id
