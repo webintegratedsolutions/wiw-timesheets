@@ -4782,6 +4782,66 @@ $wpdb->update(
 
 }
 
+// Same pattern for flag 102 (clocked out before scheduled end).
+// If reset makes the condition true again, the flag must return to active.
+$clock_out_raw_102 = is_string( $new_clock_out_db ) ? trim( (string) $new_clock_out_db ) : '';
+$sched_end_raw_102 = isset( $entry->scheduled_end ) ? trim( (string) $entry->scheduled_end ) : '';
+
+$is_missing_out_102 = ( $clock_out_raw_102 === '' || $clock_out_raw_102 === '0000-00-00 00:00:00' );
+$is_missing_end_102 = ( $sched_end_raw_102 === '' || $sched_end_raw_102 === '0000-00-00 00:00:00' );
+
+$new_102_status = 'resolved';
+
+if ( ! $is_missing_out_102 && ! $is_missing_end_102 ) {
+	$clock_out_ts_102 = strtotime( $clock_out_raw_102 );
+	$sched_end_ts_102 = strtotime( $sched_end_raw_102 );
+
+	// Only evaluate if both parse cleanly.
+	if ( $clock_out_ts_102 !== false && $sched_end_ts_102 !== false ) {
+		$new_102_status = ( $clock_out_ts_102 < $sched_end_ts_102 ) ? 'active' : 'resolved';
+	}
+}
+
+// Update existing 102 flag if present.
+$rows_102 = $wpdb->update(
+	$table_flags,
+	array( 'flag_status' => $new_102_status ),
+	array(
+		'wiw_time_id' => (int) $wiw_time_id,
+		'flag_type'   => 102,
+	),
+	array( '%s' ),
+	array( '%d', '%d' )
+);
+
+// If it should be active and no row exists yet, insert it (sync normally creates it, but be safe).
+if ( $new_102_status === 'active' && ( $rows_102 === 0 || $rows_102 === false ) ) {
+	$existing_102_id = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT id FROM {$table_flags} WHERE wiw_time_id = %d AND flag_type = %d LIMIT 1",
+			(int) $wiw_time_id,
+			102
+		)
+	);
+
+	if ( $existing_102_id <= 0 ) {
+		$now_mysql = current_time( 'mysql' );
+
+		$wpdb->insert(
+			$table_flags,
+			array(
+				'wiw_time_id'  => (int) $wiw_time_id,
+				'flag_type'    => '102',
+				'description'  => 'Clocked out before scheduled end',
+				'flag_status'  => 'active',
+				'created_at'   => $now_mysql,
+				'updated_at'   => $now_mysql,
+			),
+			array( '%d', '%s', '%s', '%s', '%s', '%s' )
+		);
+	}
+}
+
 		// Recalculate timesheet header total_clocked_hours for this timesheet_id
 		$timesheet_id = isset( $entry->timesheet_id ) ? absint( $entry->timesheet_id ) : 0;
 
