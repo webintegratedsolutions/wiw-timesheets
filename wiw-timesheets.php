@@ -1883,6 +1883,24 @@ foreach ( $timesheets as $ts ) {
     $action_url = get_permalink();
 
     $out  = '<div class="wiw-client-timesheets" style="margin-bottom:14px;">';
+// Dynamic approval deadline: 8:00 a.m. on the Tuesday after the upcoming Saturday (week ends Saturday).
+$tz  = wp_timezone();
+$now = new DateTimeImmutable( 'now', $tz );
+
+// PHP: w => 0 (Sun) ... 6 (Sat)
+$dow         = (int) $now->format( 'w' );
+$days_to_sat = ( 6 - $dow + 7 ) % 7;
+
+$week_end_sat = $now->modify( '+' . $days_to_sat . ' days' );
+$deadline_tue = $week_end_sat->modify( '+3 days' );
+
+$deadline_label = wp_date( 'l, F j', $deadline_tue->getTimestamp(), $tz );
+
+$out .= '<p style="margin:0 0 12px;font-size:14px;line-height:1.4;">'
+    . 'The approval deadline for this week 8:00 a.m. on <strong>' . esc_html( $deadline_label ) . '</strong>. '
+    . 'Timesheets not edited or approved by this time will be considered approved.'
+    . '</p>';
+
     $out .= '<form method="get" action="' . esc_url( $action_url ) . '" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">';
 // Timesheet Records filter (UI only for now; functionality will be added in a later step).
 $out .= '<div>';
