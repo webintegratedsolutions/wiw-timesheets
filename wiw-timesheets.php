@@ -4413,6 +4413,93 @@ if ( 0 === (int) $updated ) {
 	);
 }
 
+// Ensure sync helpers are loaded (flag recalculation lives in includes/timesheet-sync.php).
+if ( ! function_exists( 'wiwts_sync_store_time_flags' ) ) {
+	$sync_file = plugin_dir_path( __FILE__ ) . 'includes/timesheet-sync.php';
+	if ( file_exists( $sync_file ) ) {
+		require_once $sync_file;
+	}
+}
+
+// After reset changes clock-in/out, re-evaluate flags immediately so UI matches the new values.
+// (Flags are normally updated during sync; a page refresh alone will not recalc them.)
+if ( function_exists( 'wiwts_sync_store_time_flags' ) && ! empty( $wiw_time_id ) ) {
+$flag_clock_in_raw  = is_string( $new_clock_in_db ) ? trim( $new_clock_in_db ) : '';
+$flag_clock_out_raw = is_string( $new_clock_out_db ) ? trim( $new_clock_out_db ) : '';
+
+// Treat "zero" datetimes as missing.
+$flag_clock_in  = ( $flag_clock_in_raw === '' || $flag_clock_in_raw === '0000-00-00 00:00:00' ) ? '' : $flag_clock_in_raw;
+$flag_clock_out = ( $flag_clock_out_raw === '' || $flag_clock_out_raw === '0000-00-00 00:00:00' ) ? '' : $flag_clock_out_raw;
+
+// If a value exists but cannot be formatted for display, treat it as missing too
+// so flags (e.g. 106) match what the UI shows.
+if ( $flag_clock_in !== '' ) {
+	$tmp_in = $this->wiw_format_time_local( $flag_clock_in );
+	if ( $tmp_in === '' ) {
+		$flag_clock_in = '';
+	}
+}
+
+if ( $flag_clock_out !== '' ) {
+	$tmp_out = $this->wiw_format_time_local( $flag_clock_out );
+	if ( $tmp_out === '' ) {
+		$flag_clock_out = '';
+	}
+}
+
+	$flag_sched_start = isset( $entry->scheduled_start ) ? (string) $entry->scheduled_start : '';
+	$flag_sched_end   = isset( $entry->scheduled_end ) ? (string) $entry->scheduled_end : '';
+
+	// Prefer freshly recomputed values when available.
+	$flag_sched_hours = null;
+	if ( isset( $update_data['scheduled_hours'] ) ) {
+		$flag_sched_hours = (float) $update_data['scheduled_hours'];
+	} elseif ( isset( $entry->scheduled_hours ) && $entry->scheduled_hours !== null ) {
+		$flag_sched_hours = (float) $entry->scheduled_hours;
+	}
+
+	$flag_payable_hours = null;
+	if ( isset( $update_data['payable_hours'] ) ) {
+		$flag_payable_hours = (float) $update_data['payable_hours'];
+	} elseif ( isset( $entry->payable_hours ) && $entry->payable_hours !== null ) {
+		$flag_payable_hours = (float) $entry->payable_hours;
+	}
+
+	wiwts_sync_store_time_flags(
+		(int) $wiw_time_id,
+		$flag_clock_in,
+		$flag_clock_out,
+		$flag_sched_start,
+		$flag_sched_end,
+		$flag_sched_hours,
+		$flag_payable_hours
+	);
+}
+
+// Keep flags in sync with reset changes: if clock_out becomes missing again, flag 106 must return to active.
+if ( ! empty( $wiw_time_id ) ) {
+	global $wpdb;
+
+	$table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
+
+	$clock_out_raw = is_string( $new_clock_out_db ) ? trim( (string) $new_clock_out_db ) : '';
+	$is_missing_out = ( $clock_out_raw === '' || $clock_out_raw === '0000-00-00 00:00:00' );
+
+	$new_106_status = $is_missing_out ? 'active' : 'resolved';
+
+	// Update existing 106 flag row for this WIW time id (do not assume other columns exist).
+	$wpdb->update(
+		$table_flags,
+		array( 'flag_status' => $new_106_status ),
+		array(
+			'wiw_time_id' => (int) $wiw_time_id,
+			'flag_type'   => 106,
+		),
+		array( '%s' ),
+		array( '%d', '%d' )
+	);
+}
+
 		// Recalculate timesheet header total_clocked_hours for this timesheet_id
 		$timesheet_id = isset( $entry->timesheet_id ) ? absint( $entry->timesheet_id ) : 0;
 
