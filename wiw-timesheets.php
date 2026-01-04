@@ -427,7 +427,7 @@ $signoff_hint_html = '<span class="wiw-signoff-hint" style="padding-top:9px;marg
 // Treat these header statuses as already signed off (some older code uses "approved" for finalized).
 $ts_status_norm = strtolower( trim( (string) $ts_status ) );
 if ( in_array( $ts_status_norm, array( 'finalized', 'approved' ), true ) ) {
-	$signoff_label         = 'Signed Off';
+	$signoff_label         = 'Finalized';
     $signoff_hint_html = '';
 	$signoff_aria_disabled = 'true';
 	$signoff_style         = 'opacity:0.55;cursor:not-allowed;';
@@ -492,14 +492,39 @@ if ( in_array( $ts_status_norm, array( 'finalized', 'approved' ), true ) ) {
 	}
 }
 
-$actions_html  = '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
-$actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="' . esc_attr( $signoff_aria_disabled ) . '"'
-	. ( $signoff_title !== '' ? ' title="' . esc_attr( $signoff_title ) . '"' : '' )
-	. ( $signoff_style !== '' ? ' style="' . esc_attr( $signoff_style ) . '"' : '' )
-	. '>'
-	. esc_html( $signoff_label )
-	. '</a>';
-$actions_html .= $signoff_hint_html;
+$actions_html  = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
+
+if ( $signoff_aria_disabled === 'false' ) {
+
+	// Enabled: real POST submit to finalize handler.
+	$actions_html .= '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="margin:0;"'
+		. ' onsubmit="if(window.wiwtsShowRefreshingOverlay){wiwtsShowRefreshingOverlay(\'Finalizing…\');} return true;">';
+
+	$actions_html .= '<input type="hidden" name="action" value="wiw_finalize_local_timesheet" />';
+	$actions_html .= '<input type="hidden" name="timesheet_id" value="' . esc_attr( (int) $timesheet_id_for_period ) . '" />';
+
+	// Nonce must match what the handler expects
+	$actions_html .= wp_nonce_field( 'wiw_finalize_local_timesheet', 'wiw_finalize_nonce', true, false );
+
+	$actions_html .= '<button type="submit" class="wiw-btn">'
+		. esc_html( $signoff_label )
+		. '</button>';
+
+	$actions_html .= '</form>';
+
+} else {
+
+	// Disabled: keep as a non-clickable anchor.
+	$actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="' . esc_attr( $signoff_aria_disabled ) . '"'
+		. ( $signoff_title !== '' ? ' title="' . esc_attr( $signoff_title ) . '"' : '' )
+		. ( $signoff_style !== '' ? ' style="' . esc_attr( $signoff_style ) . '"' : '' )
+		. '>'
+		. esc_html( $signoff_label )
+		. '</a>';
+
+	$actions_html .= $signoff_hint_html;
+}
+
 $actions_html .= '</div>';
 
 if ( current_user_can( 'manage_options' ) ) {
@@ -5479,7 +5504,10 @@ public function handle_finalize_local_timesheet() {
 
     $timesheet_id = isset( $_POST['timesheet_id'] ) ? absint( $_POST['timesheet_id'] ) : 0;
 
-    $redirect_base = admin_url( 'admin.php?page=wiw-local-timesheets' );
+$redirect_base = wp_get_referer();
+if ( ! $redirect_base ) {
+	$redirect_base = admin_url( 'admin.php?page=wiw-local-timesheets' );
+}
     $redirect_back = add_query_arg( array( 'timesheet_id' => $timesheet_id ), $redirect_base );
 
     if ( ! $timesheet_id ) {
@@ -5532,7 +5560,7 @@ public function handle_finalize_local_timesheet() {
     $updated = $wpdb->update(
         $table_headers,
         array(
-            'status'     => 'approved',
+            'status'     => 'finalized',
             'updated_at' => $now,
         ),
         array( 'id' => $timesheet_id ),
