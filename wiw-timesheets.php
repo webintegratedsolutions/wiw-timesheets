@@ -2120,8 +2120,8 @@ $deadline_tue = $week_end_sat->modify( '+3 days' );
 $deadline_label = wp_date( 'l, F j', $deadline_tue->getTimestamp(), $tz );
 
 $out .= '<p style="margin:0 0 20px;font-size:16px;line-height:1.4;">'
-    . 'The approval deadline for this week 8:00 a.m. on <strong>' . esc_html( $deadline_label ) . '</strong>. '
-    . 'Timesheets not edited or approved by this time will be considered approved.'
+    . 'The approval deadline for this week is 8:00 a.m. on <strong>' . esc_html( $deadline_label ) . '</strong>. '
+    . 'Timesheets not edited and approved by this time will be considered approved.'
     . '</p>';
 
     $out .= '<form method="get" action="' . esc_url( $action_url ) . '" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">';
