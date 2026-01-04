@@ -1089,8 +1089,8 @@ if ( empty( $flags_visible ) ) {
 	$out .= '<div style="border:1px solid #ccd0d4; border-radius:4px; overflow:hidden; background:#fff;">';
 	$out .= '<table class="wp-list-table widefat fixed striped" style="margin:0;">';
 	$out .= '<thead><tr>';
-	$out .= '<th style="width:110px;">Type</th>';
-	$out .= '<th style="width:130px;">Shift Date</th>';
+    $out .= '<th style="width:130px;">Shift Date</th>';
+    $out .= '<th style="width:110px;">Type</th>';;
 	$out .= '<th>Description</th>';
 	$out .= '<th style="width:120px;">Status</th>';
 	$out .= '<th style="width:220px;">Updated</th>';
@@ -1121,8 +1121,8 @@ if ( strtolower( $status_raw ) === 'resolved' ) {
 		$cell_style = 'style="padding:10px 10px; vertical-align:top;"';
 
 		$out .= '<tr style="' . esc_attr( $row_style ) . '">';
-		$out .= '<td ' . $cell_style . '><strong>' . esc_html( $type !== '' ? $type : 'N/A' ) . '</strong></td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $shift_date !== '' ? $shift_date : 'N/A' ) . '</td>';
+		$out .= '<td ' . $cell_style . '><strong>' . esc_html( $type !== '' ? $type : 'N/A' ) . '</strong></td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $desc !== '' ? $desc : 'N/A' ) . '</td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $status !== '' ? $status : 'N/A' ) . '</td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $updated ) . '</td>';
