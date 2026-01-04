@@ -414,9 +414,84 @@ if ( $timesheet_id_for_period !== '' ) {
 	}
 }
 
-// Build Actions buttons (nonfunctional for now).
+// Build Actions buttons (UI-gated; still nonfunctional until Step 2 wiring).
+$signoff_label         = 'Sign Off';
+$signoff_aria_disabled = 'true';
+$signoff_style         = 'opacity:0.55;cursor:not-allowed;';
+$signoff_title         = 'All entries must be approved before Sign Off is available.';
+
+// Treat these header statuses as already signed off (some older code uses "approved" for finalized).
+$ts_status_norm = strtolower( trim( (string) $ts_status ) );
+if ( in_array( $ts_status_norm, array( 'finalized', 'approved' ), true ) ) {
+	$signoff_label         = 'Signed Off';
+	$signoff_aria_disabled = 'true';
+	$signoff_style         = 'opacity:0.55;cursor:not-allowed;';
+	$signoff_title         = 'This timesheet has already been signed off.';
+} elseif ( $timesheet_id_for_period !== '' ) {
+
+	global $wpdb;
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+	// Count statuses for THIS timesheet_id (no location scoping here so admin + filters cannot break).
+	$status_rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT status, COUNT(*) AS cnt
+			 FROM {$table_entries}
+			 WHERE timesheet_id = %d
+			 GROUP BY status",
+			absint( $timesheet_id_for_period )
+		),
+		ARRAY_A
+	);
+
+	$total_entries  = 0;
+	$approved_count = 0;
+	$archived_count = 0;
+
+	if ( ! empty( $status_rows ) ) {
+		foreach ( $status_rows as $row ) {
+			$cnt = isset( $row['cnt'] ) ? (int) $row['cnt'] : 0;
+			$st  = isset( $row['status'] ) ? strtolower( trim( (string) $row['status'] ) ) : '';
+
+			$total_entries += $cnt;
+
+			if ( $st === 'approved' ) {
+				$approved_count += $cnt;
+			} elseif ( $st === 'archived' ) {
+				$archived_count += $cnt;
+			}
+		}
+	}
+
+	// Rules:
+	// - All archived => read-only => disabled.
+	// - All approved => enabled.
+	// - Otherwise => disabled.
+	if ( $total_entries > 0 && $archived_count === $total_entries ) {
+		$signoff_label         = 'Sign Off';
+		$signoff_aria_disabled = 'true';
+		$signoff_style         = 'opacity:0.55;cursor:not-allowed;';
+		$signoff_title         = 'This timesheet is archived and is read-only.';
+	} elseif ( $total_entries > 0 && $approved_count === $total_entries ) {
+		$signoff_label         = 'Sign Off';
+		$signoff_aria_disabled = 'false';
+		$signoff_style         = '';
+		$signoff_title         = 'Ready to sign off.';
+	} else {
+		$signoff_label         = 'Sign Off';
+		$signoff_aria_disabled = 'true';
+		$signoff_style         = 'opacity:0.55;cursor:not-allowed;';
+		$signoff_title         = 'All entries must be approved before Sign Off is available.';
+	}
+}
+
 $actions_html  = '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
-$actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="true">Sign Off</a>';
+$actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disabled="' . esc_attr( $signoff_aria_disabled ) . '"'
+	. ( $signoff_title !== '' ? ' title="' . esc_attr( $signoff_title ) . '"' : '' )
+	. ( $signoff_style !== '' ? ' style="' . esc_attr( $signoff_style ) . '"' : '' )
+	. '>'
+	. esc_html( $signoff_label )
+	. '</a>';
 $actions_html .= '</div>';
 
 if ( current_user_can( 'manage_options' ) ) {
@@ -1539,6 +1614,12 @@ if (!confirm(msg)) { return; }
             // Mark approved in UI.
       t.textContent = "Approved";
       t.disabled = true;
+
+      // Always refresh after approval so server-rendered UI updates
+// (Reset button visibility, Sign Off gating, etc.)
+setTimeout(function () {
+    window.location.reload();
+}, 300);
 
       // Hide Edit button for this row.
       var editBtn = row.querySelector("button.wiw-client-edit-btn");
