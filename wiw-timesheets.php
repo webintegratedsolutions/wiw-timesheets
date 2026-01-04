@@ -918,25 +918,49 @@ if ( $tid_for_flags > 0 && ! empty( $wiwts_client_flags_unresolved_cache[ $tid_f
     $unresolved_flags_attr = ' data-unresolved-flags="' . esc_attr( implode( '||', $wiwts_client_flags_unresolved_cache[ $tid_for_flags ] ) ) . '"';
 }
 
-$actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
-if ( ! $is_approved ) {
-    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
-}
-$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $unresolved_flags_attr . $approve_title . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
-$actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
-if ( $wiwts_show_admin_reset_under_approved ) {
-    // Visible but disabled so it cannot run any JS/AJAX yet.
-$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" title="Preview reset (no changes yet)">Reset</button>';
+// === WIWTS STEP 2 BEGIN: Hide entry action buttons for archived entries (client UI) ===
+
+// IMPORTANT:
+// The client "Timesheet Records" filter applies to wp_wiw_timesheet_entries.status,
+// so archived rows must be gated by *entry status* (and/or the current filter),
+// not by the parent wp_wiw_timesheets.status.
+
+$entry_status_for_actions = isset( $dr->status ) ? strtolower( trim( (string) $dr->status ) ) : strtolower( trim( (string) $status ) );
+$current_filter_status    = isset( $filter_status ) ? (string) $filter_status : '';
+
+$is_archived_row = ( $entry_status_for_actions === 'archived' ) || ( $current_filter_status === 'archived' );
+
+if ( $is_archived_row ) {
+
+    // No buttons for archived rows in the client UI.
+    $out .= '<td><span class="wiw-muted">Archived</span></td>';
+
 } else {
-    // Existing behavior: only shown when user enters edit mode.
-    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" style="display:none;">Reset</button>';
+
+    $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
+
+    if ( ! $is_approved ) {
+        $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
+    }
+
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( (int) $time_id ) . '"' . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
+
+    $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
+
+    if ( $wiwts_show_admin_reset_under_approved ) {
+        $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" title="Preview reset (no changes yet)">Reset</button>';
+    } else {
+        $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" style="display:none;">Reset</button>';
+    }
+
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
+
+    $actions_html .= '</div>';
+
+    $out .= '<td>' . $actions_html . '</td>';
 }
-$actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
-$actions_html .= '</div>';
 
-
-
-$out .= '<td>' . $actions_html . '</td>';
+// === WIWTS STEP 2 END ===
 
 
         $out .= '</tr>';
