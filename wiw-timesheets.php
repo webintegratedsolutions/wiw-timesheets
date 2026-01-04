@@ -1228,6 +1228,69 @@ $out .= '<script>
     return el;
   }
 
+  // Show a simple overlay so users know the page is refreshing.
+  function wiwtsShowRefreshingOverlay(message){
+    try {
+      if (document.getElementById("wiwts-refreshing-overlay")) return;
+
+      var overlay = document.createElement("div");
+      overlay.id = "wiwts-refreshing-overlay";
+      overlay.setAttribute("role", "status");
+      overlay.setAttribute("aria-live", "polite");
+      overlay.style.position = "fixed";
+      overlay.style.left = "0";
+      overlay.style.top = "0";
+      overlay.style.right = "0";
+      overlay.style.bottom = "0";
+      overlay.style.background = "rgba(0,0,0,0.35)";
+      overlay.style.zIndex = "999999";
+      overlay.style.display = "flex";
+      overlay.style.alignItems = "center";
+      overlay.style.justifyContent = "center";
+      overlay.style.padding = "20px";
+
+      var box = document.createElement("div");
+      box.style.background = "#fff";
+      box.style.borderRadius = "10px";
+      box.style.padding = "16px 18px";
+      box.style.boxShadow = "0 10px 30px rgba(0,0,0,0.25)";
+      box.style.display = "flex";
+      box.style.alignItems = "center";
+      box.style.gap = "12px";
+      box.style.maxWidth = "420px";
+      box.style.width = "100%";
+
+      var spinner = document.createElement("div");
+      spinner.style.width = "18px";
+      spinner.style.height = "18px";
+      spinner.style.border = "3px solid #ddd";
+      spinner.style.borderTopColor = "#333";
+      spinner.style.borderRadius = "50%";
+      spinner.style.animation = "wiwtsSpin 0.9s linear infinite";
+
+      var text = document.createElement("div");
+      text.style.fontSize = "14px";
+      text.style.lineHeight = "1.4";
+      text.textContent = (message && String(message)) ? String(message) : "Refreshing…";
+
+      // Inject keyframes once
+      if (!document.getElementById("wiwts-spin-style")) {
+        var st = document.createElement("style");
+        st.id = "wiwts-spin-style";
+        st.type = "text/css";
+        st.textContent = "@keyframes wiwtsSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
+        document.head.appendChild(st);
+      }
+
+      box.appendChild(spinner);
+      box.appendChild(text);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+
+      document.body.style.cursor = "wait";
+    } catch (e) {}
+  }
+
   function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
@@ -1615,11 +1678,13 @@ if (!confirm(msg)) { return; }
       t.textContent = "Approved";
       t.disabled = true;
 
-      // Always refresh after approval so server-rendered UI updates
-// (Reset button visibility, Sign Off gating, etc.)
+      // Show overlay and refresh so server-rendered UI updates (Reset button + Sign Off gating).
+      wiwtsShowRefreshingOverlay("Updating timesheet records…");
+
+// Very short delay so the overlay can paint before reload.
 setTimeout(function () {
-    window.location.reload();
-}, 300);
+  window.location.reload();
+}, 50);
 
       // Hide Edit button for this row.
       var editBtn = row.querySelector("button.wiw-client-edit-btn");
