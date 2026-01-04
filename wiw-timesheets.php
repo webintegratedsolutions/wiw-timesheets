@@ -1089,11 +1089,11 @@ if ( empty( $flags_visible ) ) {
 	$out .= '<div style="border:1px solid #ccd0d4; border-radius:4px; overflow:hidden; background:#fff;">';
 	$out .= '<table class="wp-list-table widefat fixed striped" style="margin:0;">';
 	$out .= '<thead><tr>';
-    $out .= '<th style="width:130px;">Shift Date</th>';
-    $out .= '<th style="width:110px;">Type</th>';;
-	$out .= '<th>Description</th>';
-	$out .= '<th style="width:120px;">Status</th>';
-	$out .= '<th style="width:220px;">Updated</th>';
+$out .= '<th style="width:130px;">Shift Date</th>';
+$out .= '<th style="width:110px;">Record ID</th>';
+$out .= '<th style="width:110px;">Type</th>';
+$out .= '<th>Description</th>';
+$out .= '<th style="width:150px;">Status</th>';
 	$out .= '</tr></thead>';
 	$out .= '<tbody>';
 
@@ -1103,6 +1103,7 @@ if ( empty( $flags_visible ) ) {
 		$shift_date = isset( $fg->shift_date ) ? (string) $fg->shift_date : '';
 		$desc       = isset( $fg->description ) ? (string) $fg->description : '';
 		$status_raw = isset( $fg->flag_status ) ? (string) $fg->flag_status : '';
+        $flag_record_id = isset( $fg->wiw_time_id ) ? (string) $fg->wiw_time_id : '—';
 
 $status = 'Unresolved';
 if ( strtolower( $status_raw ) === 'resolved' ) {
@@ -1121,11 +1122,12 @@ if ( strtolower( $status_raw ) === 'resolved' ) {
 		$cell_style = 'style="padding:10px 10px; vertical-align:top;"';
 
 		$out .= '<tr style="' . esc_attr( $row_style ) . '">';
-		$out .= '<td ' . $cell_style . '>' . esc_html( $shift_date !== '' ? $shift_date : 'N/A' ) . '</td>';
-		$out .= '<td ' . $cell_style . '><strong>' . esc_html( $type !== '' ? $type : 'N/A' ) . '</strong></td>';
+$out .= '<td ' . $cell_style . '>' . esc_html( $shift_date !== '' ? $shift_date : 'N/A' ) . '</td>';
+$out .= '<td ' . $cell_style . '>' . esc_html( $flag_record_id ) . '</td>';
+$out .= '<td ' . $cell_style . '><strong>' . esc_html( $type !== '' ? $type : 'N/A' ) . '</strong></td>';
+
 		$out .= '<td ' . $cell_style . '>' . esc_html( $desc !== '' ? $desc : 'N/A' ) . '</td>';
 		$out .= '<td ' . $cell_style . '>' . esc_html( $status !== '' ? $status : 'N/A' ) . '</td>';
-		$out .= '<td ' . $cell_style . '>' . esc_html( $updated ) . '</td>';
 		$out .= '</tr>';
 
 // Special follow-up row for flag 104 (Confirm Additional Hours).
@@ -2493,14 +2495,31 @@ private function get_scoped_edit_logs_for_timesheet( $client_id, $timesheet_id )
 	$table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
 	$table_ts   = $wpdb->prefix . 'wiw_timesheets';
 
-	$client_id    = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
 	$timesheet_id = absint( $timesheet_id );
+	$is_admin     = current_user_can( 'manage_options' );
 
-	if ( $client_id === '' || $timesheet_id <= 0 ) {
+	if ( $timesheet_id <= 0 ) {
 		return array();
 	}
 
-	// Join to timesheets to enforce location scope.
+	// Admins: return ALL edit logs for the timesheet (no location scoping).
+	if ( $is_admin ) {
+		$sql = "
+			SELECT l.*
+			FROM {$table_logs} l
+			WHERE l.timesheet_id = %d
+			ORDER BY l.created_at DESC, l.id DESC
+			LIMIT 200
+		";
+		return $wpdb->get_results( $wpdb->prepare( $sql, $timesheet_id ) );
+	}
+
+	// Clients: enforce location scope via join to timesheets.
+	$client_id = is_scalar( $client_id ) ? trim( (string) $client_id ) : '';
+	if ( $client_id === '' ) {
+		return array();
+	}
+
 	$sql = "
 		SELECT l.*
 		FROM {$table_logs} l
@@ -2511,9 +2530,7 @@ private function get_scoped_edit_logs_for_timesheet( $client_id, $timesheet_id )
 		LIMIT 200
 	";
 
-	$prepared = $wpdb->prepare( $sql, $timesheet_id, $client_id );
-
-	return $wpdb->get_results( $prepared );
+	return $wpdb->get_results( $wpdb->prepare( $sql, $timesheet_id, $client_id ) );
 }
 
 /**
