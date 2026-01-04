@@ -780,7 +780,17 @@ if ( ! $printed_week2_header && $week2_start && $week2_end ) {
         $scheduled_end_raw   = ( $scheduled_end && strlen( $scheduled_end ) >= 16 ) ? substr( $scheduled_end, 11, 5 ) : '';
 
         $out .= '<tr data-sched-start="' . esc_attr( $scheduled_start_raw ) . '" data-sched-end="' . esc_attr( $scheduled_end_raw ) . '">';
-                $out .= '<td>' . esc_html( $date_display ) . '</td>';
+                // === WIWTS STEP 3 BEGIN: Show WIW Time ID under Shift Date (front end) ===
+$wiw_time_id_display = isset( $dr->wiw_time_id ) ? (string) $dr->wiw_time_id : '';
+
+$date_cell_html  = '<div>' . esc_html( $date_display ) . '</div>';
+
+if ( $wiw_time_id_display !== '' ) {
+    $date_cell_html .= '<div><small style="opacity:0.75;">(' . esc_html( $wiw_time_id_display ) . ')</small></div>';
+}
+
+$out .= '<td>' . $date_cell_html . '</td>';
+// === WIWTS STEP 3 END ===
 
         if ( $is_admin_front ) {
 			$row_location_name = ( isset( $dr->location_name ) && (string) $dr->location_name !== '' )
