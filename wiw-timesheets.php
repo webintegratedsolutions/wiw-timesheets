@@ -2137,9 +2137,9 @@ $out .= '</select>';
 $out .= '</div>';
 
     $out .= '<div>';
-    $out .= '<label for="wiw_emp" style="display:block;font-weight:600;margin-bottom:4px;">Employee</label>';
+    $out .= '<label for="wiw_emp" style="display:block;font-weight:600;margin-bottom:4px;">Employee:</label>';
     $out .= '<select id="wiw_emp" name="wiw_emp">';
-    $out .= '<option value="">All Employees:</option>';
+    $out .= '<option value="">All Employees</option>';
     foreach ( $employees as $eid => $ename ) {
         $out .= '<option value="' . esc_attr( $eid ) . '"' . selected( $selected_emp, $eid, false ) . '>'
             . esc_html( $ename )
@@ -2150,9 +2150,9 @@ $out .= '</div>';
 
 if ( $is_frontend_admin ) {
     $out .= '<div>';
-    $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Pay Period</label>';
+    $out .= '<label for="wiw_period" style="display:block;font-weight:600;margin-bottom:4px;">Pay Period:</label>';
     $out .= '<select id="wiw_period" name="wiw_period">';
-    $out .= '<option value="">All Pay Periods:</option>';
+    $out .= '<option value="">All Pay Periods</option>';
     foreach ( $periods as $pkey => $plabel ) {
         $out .= '<option value="' . esc_attr( $pkey ) . '"' . selected( $selected_period, $pkey, false ) . '>'
             . esc_html( $plabel )
