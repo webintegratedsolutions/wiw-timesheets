@@ -418,12 +418,17 @@ if ( $timesheet_id_for_period !== '' ) {
 $signoff_label         = 'Sign Off';
 $signoff_aria_disabled = 'true';
 $signoff_style         = 'opacity:0.55;cursor:not-allowed;';
+$signoff_hint_html     = '';
 $signoff_title         = 'All entries must be approved before Sign Off is available.';
+$signoff_hint_html = '<span class="wiw-signoff-hint" style="padding-top:9px;margin-left:8px;font-size:12px;color:#666;">'
+	. '(All pay period timesheet records must be approved for sign off.)'
+	. '</span>';
 
 // Treat these header statuses as already signed off (some older code uses "approved" for finalized).
 $ts_status_norm = strtolower( trim( (string) $ts_status ) );
 if ( in_array( $ts_status_norm, array( 'finalized', 'approved' ), true ) ) {
 	$signoff_label         = 'Signed Off';
+    $signoff_hint_html = '';
 	$signoff_aria_disabled = 'true';
 	$signoff_style         = 'opacity:0.55;cursor:not-allowed;';
 	$signoff_title         = 'This timesheet has already been signed off.';
@@ -472,9 +477,11 @@ if ( in_array( $ts_status_norm, array( 'finalized', 'approved' ), true ) ) {
 		$signoff_aria_disabled = 'true';
 		$signoff_style         = 'opacity:0.55;cursor:not-allowed;';
 		$signoff_title         = 'This timesheet is archived and is read-only.';
+        $signoff_hint_html = '';
 	} elseif ( $total_entries > 0 && $approved_count === $total_entries ) {
 		$signoff_label         = 'Sign Off';
 		$signoff_aria_disabled = 'false';
+        $signoff_hint_html = '';
 		$signoff_style         = '';
 		$signoff_title         = 'Ready to sign off.';
 	} else {
@@ -492,6 +499,7 @@ $actions_html .= '<a href="#" class="wiw-btn" onclick="return false;" aria-disab
 	. '>'
 	. esc_html( $signoff_label )
 	. '</a>';
+$actions_html .= $signoff_hint_html;
 $actions_html .= '</div>';
 
 if ( current_user_can( 'manage_options' ) ) {
