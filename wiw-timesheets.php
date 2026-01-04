@@ -5568,6 +5568,25 @@ if ( ! $redirect_base ) {
         array( '%d' )
     );
 
+    // === WIWTS STEP 1 BEGIN: Archive approved entries on Sign Off ===
+
+// Archive all approved daily entries for this timesheet
+$wpdb->update(
+    $table_entries,
+    array(
+        'status'     => 'archived',
+        'updated_at' => $now,
+    ),
+    array(
+        'timesheet_id' => $timesheet_id,
+        'status'       => 'approved',
+    ),
+    array( '%s', '%s' ),
+    array( '%d', '%s' )
+);
+
+// === WIWTS STEP 1 END ===
+
     if ( false === $updated ) {
         wp_safe_redirect( add_query_arg( 'finalize_error', rawurlencode( 'Failed to finalize timesheet in database.' ), $redirect_back ) );
         exit;
