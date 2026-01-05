@@ -699,11 +699,48 @@ if ( $is_finalized ) {
 		. '</td></tr>';
 }
 
-$out .= '<tr><th>Totals: </th><td>'
+$out .= '<tr><th>Timesheet Totals: </th><td>'
 	. 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
 	. 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
 	. 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
 	. '</td></tr>';
+
+// === WIWTS ADD BEGIN: Details row for Edit Logs + Flags counts ===
+$edit_log_count = 0;
+$flag_count     = 0;
+
+if ( isset( $timesheet_id_for_period ) && $timesheet_id_for_period !== '' ) {
+	$tsid = absint( $timesheet_id_for_period );
+
+	$table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+	$table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
+	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+	$edit_log_count = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COUNT(*) FROM {$table_logs} WHERE timesheet_id = %d",
+			$tsid
+		)
+	);
+
+	// Flags are keyed by wiw_time_id, so join to entries to scope to this timesheet_id.
+	$flag_count = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COUNT(*)
+			 FROM {$table_flags} f
+			 INNER JOIN {$table_entries} e ON e.wiw_time_id = f.wiw_time_id
+			 WHERE e.timesheet_id = %d",
+			$tsid
+		)
+	);
+}
+
+$out .= '<tr><th>Reference:</th><td>'
+	. 'Edit Logs: <strong>' . esc_html( (string) $edit_log_count ) . '</strong> | '
+	. 'Flags: <strong>' . esc_html( (string) $flag_count ) . '</strong>'
+	. '</td></tr>';
+// === WIWTS ADD END ===
+
 
 // === WIWTS ADD BEGIN: Locations row (frontend admin only) ===
 $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
