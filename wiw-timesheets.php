@@ -687,12 +687,13 @@ if ( ! $is_finalized && $timesheet_id_for_period !== '' ) {
 }
 
 if ( $is_finalized ) {
-	$out .= '<tr><th>Shift Entries: </th><td>'
+	$out .= '<tr><th>Shift Entries:</th><td>'
 		. 'Total Records: <strong>' . esc_html( (string) $total_records ) . '</strong>'
 		. '</td></tr>';
 } else {
-	$out .= '<tr><th>Shift Entries: </th><td>'
+	$out .= '<tr><th>Shift Entries:</th><td>'
 		. 'Total Records: <strong>' . esc_html( (string) $total_records ) . '</strong> | '
+        . 'Pending: <strong>' . esc_html( (string) $pending_records ) . '</strong> | '
 		. 'Approved: <strong>' . esc_html( (string) $approved_records ) . '</strong> | '
 		. 'Past Due: <strong>' . esc_html( (string) $past_due_records ) . '</strong>'
 		. '</td></tr>';
@@ -704,7 +705,7 @@ $out .= '<tr><th>Totals: </th><td>'
 	. 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
 	. '</td></tr>';
 
-$out .= '<tr><th>Actions: </th><td>' . $actions_html . '</td></tr>';
+$out .= '<tr><th>Actions:</th><td>' . $actions_html . '</td></tr>';
 
 $out .= '</tbody></table>';
 }
