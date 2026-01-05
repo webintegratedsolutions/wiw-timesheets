@@ -173,3 +173,25 @@
 	white-space: nowrap;
 }
 
+/* === WIWTS FIX: Normalize expandable flags table borders === */
+.wiwts-flags-wrapper {
+    padding: 0;
+    margin: 0;
+}
+
+.wiwts-flags-wrapper table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+}
+
+.wiwts-flags-wrapper table th,
+.wiwts-flags-wrapper table td {
+    border: 1px solid #dcdcde;
+}
+
+.wiwts-flags-wrapper table thead th {
+    background: #f6f7f7;
+}
+
+

@@ -1318,7 +1318,7 @@ if ( empty( $flags_visible ) ) {
 	$out .= '<p class="description" style="margin:0;">No flags found for this timesheet.</p>';
 } else {
 	// Border wrapper (requested).
-	$out .= '<div style="border:1px solid #ccd0d4; border-radius:4px; overflow:hidden; background:#fff;">';
+	$out .= '<div style="border-right:1px solid #ccd0d4; border-radius:1px; overflow:hidden; background:#fff;">';
 	$out .= '<table class="wp-list-table widefat fixed striped" style="margin:0;">';
 	$out .= '<thead><tr>';
 $out .= '<th style="width:130px;">Shift Date</th>';
