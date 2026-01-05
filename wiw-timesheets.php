@@ -669,13 +669,25 @@ if ( empty( $daily_rows ) ) {
     $pay_period_end   = isset( $ts->week_end_date ) ? (string) $ts->week_end_date : '';
 $pay_period = $pay_period_start . ( $pay_period_end ? ' to ' . $pay_period_end : '' );
 
-// Helper to format Y-m-d dates as "December 07, 2025"
+// === WIWTS STEP 7 BEGIN: Fix Week Of date display timezone shift ===
+// Helper to format Y-m-d dates as "December 07, 2025" using WP timezone (prevents off-by-one day).
 $format_week_date = function( $ymd ) {
 	if ( ! preg_match( '/^\d{4}-\d{2}-\d{2}$/', $ymd ) ) {
 		return $ymd;
 	}
-	return wp_date( 'F d, Y', strtotime( $ymd ) );
+
+	$tz = wp_timezone();
+
+	// Interpret the date at midnight in WP timezone (not UTC) to avoid shifting into the previous day.
+	try {
+		$dt = new DateTimeImmutable( $ymd . ' 00:00:00', $tz );
+		return wp_date( 'F d, Y', $dt->getTimestamp(), $tz );
+	} catch ( Exception $e ) {
+		// Fallback (should be rare)
+		return wp_date( 'F d, Y', strtotime( $ymd ) );
+	}
 };
+// === WIWTS STEP 7 END ===
 
     // Week boundaries (Sun–Sat) within the pay period.
     $week1_start = $pay_period_start;
@@ -2118,9 +2130,48 @@ if ( $selected_status === 'approved' ) {
 
 $out .= '<h3 style="margin:0 8px 10px 0;font-size:18px;line-height:1.2;">' . esc_html( $heading_text ) . '</h3>';
 
-// Dynamic approval deadline: 8:00 a.m. on the Tuesday after the upcoming Saturday (week ends Saturday).
+// Dynamic approval deadline:
+// - Weeks are Sunday -> Saturday (week ends Saturday).
+// - Deadline is Tuesday 8:00 a.m. after the week-end Saturday.
+// - Until Tuesday 8:00 a.m., keep showing LAST week + the upcoming deadline.
+// - After Tuesday 8:00 a.m., switch to CURRENT week (ending upcoming Saturday) + next deadline.
 $tz  = wp_timezone();
 $now = new DateTimeImmutable( 'now', $tz );
+
+// PHP: w => 0 (Sun) ... 6 (Sat)
+$dow = (int) $now->format( 'w' );
+
+// Last Saturday (most recent)
+$days_since_sat = ( $dow - 6 + 7 ) % 7;
+$last_sat = $now->modify( '-' . $days_since_sat . ' days' )->setTime( 0, 0, 0 );
+
+// Deadline for last week is Tuesday 8:00 a.m. after last Saturday
+$last_deadline = $last_sat->modify( '+3 days' )->setTime( 8, 0, 0 );
+
+// Decide which week to display based on the Tuesday 8:00 a.m. rollover
+if ( $now < $last_deadline ) {
+    // Before Tuesday 8:00 a.m.: show last week + upcoming deadline (this Tuesday)
+    $week_end_sat = $last_sat;
+    $deadline_tue = $last_deadline;
+} else {
+    // After Tuesday 8:00 a.m.: show current week (ending upcoming Saturday) + next Tuesday deadline
+    $days_to_sat  = ( 6 - $dow + 7 ) % 7;
+    $week_end_sat = $now->modify( '+' . $days_to_sat . ' days' )->setTime( 0, 0, 0 );
+    $deadline_tue = $week_end_sat->modify( '+3 days' )->setTime( 8, 0, 0 );
+}
+
+$week_start_sun = $week_end_sat->modify( '-6 days' );
+
+$week_range_label = wp_date( 'F j, Y', $week_start_sun->getTimestamp(), $tz )
+    . ' to '
+    . wp_date( 'F j, Y', $week_end_sat->getTimestamp(), $tz );
+
+$deadline_label = wp_date( 'l, F j', $deadline_tue->getTimestamp(), $tz );
+
+$out .= '<p style="margin:0 0 20px;font-size:16px;line-height:1.4;">'
+    . 'The approval deadline for the week of ' . esc_html( $week_range_label ) . ' is <strong>8:00 a.m.</strong> on <strong>' . esc_html( $deadline_label ) . '</strong>. '
+    . 'Timesheets not edited and approved by this time will be considered approved.'
+    . '</p>';
 
 // PHP: w => 0 (Sun) ... 6 (Sat)
 $dow         = (int) $now->format( 'w' );
@@ -2128,13 +2179,6 @@ $days_to_sat = ( 6 - $dow + 7 ) % 7;
 
 $week_end_sat = $now->modify( '+' . $days_to_sat . ' days' );
 $deadline_tue = $week_end_sat->modify( '+3 days' );
-
-$deadline_label = wp_date( 'l, F j', $deadline_tue->getTimestamp(), $tz );
-
-$out .= '<p style="margin:0 0 20px;font-size:16px;line-height:1.4;">'
-    . 'The approval deadline for this week is 8:00 a.m. on <strong>' . esc_html( $deadline_label ) . '</strong>. '
-    . 'Timesheets not edited and approved by this time will be considered approved.'
-    . '</p>';
 
     $out .= '<form method="get" action="' . esc_url( $action_url ) . '" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">';
 // Timesheet Records filter (UI only for now; functionality will be added in a later step).
