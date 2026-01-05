@@ -1928,30 +1928,39 @@ if (!ok) {
   body.append("clock_out_time", outVal);
   body.append("break_minutes", breakVal);
 
-  fetch(ajaxUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
-    body: body.toString()
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(resp){
-  if (!resp || !resp.success) {
-    var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Save failed";
-    alert(msg);
-    return;
-  }
+  // Show modal overlay immediately (before the AJAX request)
+ wiwtsShowRefreshingOverlay("Updating timesheet records…");
 
-  var newPayable = (resp && resp.data && resp.data.payable_hours !== undefined)
-    ? resp.data.payable_hours
-    : "";
+  window.requestAnimationFrame(function(){
 
-  alert("Saved successfully.\n\nUpdated Payable Hrs: " + newPayable);
+    fetch(ajaxUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+      body: body.toString()
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(resp){
+      if (!resp || !resp.success) {
+        var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Save failed";
+        wiwtsHideRefreshingOverlay();
+        alert(msg);
+        return;
+      }
 
-  window.location.reload();
-})
-  .catch(function(){
-    alert("AJAX error saving entry");
-  });
+      var newPayable = (resp && resp.data && resp.data.payable_hours !== undefined)
+        ? resp.data.payable_hours
+        : "";
+
+      alert("Saved successfully.\n\nUpdated Payable Hrs: " + newPayable);
+
+      window.location.reload();
+    })
+    .catch(function(){
+      wiwtsHideRefreshingOverlay();
+      alert("AJAX error saving entry");
+    });
+
+  }); // ✅ closes requestAnimationFrame
 
   return;
 }
