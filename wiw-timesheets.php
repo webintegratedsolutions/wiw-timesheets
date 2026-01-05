@@ -613,22 +613,6 @@ if ( current_user_can( 'manage_options' ) ) {
 $out .= '<table class="wp-list-table widefat fixed striped wiw-timesheet-details" style="margin:8px 0 14px;">';
 $out .= '<tbody>';
 
-// Created/Updated (formatted like admin: WP timezone + date/time format)
-$created_display = $this->wiw_format_datetime_local_pretty( $ts_created );
-$updated_display = $this->wiw_format_datetime_local_pretty( $ts_updated );
-
-// Location (Name + Address), matching admin Locations page
-$ts_location_id = ( $ts_header && isset( $ts_header->location_id ) ) ? (string) $ts_header->location_id : (string) $client_id;
-$loc            = $this->wiw_get_location_name_address_by_id( $ts_location_id );
-$loc_name       = isset( $loc['name'] ) ? (string) $loc['name'] : 'N/A';
-$loc_address    = isset( $loc['address'] ) ? (string) $loc['address'] : 'N/A';
-
-$out .= '<tr><th style="width:180px;">Created/Updated</th><td>'
-    . esc_html( $created_display )
-    . ' / '
-    . esc_html( $updated_display )
-    . '</td></tr>';
-
 // (Location row removed)
 
 $out .= '<tr><th>Timesheet Totals</th><td>'
