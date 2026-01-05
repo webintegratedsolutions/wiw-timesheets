@@ -1618,6 +1618,17 @@ $out .= '<script>
     } catch (e) {}
   }
 
+    // Hide overlay if an error occurs (so user is not stuck on a blocking screen).
+  function wiwtsHideRefreshingOverlay(){
+    try {
+      var overlay = document.getElementById("wiwts-refreshing-overlay");
+      if (overlay && overlay.parentNode) {
+        overlay.parentNode.removeChild(overlay);
+      }
+      document.body.style.cursor = "";
+    } catch (e) {}
+  }
+
   function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
@@ -1729,245 +1740,26 @@ $out .= '<script>
       return;
     }
 
-if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
-  e.preventDefault();
-
-  var row = closestRow(t);
-  if (!row) { alert("Row not found."); return; }
-
-  var cfg = document.getElementById("wiwts-client-ajax");
-  if (!cfg) { alert("Missing AJAX config."); return; }
-
-  var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
-  var nonceR  = cfg.getAttribute("data-nonce-reset") || "";
-
-  if (!ajaxUrl || !nonceR) { alert("Missing reset AJAX settings."); return; }
-
-  // Use the Save buttons entry id (it already exists on every row)
-  var saveBtn = row.querySelector(".wiw-client-save-btn");
-  var entryId = saveBtn ? (saveBtn.getAttribute("data-entry-id") || "") : "";
-
-  var form = new FormData();
-  form.append("action", "wiw_client_reset_entry_from_api");
-  form.append("security", nonceR);
-  form.append("entry_id", entryId);
-
-  fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      if (!data || !data.success){
-        var msg = (data && data.data && data.data.message) ? data.data.message : "Reset failed.";
-        alert(msg);
-        return;
-      }
-var p = (data && data.data && data.data.preview) ? data.data.preview : null;
-
-if (!p) {
-  alert((data.data && data.data.message) ? data.data.message : "Reset preview loaded.");
-  return;
-}
-
-var msg = "";
-msg += (data.data && data.data.message) ? data.data.message : "Reset preview loaded.";
-msg += "\n\nCurrent (Saved):";
-msg += "\nClock In: " + (p.current && p.current.clock_in ? p.current.clock_in : "N/A");
-msg += "\nClock Out: " + (p.current && p.current.clock_out ? p.current.clock_out : "N/A");
-msg += "\nBreak (Min): " + (p.current && typeof p.current.break_minutes !== "undefined" ? p.current.break_minutes : "0");
-
-msg += "\n\nFrom When I Work (Would Reset To):";
-msg += "\nClock In: " + (p.api && p.api.clock_in ? p.api.clock_in : "N/A");
-msg += "\nClock Out: " + (p.api && p.api.clock_out ? p.api.clock_out : "N/A");
-msg += "\nBreak (Min): " + (p.api && typeof p.api.break_minutes !== "undefined" ? p.api.break_minutes : "0");
-
-// If this Reset button is marked as preview-only (approved admin reset), show modal and stop here.
-var isPreviewOnly = (t && t.getAttribute && t.getAttribute("data-reset-preview-only") === "1");
-
-if (isPreviewOnly) {
-  var modal = document.getElementById("wiwts-reset-preview-modal");
-  var body  = document.getElementById("wiwts-reset-preview-body");
-  if (!modal || !body) {
-    alert(msg); // fallback
-    return;
-  }
-
-  body.textContent = msg;
-
-  function closeModal(){
-    modal.style.display = "none";
-    document.removeEventListener("keydown", onKeyDown);
-  }
-  function onKeyDown(ev){
-    if (ev.key === "Escape") { closeModal(); }
-  }
-
-  modal.style.display = "block";
-  document.addEventListener("keydown", onKeyDown);
-
-  var b  = document.getElementById("wiwts-reset-preview-backdrop");
-  var c1 = document.getElementById("wiwts-reset-preview-close");
-  var c2 = document.getElementById("wiwts-reset-preview-close-top");
-  var ap = document.getElementById("wiwts-reset-preview-apply");
-
-  if (b)  b.onclick  = closeModal;
-  if (c1) c1.onclick = closeModal;
-  if (c2) c2.onclick = closeModal;
-
-  // Wire Apply Reset for admin preview-only reset (same backend action as client reset).
-  if (ap) {
-    ap.disabled = false;
-    ap.textContent = "Apply Reset";
-
-    ap.onclick = function() {
-      if (!window.confirm("Apply this reset now? This will overwrite the saved Clock In/Out and Break values.")) {
-        return;
-      }
-
-ap.disabled = true;
-ap.textContent = "Applying...";
-
-// Ensure spinner keyframes exist (add once)
-(function(){
-  if (!document.getElementById("wiwts-spin-style")) {
-    var st = document.createElement("style");
-    st.id = "wiwts-spin-style";
-    st.textContent = "@keyframes wiwts-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
-    document.head.appendChild(st);
-  }
-})();
-
-// Add spinner (DOM-safe, no innerHTML)
-try {
-  // Remove any previous spinner if present
-  var oldSp = ap.querySelector(".wiwts-spinner");
-  if (oldSp) { oldSp.remove(); }
-
-  var sp = document.createElement("span");
-  sp.className = "wiwts-spinner";
-  sp.setAttribute("aria-hidden", "true");
-  sp.style.cssText = "display:inline-block;width:14px;height:14px;margin-left:6px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:wiwts-spin 0.8s linear infinite;vertical-align:-2px;";
-  ap.appendChild(sp);
-} catch (e) {
-  // If anything goes wrong, keep plain text only
-}
-
-// Disable Close button while applying
-if (c1) {
-  c1.disabled = true;
-  c1.style.opacity = "0.6";
-  c1.style.cursor = "not-allowed";
-}
-
-      var formData2 = new FormData();
-      formData2.append("action", "wiw_client_reset_entry_from_api");
-      formData2.append("security", nonceR);
-      formData2.append("entry_id", entryId);
-      formData2.append("apply_reset", "1");
-
-      fetch(ajaxUrl, {
-        method: "POST",
-        credentials: "same-origin",
-        body: formData2
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(resp2) {
-        if (!resp2 || !resp2.success) {
-          var m = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
-          alert(m);
-ap.disabled = false;
-ap.textContent = "Apply Reset";
-
-// Re-enable Close button on failure
-if (c1) {
-  c1.disabled = false;
-  c1.style.opacity = "";
-  c1.style.cursor = "";
-}
-
-return;
-
-        }
-        window.location.reload();
-      })
-      .catch(function() {
-        alert("Reset failed (network error).");
-        ap.disabled = false;
-        ap.textContent = "Apply Reset";
-      });
-    };
-  }
-
-  return;
-
-}
-
-// Existing behavior for normal (edit-mode) reset button:
-if (!window.confirm(msg + "\n\nApply this reset now?")) {
-  return;
-}
-
-var formData2 = new FormData();
-formData2.append("action", "wiw_client_reset_entry_from_api");
-formData2.append("security", nonceR);
-formData2.append("entry_id", entryId);
-formData2.append("apply_reset", "1");
-
-fetch(ajaxUrl, {
-  method: "POST",
-  credentials: "same-origin",
-  body: formData2
-})
-.then(function(r) { return r.json(); })
-.then(function(resp2) {
-  if (!resp2 || !resp2.success) {
-    var m = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
-    alert(m);
-    return;
-  }
-  window.location.reload();
-})
-.catch(function() {
-  alert("Reset failed (network error).");
-});
-
-    })
-    .catch(function(err){
-      console.error(err);
-      alert("Reset failed (network error).");
-    });
-
-  return;
-}
-
-    if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")){
-      e.preventDefault();
-      var row2 = closestRow(t);
-      if (!row2) return;
-      restoreOriginal(row2);
-      setEditing(row2, false);
-      return;
-    }
-
 if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
   e.preventDefault();
 
   if (t.disabled) { return; }
 
   var flagsRaw = t.getAttribute("data-unresolved-flags") || "";
-var msg = "Approve this entry?";
+  var msg = "Approve this entry?";
 
-if (flagsRaw) {
-  var parts = flagsRaw.split("||").map(function(s){ return (s || "").trim(); }).filter(Boolean);
-  if (parts.length) {
-    msg = "This entry has unresolved flags:\n\n";
-    parts.forEach(function(line){
-      msg += "• " + line + "\n";
-    });
-    msg += "\nApprove this entry?";
+  if (flagsRaw) {
+    var parts = flagsRaw.split("||").map(function(s){ return (s || "").trim(); }).filter(Boolean);
+    if (parts.length) {
+      msg = "This entry has unresolved flags:\n\n";
+      parts.forEach(function(line){
+        msg += "• " + line + "\n";
+      });
+      msg += "\nApprove this entry?";
+    }
   }
-}
 
-if (!confirm(msg)) { return; }
-
+  if (!confirm(msg)) { return; }
 
   var row = closestRow(t);
   if (!row) { alert("Approve clicked but row not found"); return; }
@@ -1987,43 +1779,52 @@ if (!confirm(msg)) { return; }
   form.append("security", nonceA);
   form.append("entry_id", entryId);
 
-  fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      if (!data || !data.success){
-        var msg = (data && data.data && data.data.message) ? data.data.message : "Approve failed.";
-        alert(msg);
-        return;
-      }
+  // Show overlay immediately (before network call) so it appears instantly on click.
+  wiwtsShowRefreshingOverlay("Updating timesheet records…");
 
-      // Update the Status cell in the row.
-      var statusCell = row.querySelector("td.wiw-client-cell-status");
-      if (statusCell) statusCell.textContent = "approved";
+  // Prevent double-click while request is in-flight.
+  t.disabled = true;
 
-      // Disable the approve button after success.
-            // Mark approved in UI.
-      t.textContent = "Approved";
-      t.disabled = true;
+  // Yield one frame so the overlay can paint before starting the fetch.
+  (window.requestAnimationFrame || function(cb){ setTimeout(cb, 0); })(function(){
 
-      // Show overlay and refresh so server-rendered UI updates (Reset button + Sign Off gating).
-      wiwtsShowRefreshingOverlay("Updating timesheet records…");
+    fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if (!data || !data.success){
+          var m = (data && data.data && data.data.message) ? data.data.message : "Approve failed.";
+          wiwtsHideRefreshingOverlay();
+          t.disabled = false;
+          alert(m);
+          return;
+        }
 
-// Very short delay so the overlay can paint before reload.
-setTimeout(function () {
-  window.location.reload();
-}, 50);
+        // Update the Status cell in the row.
+        var statusCell = row.querySelector("td.wiw-client-cell-status");
+        if (statusCell) statusCell.textContent = "approved";
 
-      // Hide Edit button for this row.
-      var editBtn = row.querySelector("button.wiw-client-edit-btn");
-      if (editBtn) {
-        editBtn.style.display = "none";
-      }
+        // Mark approved in UI.
+        t.textContent = "Approved";
 
-    })
-    .catch(function(err){
-      console.error(err);
-      alert("Approve failed (network error).");
-    });
+        // Refresh so server-rendered UI updates (Reset button + Sign Off gating).
+        setTimeout(function () {
+          window.location.reload();
+        }, 50);
+
+        // Hide Edit button for this row.
+        var editBtn = row.querySelector("button.wiw-client-edit-btn");
+        if (editBtn) {
+          editBtn.style.display = "none";
+        }
+      })
+      .catch(function(err){
+        console.error(err);
+        wiwtsHideRefreshingOverlay();
+        t.disabled = false;
+        alert("Approve failed (network error).");
+      });
+
+  });
 
   return;
 }
@@ -2481,31 +2282,35 @@ if ( $is_frontend_admin ) {
     ? array( 'wiw_status', 'wiw_emp', 'wiw_period' )
     : array( 'wiw_status', 'wiw_emp' );
 
-// === WIWTS STEP 13 BEGIN: Export CSV button (frontend) ===
+// === WIWTS STEP 13 BEGIN: Export CSV button (admin only) ===
 $out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( $reset_args, $action_url ) ) . '">Default</a>';
 
-// Build Export URL (GET download) that preserves current filter args.
-$export_args = array(
-    'action'              => 'wiwts_export_csv',
-    'wiwts_export_nonce'  => wp_create_nonce( 'wiwts_export_csv' ),
-);
+if ( current_user_can( 'manage_options' ) ) {
 
-// Preserve current filter values (if present).
-if ( isset( $_GET['wiw_status'] ) ) {
-    $export_args['wiw_status'] = sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) );
-}
-if ( isset( $_GET['wiw_emp'] ) ) {
-    $export_args['wiw_emp'] = sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) );
-}
-if ( isset( $_GET['wiw_period'] ) ) {
-    $export_args['wiw_period'] = sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) );
-}
+    // Build Export URL (GET download) that preserves current filter args.
+    $export_args = array(
+        'action'              => 'wiwts_export_csv',
+        'wiwts_export_nonce'  => wp_create_nonce( 'wiwts_export_csv' ),
+    );
 
-$export_url = add_query_arg( $export_args, admin_url( 'admin-post.php' ) );
+    // Preserve current filter values (if present).
+    if ( isset( $_GET['wiw_status'] ) ) {
+        $export_args['wiw_status'] = sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) );
+    }
+    if ( isset( $_GET['wiw_emp'] ) ) {
+        $export_args['wiw_emp'] = sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) );
+    }
+    if ( isset( $_GET['wiw_period'] ) ) {
+        $export_args['wiw_period'] = sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) );
+    }
 
-$out .= '<span aria-hidden="true" style="display:inline-block;border-left:1px solid #c3c4c7;height:28px;vertical-align:middle;margin:0 10px;"></span>';
-$out .= '<a class="wiw-btn secondary" href="' . esc_url( $export_url ) . '">Export</a>';
+    $export_url = add_query_arg( $export_args, admin_url( 'admin-post.php' ) );
+
+    $out .= '<span aria-hidden="true" style="display:inline-block;border-left:1px solid #c3c4c7;height:28px;vertical-align:middle;margin:0 10px;"></span>';
+    $out .= '<a class="wiw-btn secondary" href="' . esc_url( $export_url ) . '">Export</a>';
+}
 // === WIWTS STEP 13 END ===
+
 
     $out .= '</div>';
 
