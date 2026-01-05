@@ -705,6 +705,38 @@ $out .= '<tr><th>Totals: </th><td>'
 	. 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
 	. '</td></tr>';
 
+// === WIWTS ADD BEGIN: Locations row (frontend admin only) ===
+$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+$location_ids = $wpdb->get_col(
+	$wpdb->prepare(
+		"SELECT DISTINCT location_id
+		 FROM {$table_entries}
+		 WHERE timesheet_id = %d
+		   AND location_id IS NOT NULL
+		   AND location_id != 0",
+		absint( $timesheet_id_for_period )
+	)
+);
+
+$location_labels = array();
+
+if ( ! empty( $location_ids ) ) {
+	foreach ( $location_ids as $loc_id ) {
+		$loc = $this->wiw_get_location_name_address_by_id( (string) $loc_id );
+		if ( ! empty( $loc['name'] ) ) {
+			$location_labels[] = $loc['name'];
+		}
+	}
+}
+
+$locations_display = ! empty( $location_labels )
+	? implode( ', ', array_map( 'esc_html', $location_labels ) )
+	: '—';
+
+$out .= '<tr><th>Locations:</th><td>' . $locations_display . '</td></tr>';
+// === WIWTS ADD END ===
+
 $out .= '<tr><th>Actions:</th><td>' . $actions_html . '</td></tr>';
 
 $out .= '</tbody></table>';
