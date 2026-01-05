@@ -130,7 +130,11 @@ public function render_client_ui() {
 $is_frontend_admin = current_user_can( 'manage_options' );
 
 // Timesheet Records filter (applies primarily to wp_wiw_timesheet_entries.status)
-$filter_status = isset( $_GET['wiw_status'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) ) : 'pending';
+if ( isset( $_GET['wiw_status'] ) ) {
+    $filter_status = sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) );
+} else {
+    $filter_status = $is_frontend_admin ? 'overdue' : 'pending';
+}
 
 // Base allowed statuses for everyone.
 $allowed_status = array( '', 'pending', 'approved', 'archived' );
@@ -2178,7 +2182,11 @@ foreach ( $timesheets as $ts ) {
 
     $out  = '<div class="wiw-client-timesheets" style="margin-bottom:14px;">';
     // Dynamic header based on Timesheet Records filter.
-$selected_status = isset( $_GET['wiw_status'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) ) : 'pending';
+if ( isset( $_GET['wiw_status'] ) ) {
+    $selected_status = sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) );
+} else {
+    $selected_status = $is_frontend_admin ? 'overdue' : 'pending';
+}
 
 $heading_text = 'Timesheets Pending Approval';
 if ( $selected_status === 'approved' ) {
@@ -2247,11 +2255,11 @@ $out .= '<div>';
 $out .= '<label for="wiw_status" style="display:block;font-weight:600;margin-bottom:4px;">Timesheet Records:</label>';
 $out .= '<select id="wiw_status" name="wiw_status" style="min-width:200px;">';
 
-$out .= '<option value="pending"' . selected( $selected_status, 'pending', false ) . '>Pending</option>';
-
 if ( $is_frontend_admin ) {
-    $out .= '<option value="overdue"' . selected( $selected_status, 'overdue', false ) . '>Overdue</option>';
+    $out .= '<option value="overdue"' . selected( $selected_status, 'overdue', false ) . '>Past Due</option>';
 }
+
+$out .= '<option value="pending"' . selected( $selected_status, 'pending', false ) . '>Pending</option>';
 
 $out .= '<option value="approved"' . selected( $selected_status, 'approved', false ) . '>Approved</option>';
 $out .= '<option value="archived"' . selected( $selected_status, 'archived', false ) . '>Archived</option>';
