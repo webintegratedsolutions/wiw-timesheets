@@ -1269,13 +1269,22 @@ if ( $flag104_time_id > 0 ) {
 		}
 	}
 
-	$sql      = "SELECT extra_time_status FROM {$table_entries} {$where_sql} LIMIT 1";
+$sql      = "SELECT status, extra_time_status FROM {$table_entries} {$where_sql} LIMIT 1";
 	$prepared = $wpdb->prepare( $sql, $params );
 	$row      = $wpdb->get_row( $prepared );
 
-	if ( $row && isset( $row->extra_time_status ) && $row->extra_time_status !== '' ) {
-		$flag104_status = (string) $row->extra_time_status;
-	}
+$flag104_entry_status = '';
+if ( $row && isset( $row->status ) ) {
+	$flag104_entry_status = strtolower( trim( (string) $row->status ) );
+}
+
+if ( $row && isset( $row->extra_time_status ) && $row->extra_time_status !== '' ) {
+	$flag104_status = (string) $row->extra_time_status;
+}
+
+// Approved entries can no longer action Confirm/Deny; treat unset as "not actioned".
+$flag104_locked_unset = ( $flag104_entry_status === 'approved' && ( $flag104_status === '' || $flag104_status === 'unset' ) );
+
 }
 
 // Change wording based on confirmed status (UI only).
@@ -1289,14 +1298,26 @@ if ( $flag104_status === 'confirmed' ) {
 }
 
 $out .= '<tr class="wiw-flag-followup wiw-flag-followup-104">';
-$out .= '<td ' . $cell_style . ' colspan="4">'
-	. '<span class="wiw-flag-icon" aria-hidden="true" style="margin-right:6px;">⏱️</span>'
-	. '<strong>Confirm Additional Time</strong> '
-	. '(Another <strong>' . esc_html( $extra_hours_text ) . '</strong> hours after the scheduled shift end time ' . $payable_tense . ')'
-	. '</td>';
+
+if ( $flag104_locked_unset ) {
+	$out .= '<td ' . $cell_style . ' colspan="4">'
+		. '<span class="wiw-flag-icon" aria-hidden="true" style="margin-right:6px;">⏱️</span>'
+		. '<strong>Confirm Additional Time</strong> '
+		. 'not actioned as payable on another <strong>' . esc_html( $extra_hours_text ) . '</strong> hours after the scheduled shift end time.'
+		. '</td>';
+} else {
+	$out .= '<td ' . $cell_style . ' colspan="4">'
+		. '<span class="wiw-flag-icon" aria-hidden="true" style="margin-right:6px;">⏱️</span>'
+		. '<strong>Confirm Additional Time</strong> '
+		. '(Another <strong>' . esc_html( $extra_hours_text ) . '</strong> hours after the scheduled shift end time ' . $payable_tense . ')'
+		. '</td>';
+}
 
 // === WIWTS FLAG 104 ACTIONS CELL START ===
-if ( $flag104_status === 'confirmed' ) {
+if ( $flag104_locked_unset ) {
+	// Approved + unset: do not show any action buttons.
+	$actions_html = '';
+} elseif ( $flag104_status === 'confirmed' ) {
 	$actions_html = '<button type="button" class="wiw-btn secondary" disabled="disabled" style="opacity:0.6;cursor:not-allowed;">Confirmed</button>';
 } elseif ( $flag104_status === 'denied' ) {
 	$actions_html = '<button type="button" class="wiw-btn secondary" disabled="disabled" style="opacity:0.6;cursor:not-allowed;">Denied</button>';
