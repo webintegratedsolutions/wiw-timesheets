@@ -46,6 +46,8 @@ require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
+// Include the timesheet export to CSV functionality
+require_once WIW_PLUGIN_PATH . 'includes/timesheet-export-csv.php';
 
 /**
 * Core Plugin Class
@@ -2479,14 +2481,30 @@ if ( $is_frontend_admin ) {
     ? array( 'wiw_status', 'wiw_emp', 'wiw_period' )
     : array( 'wiw_status', 'wiw_emp' );
 
-// === WIWTS STEP 13 BEGIN: Add Export placeholder button (frontend admin only) ===
+// === WIWTS STEP 13 BEGIN: Export CSV button (frontend) ===
 $out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( $reset_args, $action_url ) ) . '">Default</a>';
 
-if ( $is_frontend_admin ) {
-    // Visual divider + placeholder Export button (no functionality yet).
-    $out .= '<span aria-hidden="true" style="display:inline-block;border-left:1px solid #c3c4c7;height:28px;vertical-align:middle;margin:0 10px;"></span>';
-    $out .= '<button type="button" class="wiw-btn secondary" disabled="disabled" style="opacity:0.7;cursor:not-allowed;">Export</button>';
+// Build Export URL (GET download) that preserves current filter args.
+$export_args = array(
+    'action'              => 'wiwts_export_csv',
+    'wiwts_export_nonce'  => wp_create_nonce( 'wiwts_export_csv' ),
+);
+
+// Preserve current filter values (if present).
+if ( isset( $_GET['wiw_status'] ) ) {
+    $export_args['wiw_status'] = sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) );
 }
+if ( isset( $_GET['wiw_emp'] ) ) {
+    $export_args['wiw_emp'] = sanitize_text_field( wp_unslash( $_GET['wiw_emp'] ) );
+}
+if ( isset( $_GET['wiw_period'] ) ) {
+    $export_args['wiw_period'] = sanitize_text_field( wp_unslash( $_GET['wiw_period'] ) );
+}
+
+$export_url = add_query_arg( $export_args, admin_url( 'admin-post.php' ) );
+
+$out .= '<span aria-hidden="true" style="display:inline-block;border-left:1px solid #c3c4c7;height:28px;vertical-align:middle;margin:0 10px;"></span>';
+$out .= '<a class="wiw-btn secondary" href="' . esc_url( $export_url ) . '">Export</a>';
 // === WIWTS STEP 13 END ===
 
     $out .= '</div>';
