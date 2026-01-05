@@ -531,24 +531,27 @@ if ( in_array( $ts_status_norm, array( 'finalized', 'approved' ), true ) ) {
 		ARRAY_A
 	);
 
-	$total_entries  = 0;
-	$approved_count = 0;
-	$archived_count = 0;
+$total_entries  = 0;
+$approved_count = 0;
+$archived_count = 0;
+$pending_count  = 0;
 
-	if ( ! empty( $status_rows ) ) {
-		foreach ( $status_rows as $row ) {
-			$cnt = isset( $row['cnt'] ) ? (int) $row['cnt'] : 0;
-			$st  = isset( $row['status'] ) ? strtolower( trim( (string) $row['status'] ) ) : '';
+if ( ! empty( $status_rows ) ) {
+	foreach ( $status_rows as $row ) {
+		$cnt = isset( $row['cnt'] ) ? (int) $row['cnt'] : 0;
+		$st  = isset( $row['status'] ) ? strtolower( trim( (string) $row['status'] ) ) : '';
 
-			$total_entries += $cnt;
+		$total_entries += $cnt;
 
-			if ( $st === 'approved' ) {
-				$approved_count += $cnt;
-			} elseif ( $st === 'archived' ) {
-				$archived_count += $cnt;
-			}
+		if ( $st === 'approved' ) {
+			$approved_count += $cnt;
+		} elseif ( $st === 'archived' ) {
+			$archived_count += $cnt;
+		} elseif ( $st === 'pending' ) {
+			$pending_count += $cnt;
 		}
 	}
+}
 
 	// Rules:
 	// - All archived => read-only => disabled.
@@ -613,13 +616,83 @@ if ( current_user_can( 'manage_options' ) ) {
 $out .= '<table class="wp-list-table widefat fixed striped wiw-timesheet-details" style="margin:8px 0 14px;">';
 $out .= '<tbody>';
 
-// (Location row removed)
+// Shift Entries summary (front-end admin only)
+$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+$ts_id         = absint( $timesheet_id_for_period );
 
-$out .= '<tr><th>Timesheet Totals</th><td>'
-    . 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
-    . 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
-    . 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
-    . '</td></tr>';
+// Totals for this timesheet (ADMIN: not location-scoped)
+$total_records = (int) $wpdb->get_var(
+	$wpdb->prepare(
+		"SELECT COUNT(*) FROM {$table_entries} WHERE timesheet_id = %d",
+		$ts_id
+	)
+);
+
+$approved_records = (int) $wpdb->get_var(
+	$wpdb->prepare(
+		"SELECT COUNT(*) FROM {$table_entries} WHERE timesheet_id = %d AND status = 'approved'",
+		$ts_id
+	)
+);
+
+$pending_records = (int) $wpdb->get_var(
+	$wpdb->prepare(
+		"SELECT COUNT(*) FROM {$table_entries} WHERE timesheet_id = %d AND status = 'pending'",
+		$ts_id
+	)
+);
+
+// Determine the current "approval week start" using the Tuesday 8:00am rollover rule (WP timezone)
+$now_ts = (int) current_time( 'timestamp' );
+$tz     = function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'UTC' );
+
+$now_dt = new DateTime( '@' . $now_ts );
+$now_dt->setTimezone( $tz );
+
+// Week start = Sunday 00:00:00 of the current week
+$week_start_dt = clone $now_dt;
+$weekday_w     = (int) $week_start_dt->format( 'w' ); // 0=Sun..6=Sat
+$week_start_dt->setTime( 0, 0, 0 );
+if ( $weekday_w > 0 ) {
+	$week_start_dt->modify( '-' . $weekday_w . ' days' );
+}
+
+// Tuesday 08:00:00 of the current week
+$tuesday_8am_dt = clone $week_start_dt;
+$tuesday_8am_dt->modify( '+2 days' );
+$tuesday_8am_dt->setTime( 8, 0, 0 );
+
+// If before Tue 8am, we are still approving "last week"
+$approval_week_start_dt = ( $now_dt < $tuesday_8am_dt ) ? ( clone $week_start_dt )->modify( '-7 days' ) : $week_start_dt;
+$approval_week_start_ymd = $approval_week_start_dt->format( 'Y-m-d' );
+
+// Is this timesheet finalized?
+$ts_status_raw = strtolower( trim( (string) $ts_status ) );
+$is_finalized  = ( $ts_status_raw === 'finalized' );
+
+// Is this timesheet "past due" (subset of pending)?
+$ts_end_ymd = ( $ts_header && isset( $ts_header->week_end_date ) ) ? (string) $ts_header->week_end_date : '';
+$is_past_due_timesheet = ( $ts_end_ymd !== '' && $ts_end_ymd < $approval_week_start_ymd );
+
+$past_due_records = ( ! $is_finalized && $is_past_due_timesheet ) ? $pending_records : 0;
+
+$out .= '<tr><th>Totals</th><td>'
+	. 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
+	. 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
+	. 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
+	. '</td></tr>';
+
+if ( $is_finalized ) {
+	$out .= '<tr><th>Shift Entries</th><td>'
+		. 'Total Records: <strong>' . esc_html( (string) $total_records ) . '</strong>'
+		. '</td></tr>';
+} else {
+	$out .= '<tr><th>Shift Entries</th><td>'
+		. 'Total Records: <strong>' . esc_html( (string) $total_records ) . '</strong> | '
+		. 'Approved: <strong>' . esc_html( (string) $approved_records ) . '</strong> | '
+		. 'Past Due: <strong>' . esc_html( (string) $past_due_records ) . '</strong>'
+		. '</td></tr>';
+}
 
 $out .= '<tr><th>Actions</th><td>' . $actions_html . '</td></tr>';
 
