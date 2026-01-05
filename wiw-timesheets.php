@@ -464,23 +464,35 @@ $ts_status  = ( $ts_header && isset( $ts_header->status ) ) ? (string) $ts_heade
 $ts_created = ( $ts_header && isset( $ts_header->created_at ) ) ? (string) $ts_header->created_at : '';
 $ts_updated = ( $ts_header && isset( $ts_header->updated_at ) ) ? (string) $ts_header->updated_at : '';
 
-$ts_total_sched  = ( $ts_header && isset( $ts_header->total_scheduled_hours ) ) ? (string) $ts_header->total_scheduled_hours : '0.00';
-$ts_total_clock  = ( $ts_header && isset( $ts_header->total_clocked_hours ) ) ? (string) $ts_header->total_clocked_hours : '0.00';
-
-// Optional: sum payable hours from entries table (source of truth for daily rows).
+// Totals (front-end admin): compute from entries table so it matches the daily rows UI.
+$ts_total_sched   = '0.00';
+$ts_total_clock   = '0.00';
 $ts_total_payable = '0.00';
+
 if ( $timesheet_id_for_period !== '' ) {
+
 	global $wpdb;
+
 	$table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
-	$sum_payable   = $wpdb->get_var(
+
+	// Admin front-end view should not be location-scoped.
+	$totals_row = $wpdb->get_row(
 		$wpdb->prepare(
-			"SELECT SUM(payable_hours) FROM {$table_entries} WHERE timesheet_id = %d AND location_id = %d",
-			absint( $timesheet_id_for_period ),
-			absint( $client_id )
-		)
+			"SELECT
+				COALESCE(SUM(scheduled_hours), 0) AS total_sched,
+				COALESCE(SUM(clocked_hours), 0)   AS total_clock,
+				COALESCE(SUM(payable_hours), 0)   AS total_payable
+			 FROM {$table_entries}
+			 WHERE timesheet_id = %d",
+			absint( $timesheet_id_for_period )
+		),
+		ARRAY_A
 	);
-	if ( $sum_payable !== null && $sum_payable !== '' ) {
-		$ts_total_payable = (string) $sum_payable;
+
+	if ( is_array( $totals_row ) ) {
+		$ts_total_sched   = number_format( (float) ( $totals_row['total_sched'] ?? 0 ), 2, '.', '' );
+		$ts_total_clock   = number_format( (float) ( $totals_row['total_clock'] ?? 0 ), 2, '.', '' );
+		$ts_total_payable = number_format( (float) ( $totals_row['total_payable'] ?? 0 ), 2, '.', '' );
 	}
 }
 
