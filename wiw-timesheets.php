@@ -1282,8 +1282,11 @@ if ( $row && isset( $row->extra_time_status ) && $row->extra_time_status !== '' 
 	$flag104_status = (string) $row->extra_time_status;
 }
 
-// Approved entries can no longer action Confirm/Deny; treat unset as "not actioned".
-$flag104_locked_unset = ( $flag104_entry_status === 'approved' && ( $flag104_status === '' || $flag104_status === 'unset' ) );
+// Approved OR archived entries can no longer action Confirm/Deny; treat unset as "not actioned".
+$flag104_locked_unset = (
+	in_array( $flag104_entry_status, array( 'approved', 'archived' ), true )
+	&& ( $flag104_status === '' || $flag104_status === 'unset' )
+);
 
 }
 
