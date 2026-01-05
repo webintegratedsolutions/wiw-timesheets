@@ -631,7 +631,7 @@ $out .= '<tr><th style="width:180px;">Created/Updated</th><td>'
 
 // (Location row removed)
 
-$out .= '<tr><th>Totals</th><td>'
+$out .= '<tr><th>Timesheet Totals</th><td>'
     . 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
     . 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
     . 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
