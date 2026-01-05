@@ -621,8 +621,6 @@ $out .= '<tr><th>Timesheet Totals</th><td>'
     . 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
     . '</td></tr>';
 
-$out .= '<tr><th>Status</th><td>' . esc_html( $ts_status !== '' ? $ts_status : 'N/A' ) . '</td></tr>';
-
 $out .= '<tr><th>Actions</th><td>' . $actions_html . '</td></tr>';
 
 $out .= '</tbody></table>';
