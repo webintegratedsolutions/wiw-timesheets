@@ -2302,13 +2302,21 @@ if ( $is_frontend_admin ) {
     $out .= '</div>';
 }
 
-    $out .= '<div>';
+    $out .= '<div style="top:3px;position:relative;">';
     $out .= '<button type="submit" class="wiw-btn">Filter</button> ';
-$reset_args = $is_frontend_admin
+    $reset_args = $is_frontend_admin
     ? array( 'wiw_status', 'wiw_emp', 'wiw_period' )
     : array( 'wiw_status', 'wiw_emp' );
 
-$out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( $reset_args, $action_url ) ) . '">Reset</a>';
+// === WIWTS STEP 13 BEGIN: Add Export placeholder button (frontend admin only) ===
+$out .= '<a class="wiw-btn secondary" href="' . esc_url( remove_query_arg( $reset_args, $action_url ) ) . '">Default</a>';
+
+if ( $is_frontend_admin ) {
+    // Visual divider + placeholder Export button (no functionality yet).
+    $out .= '<span aria-hidden="true" style="display:inline-block;border-left:1px solid #c3c4c7;height:28px;vertical-align:middle;margin:0 10px;"></span>';
+    $out .= '<button type="button" class="wiw-btn secondary" disabled="disabled" style="opacity:0.7;cursor:not-allowed;">Export</button>';
+}
+// === WIWTS STEP 13 END ===
 
     $out .= '</div>';
 
