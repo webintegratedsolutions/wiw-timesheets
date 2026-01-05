@@ -129,9 +129,17 @@ public function render_client_ui() {
 // Filter-aware summary (count reflects filtered results)
 $is_frontend_admin = current_user_can( 'manage_options' );
 
-// Timesheet Records filter (applies to wp_wiw_timesheet_entries.status)
+// Timesheet Records filter (applies primarily to wp_wiw_timesheet_entries.status)
 $filter_status = isset( $_GET['wiw_status'] ) ? sanitize_text_field( wp_unslash( $_GET['wiw_status'] ) ) : 'pending';
+
+// Base allowed statuses for everyone.
 $allowed_status = array( '', 'pending', 'approved', 'archived' );
+
+// Front-end admin only: allow "overdue"
+if ( $is_frontend_admin ) {
+    $allowed_status[] = 'overdue';
+}
+
 if ( ! in_array( $filter_status, $allowed_status, true ) ) {
     $filter_status = 'pending';
 }
@@ -229,10 +237,60 @@ $params  = array();
 $where[] = "e.timesheet_id = ts.id";
 
 // Status filter (applies to entries table)
+// Special case: "overdue" = subset of pending (weeks <= deadline week-end and only after deadline passes).
+// === WIWTS STEP 8 BEGIN: Overdue filter (pending before current approval week) ===
+
+// Status filter (applies to entries table)
 if ( $filter_status !== '' ) {
-    $where[]  = "e.status = %s";
-    $params[] = (string) $filter_status;
+
+    if ( $is_frontend_admin && $filter_status === 'overdue' ) {
+
+        /*
+         * Overdue = pending records from weeks BEFORE the current approval week
+         * shown in the deadline paragraph.
+         *
+         * We already know the approval week is Sunday -> Saturday.
+         * Any week_end_date < approval_week_start is overdue.
+         */
+
+        $tz  = wp_timezone();
+        $now = new DateTimeImmutable( 'now', $tz );
+
+        // Determine the approval week start (Sunday) using the SAME rule as the paragraph.
+        $dow            = (int) $now->format( 'w' ); // 0=Sun .. 6=Sat
+        $days_since_sat = ( $dow - 6 + 7 ) % 7;
+        $last_sat       = $now->modify( '-' . $days_since_sat . ' days' )->setTime( 0, 0, 0 );
+        $last_deadline  = $last_sat->modify( '+3 days' )->setTime( 8, 0, 0 );
+
+        if ( $now < $last_deadline ) {
+            // Before Tuesday 8am → approval week is LAST week
+            $approval_week_end   = $last_sat;
+            $approval_week_start = $approval_week_end->modify( '-6 days' );
+        } else {
+            // After Tuesday 8am → approval week is CURRENT week
+            $days_to_sat         = ( 6 - $dow + 7 ) % 7;
+            $approval_week_end   = $now->modify( '+' . $days_to_sat . ' days' )->setTime( 0, 0, 0 );
+            $approval_week_start = $approval_week_end->modify( '-6 days' );
+        }
+
+        $cutoff_ymd = $approval_week_start->format( 'Y-m-d' );
+
+        // Overdue = pending entries for weeks before the approval week
+        $where[]  = "e.status = %s";
+        $params[] = 'pending';
+
+        $where[]  = "ts.week_end_date < %s";
+        $params[] = $cutoff_ymd;
+
+    } else {
+
+        // Normal behavior for pending / approved / archived
+        $where[]  = "e.status = %s";
+        $params[] = (string) $filter_status;
+    }
 }
+
+// === WIWTS STEP 8 END ===
 
 // Client scoping: entries.location_id must match the client id (admins see all)
 if ( ! $is_frontend_admin ) {
@@ -640,7 +698,10 @@ $out .= '<th>Actions</th>';
             $actions_html = '<span style="color:#666;">N/A</span>';
 
 $timesheet_id = isset( $ts->id ) ? absint( $ts->id ) : 0;
-$daily_rows   = $this->get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id, $filter_status );
+// ===  Overdue view should display pending daily rows ===
+$daily_status_filter = ( $filter_status === 'overdue' ) ? 'pending' : $filter_status;
+
+$daily_rows = $this->get_scoped_daily_records_for_timesheet( $client_id, $timesheet_id, $daily_status_filter );
 
 // If no daily rows exist, still show a single summary row using the timesheet header.
 if ( empty( $daily_rows ) ) {
@@ -2185,10 +2246,17 @@ $deadline_tue = $week_end_sat->modify( '+3 days' );
 $out .= '<div>';
 $out .= '<label for="wiw_status" style="display:block;font-weight:600;margin-bottom:4px;">Timesheet Records:</label>';
 $out .= '<select id="wiw_status" name="wiw_status" style="min-width:200px;">';
+
 $out .= '<option value="pending"' . selected( $selected_status, 'pending', false ) . '>Pending</option>';
+
+if ( $is_frontend_admin ) {
+    $out .= '<option value="overdue"' . selected( $selected_status, 'overdue', false ) . '>Overdue</option>';
+}
+
 $out .= '<option value="approved"' . selected( $selected_status, 'approved', false ) . '>Approved</option>';
 $out .= '<option value="archived"' . selected( $selected_status, 'archived', false ) . '>Archived</option>';
 $out .= '<option value=""' . selected( $selected_status, '', false ) . '>All Records</option>';
+
 $out .= '</select>';
 $out .= '</div>';
 
@@ -2279,6 +2347,53 @@ function get_scoped_local_timesheets( $client_id, $status_filter = '' ) {
 if ( current_user_can( 'manage_options' ) ) {
 
     $status_filter = (string) $status_filter;
+    // === WIWTS STEP 9 BEGIN: Support "overdue" in get_scoped_local_timesheets (admin) ===
+if ( $status_filter === 'overdue' ) {
+
+    // Overdue = pending entries where the week_end_date is before the current approval week (same rule as paragraph).
+    $tz  = wp_timezone();
+    $now = new DateTimeImmutable( 'now', $tz );
+
+    $dow            = (int) $now->format( 'w' ); // 0=Sun .. 6=Sat
+    $days_since_sat = ( $dow - 6 + 7 ) % 7;
+    $last_sat       = $now->modify( '-' . $days_since_sat . ' days' )->setTime( 0, 0, 0 );
+    $last_deadline  = $last_sat->modify( '+3 days' )->setTime( 8, 0, 0 );
+
+    if ( $now < $last_deadline ) {
+        // Before Tuesday 8am → approval week is LAST week
+        $approval_week_end   = $last_sat;
+        $approval_week_start = $approval_week_end->modify( '-6 days' );
+    } else {
+        // After Tuesday 8am → approval week is CURRENT week
+        $days_to_sat         = ( 6 - $dow + 7 ) % 7;
+        $approval_week_end   = $now->modify( '+' . $days_to_sat . ' days' )->setTime( 0, 0, 0 );
+        $approval_week_start = $approval_week_end->modify( '-6 days' );
+    }
+
+    $cutoff_ymd = $approval_week_start->format( 'Y-m-d' );
+
+    // Note: We filter timesheets by week_end_date < cutoff, and ensure they have pending entries.
+    $sql = $wpdb->prepare(
+        "
+        SELECT ts.*,
+               (SELECT COUNT(*) FROM {$table_entries} e WHERE e.timesheet_id = ts.id AND e.status = %s) AS daily_record_count
+        FROM {$table_ts} ts
+        WHERE ts.week_end_date < %s
+          AND EXISTS (
+              SELECT 1 FROM {$table_entries} e2
+              WHERE e2.timesheet_id = ts.id
+                AND e2.status = %s
+          )
+        ORDER BY ts.week_start_date DESC, ts.id DESC
+        ",
+        'pending',
+        $cutoff_ymd,
+        'pending'
+    );
+
+    return $wpdb->get_results( $sql );
+}
+// === WIWTS STEP 9 END ===
 
     if ( $status_filter !== '' ) {
         $sql = $wpdb->prepare(
