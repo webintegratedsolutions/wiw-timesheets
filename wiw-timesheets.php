@@ -118,7 +118,15 @@ public function render_client_ui() {
     $client_id       = is_scalar( $client_id_raw ) ? trim( (string) $client_id_raw ) : '';
 
     $out  = '<div class="wiw-client-timesheets">';
-    $out .= '<div id="wiwts-client-ajax" data-ajax-url="' . esc_attr( admin_url( 'admin-ajax.php' ) ) . '" data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '" data-nonce-approve="' . esc_attr( wp_create_nonce( 'wiw_local_approve_entry' ) ) . '" data-nonce-reset="' . esc_attr( wp_create_nonce( 'wiw_client_reset_entry_from_api' ) ) . '"></div>';
+// === WIWTS STEP 12 BEGIN: Fix AJAX config attributes ===
+$out .= '<div id="wiwts-client-ajax"'
+    . ' data-ajax-url="' . esc_url( admin_url( 'admin-ajax.php' ) ) . '"'
+    . ' data-nonce="' . esc_attr( wp_create_nonce( 'wiw_local_edit_entry' ) ) . '"'
+    . ' data-nonce-approve="' . esc_attr( wp_create_nonce( 'wiw_local_approve_entry' ) ) . '"'
+    . ' data-nonce-reset="' . esc_attr( wp_create_nonce( 'wiw_client_reset_entry_from_api' ) ) . '"'
+    . '></div>';
+// === WIWTS STEP 12 END ===
+
 
     if ( $client_id === '' ) {
         $out .= '<p>No client account number found on your user profile.</p>';
@@ -1030,7 +1038,7 @@ if ( $is_archived_row ) {
         $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
     }
 
-    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( (int) $time_id ) . '"' . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '"' . $approve_disabled . '>' . esc_html( $approve_label ) . '</button>';
 
     $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr( isset( $dr->id ) ? absint( $dr->id ) : 0 ) . '">Save</button>';
 
