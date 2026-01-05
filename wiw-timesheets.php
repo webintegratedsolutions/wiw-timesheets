@@ -291,7 +291,7 @@ if ( $filter_status !== '' ) {
         $where[]  = "e.status = %s";
         $params[] = 'pending';
 
-        $where[]  = "ts.week_end_date < %s";
+        $where[]  = "e.date < %s";
         $params[] = $cutoff_ymd;
 
     } else {
@@ -620,7 +620,7 @@ $out .= '<tbody>';
 $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 $ts_id         = absint( $timesheet_id_for_period );
 
-// Totals for this timesheet (ADMIN: not location-scoped)
+// Totals for this timesheet (admin front-end should NOT be location-scoped)
 $total_records = (int) $wpdb->get_var(
 	$wpdb->prepare(
 		"SELECT COUNT(*) FROM {$table_entries} WHERE timesheet_id = %d",
@@ -663,7 +663,7 @@ $tuesday_8am_dt->modify( '+2 days' );
 $tuesday_8am_dt->setTime( 8, 0, 0 );
 
 // If before Tue 8am, we are still approving "last week"
-$approval_week_start_dt = ( $now_dt < $tuesday_8am_dt ) ? ( clone $week_start_dt )->modify( '-7 days' ) : $week_start_dt;
+$approval_week_start_dt  = ( $now_dt < $tuesday_8am_dt ) ? ( clone $week_start_dt )->modify( '-7 days' ) : $week_start_dt;
 $approval_week_start_ymd = $approval_week_start_dt->format( 'Y-m-d' );
 
 // Is this timesheet finalized?
@@ -671,30 +671,40 @@ $ts_status_raw = strtolower( trim( (string) $ts_status ) );
 $is_finalized  = ( $ts_status_raw === 'finalized' );
 
 // Is this timesheet "past due" (subset of pending)?
-$ts_end_ymd = ( $ts_header && isset( $ts_header->week_end_date ) ) ? (string) $ts_header->week_end_date : '';
-$is_past_due_timesheet = ( $ts_end_ymd !== '' && $ts_end_ymd < $approval_week_start_ymd );
+$ts_end_ymd            = ( $ts_header && isset( $ts_header->week_end_date ) ) ? (string) $ts_header->week_end_date : '';
 
-$past_due_records = ( ! $is_finalized && $is_past_due_timesheet ) ? $pending_records : 0;
+// Past Due (admin): count pending entries where entry date is before the approval week start cutoff.
+$past_due_records = 0;
 
-$out .= '<tr><th>Totals</th><td>'
-	. 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
-	. 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
-	. 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
-	. '</td></tr>';
+if ( ! $is_finalized && $timesheet_id_for_period !== '' ) {
+	$past_due_records = (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COUNT(*) FROM {$table_entries} WHERE timesheet_id = %d AND status = 'pending' AND date < %s",
+			absint( $timesheet_id_for_period ),
+			$approval_week_start_ymd
+		)
+	);
+}
 
 if ( $is_finalized ) {
-	$out .= '<tr><th>Shift Entries</th><td>'
+	$out .= '<tr><th>Shift Entries: </th><td>'
 		. 'Total Records: <strong>' . esc_html( (string) $total_records ) . '</strong>'
 		. '</td></tr>';
 } else {
-	$out .= '<tr><th>Shift Entries</th><td>'
+	$out .= '<tr><th>Shift Entries: </th><td>'
 		. 'Total Records: <strong>' . esc_html( (string) $total_records ) . '</strong> | '
 		. 'Approved: <strong>' . esc_html( (string) $approved_records ) . '</strong> | '
 		. 'Past Due: <strong>' . esc_html( (string) $past_due_records ) . '</strong>'
 		. '</td></tr>';
 }
 
-$out .= '<tr><th>Actions</th><td>' . $actions_html . '</td></tr>';
+$out .= '<tr><th>Totals: </th><td>'
+	. 'Sched: <strong>' . esc_html( $ts_total_sched ) . '</strong> | '
+	. 'Clocked: <strong>' . esc_html( $ts_total_clock ) . '</strong> | '
+	. 'Payable: <strong>' . esc_html( $ts_total_payable ) . '</strong>'
+	. '</td></tr>';
+
+$out .= '<tr><th>Actions: </th><td>' . $actions_html . '</td></tr>';
 
 $out .= '</tbody></table>';
 }
@@ -2488,23 +2498,24 @@ if ( $status_filter === 'overdue' ) {
     $cutoff_ymd = $approval_week_start->format( 'Y-m-d' );
 
     // Note: We filter timesheets by week_end_date < cutoff, and ensure they have pending entries.
-    $sql = $wpdb->prepare(
-        "
-        SELECT ts.*,
-               (SELECT COUNT(*) FROM {$table_entries} e WHERE e.timesheet_id = ts.id AND e.status = %s) AS daily_record_count
-        FROM {$table_ts} ts
-        WHERE ts.week_end_date < %s
-          AND EXISTS (
-              SELECT 1 FROM {$table_entries} e2
-              WHERE e2.timesheet_id = ts.id
-                AND e2.status = %s
-          )
-        ORDER BY ts.week_start_date DESC, ts.id DESC
-        ",
-        'pending',
-        $cutoff_ymd,
-        'pending'
-    );
+// Note: Overdue is based on entry date (shift date), not the timesheet header range.
+$sql = $wpdb->prepare(
+    "
+    SELECT ts.*,
+           (SELECT COUNT(*) FROM {$table_entries} e WHERE e.timesheet_id = ts.id) AS daily_record_count
+    FROM {$table_ts} ts
+    WHERE EXISTS (
+        SELECT 1
+        FROM {$table_entries} e2
+        WHERE e2.timesheet_id = ts.id
+          AND e2.status = %s
+          AND e2.date < %s
+    )
+    ORDER BY ts.week_start_date DESC, ts.id DESC
+    ",
+    'pending',
+    $cutoff_ymd
+);
 
     return $wpdb->get_results( $sql );
 }
