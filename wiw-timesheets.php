@@ -1707,6 +1707,92 @@ $out .= '<script>
     }
   }
 
+  // === WIWTS Reset Preview Modal wiring (Apply + Close) ===
+  function wiwtsOpenResetPreviewModal(previewText, entryId, ajaxUrl, nonceR){
+    var modal = document.getElementById("wiwts-reset-preview-modal");
+    var body  = document.getElementById("wiwts-reset-preview-body");
+    if (!modal || !body) {
+      alert(previewText || "Reset preview loaded.");
+      return;
+    }
+
+    body.textContent = previewText || "Reset preview loaded.";
+    modal.style.display = "block";
+
+    // Store context for Apply Reset.
+    modal.setAttribute("data-entry-id", entryId || "");
+    modal.setAttribute("data-ajax-url", ajaxUrl || "");
+    modal.setAttribute("data-nonce-reset", nonceR || "");
+  }
+
+  function wiwtsCloseResetPreviewModal(){
+    var modal = document.getElementById("wiwts-reset-preview-modal");
+    if (modal) {
+      modal.style.display = "none";
+      modal.removeAttribute("data-entry-id");
+      modal.removeAttribute("data-ajax-url");
+      modal.removeAttribute("data-nonce-reset");
+    }
+  }
+
+  // Wire modal buttons once.
+  (function(){
+    var closeBtn = document.getElementById("wiwts-reset-preview-close");
+    var applyBtn = document.getElementById("wiwts-reset-preview-apply");
+    var backdrop = document.getElementById("wiwts-reset-preview-backdrop");
+
+    if (closeBtn) closeBtn.addEventListener("click", function(){
+      wiwtsCloseResetPreviewModal();
+    });
+
+    if (backdrop) backdrop.addEventListener("click", function(){
+      wiwtsCloseResetPreviewModal();
+    });
+
+    if (applyBtn) applyBtn.addEventListener("click", function(){
+      var modal = document.getElementById("wiwts-reset-preview-modal");
+      if (!modal) return;
+
+      var entryId = modal.getAttribute("data-entry-id") || "";
+      var ajaxUrl = modal.getAttribute("data-ajax-url") || "";
+      var nonceR  = modal.getAttribute("data-nonce-reset") || "";
+
+      if (!entryId || !ajaxUrl || !nonceR) {
+        alert("Missing reset context.");
+        return;
+      }
+
+      // Apply reset now.
+      var formData2 = new FormData();
+      formData2.append("action", "wiw_client_reset_entry_from_api");
+      formData2.append("security", nonceR);
+      formData2.append("entry_id", entryId);
+      formData2.append("apply_reset", "1");
+
+      wiwtsShowRefreshingOverlay("Updating timesheet records…");
+
+      (window.requestAnimationFrame || function(cb){ setTimeout(cb, 0); })(function(){
+        fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: formData2 })
+          .then(function(r){ return r.json(); })
+          .then(function(resp2){
+            if (!resp2 || !resp2.success){
+              wiwtsHideRefreshingOverlay();
+              var m2 = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
+              alert(m2);
+              return;
+            }
+            window.location.reload();
+          })
+          .catch(function(err){
+            console.error(err);
+            wiwtsHideRefreshingOverlay();
+            alert("Reset failed.");
+          });
+      });
+    });
+  })();
+  // === END Reset Preview Modal wiring ===
+
 document.addEventListener("click", function(e){
   // Use closest() so clicks on inner spans/icons still trigger the correct button handler.
   var t = e.target;
@@ -1753,6 +1839,102 @@ document.addEventListener("click", function(e){
       return;
     }
 
+    if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
+      e.preventDefault();
+
+      var row = closestRow(t);
+      if (!row) { alert("Reset clicked but row not found"); return; }
+
+      var cfg = document.getElementById("wiwts-client-ajax");
+      if (!cfg) { alert("Missing AJAX config"); return; }
+
+      var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
+      var nonceR  = cfg.getAttribute("data-nonce-reset") || "";
+      if (!ajaxUrl || !nonceR) { alert("Missing reset AJAX settings"); return; }
+
+      // Entry ID is stored on the Save button for the row.
+      var saveBtn = row.querySelector("button.wiw-client-save-btn");
+      var entryId = saveBtn ? (saveBtn.getAttribute("data-entry-id") || "") : "";
+      if (!entryId) { alert("Missing Entry ID"); return; }
+
+      // Preview request first (no DB writes).
+      var form = new FormData();
+      form.append("action", "wiw_client_reset_entry_from_api");
+      form.append("security", nonceR);
+      form.append("entry_id", entryId);
+
+      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          if (!data || !data.success){
+            var msg = (data && data.data && data.data.message) ? data.data.message : "Reset preview failed.";
+            alert(msg);
+            return;
+          }
+
+          var p = (data && data.data && data.data.preview) ? data.data.preview : null;
+
+          // Build preview text.
+          var msg2 = (data.data && data.data.message) ? data.data.message : "Reset preview loaded.";
+          if (p) {
+            msg2 += "\n\nCurrent (Saved):";
+            msg2 += "\nClock In: " + ((p.current && p.current.clock_in) ? p.current.clock_in : "N/A");
+            msg2 += "\nClock Out: " + ((p.current && p.current.clock_out) ? p.current.clock_out : "N/A");
+            msg2 += "\nBreak (Min): " + ((p.current && typeof p.current.break_minutes !== "undefined") ? p.current.break_minutes : "0");
+
+            msg2 += "\n\nFrom When I Work (Would Reset To):";
+            msg2 += "\nClock In: " + ((p.api && p.api.clock_in) ? p.api.clock_in : "N/A");
+            msg2 += "\nClock Out: " + ((p.api && p.api.clock_out) ? p.api.clock_out : "N/A");
+            msg2 += "\nBreak (Min): " + ((p.api && typeof p.api.break_minutes !== "undefined") ? p.api.break_minutes : "0");
+          }
+
+          // If preview-only reset, open modal (admin approved rows).
+          var previewOnly = (t.getAttribute && t.getAttribute("data-reset-preview-only") === "1");
+          if (previewOnly) {
+            wiwtsOpenResetPreviewModal(msg2, entryId, ajaxUrl, nonceR);
+            return;
+          }
+
+          // Normal reset confirmation:
+          if (!window.confirm(msg2 + "\n\nApply this reset now?")) {
+            return;
+          }
+
+          // Apply reset
+          var formData2 = new FormData();
+          formData2.append("action", "wiw_client_reset_entry_from_api");
+          formData2.append("security", nonceR);
+          formData2.append("entry_id", entryId);
+          formData2.append("apply_reset", "1");
+
+          wiwtsShowRefreshingOverlay("Updating timesheet records…");
+
+          (window.requestAnimationFrame || function(cb){ setTimeout(cb, 0); })(function(){
+            fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: formData2 })
+              .then(function(r){ return r.json(); })
+              .then(function(resp2){
+                if (!resp2 || !resp2.success){
+                  wiwtsHideRefreshingOverlay();
+                  var m2 = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
+                  alert(m2);
+                  return;
+                }
+                window.location.reload();
+              })
+              .catch(function(err){
+                console.error(err);
+                wiwtsHideRefreshingOverlay();
+                alert("Reset failed.");
+              });
+          });
+        })
+        .catch(function(err){
+          console.error(err);
+          alert("Reset preview failed.");
+        });
+
+      return;
+    }
 
 if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
   e.preventDefault();
