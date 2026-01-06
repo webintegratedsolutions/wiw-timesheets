@@ -1858,12 +1858,18 @@ document.addEventListener("click", function(e){
       if (!entryId) { alert("Missing Entry ID"); return; }
 
       // Preview request first (no DB writes).
-      var form = new FormData();
-      form.append("action", "wiw_client_reset_entry_from_api");
-      form.append("security", nonceR);
-      form.append("entry_id", entryId);
+// Preview request first (no DB writes).
+var form = new FormData();
+form.append("action", "wiw_client_reset_entry_from_api");
+form.append("security", nonceR);
+form.append("entry_id", entryId);
 
-      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
+// Show overlay immediately so the user gets instant feedback.
+wiwtsShowRefreshingOverlay("Loading reset preview…");
+
+// Yield one frame so the overlay can paint before starting the fetch.
+(window.requestAnimationFrame || function(cb){ setTimeout(cb, 0); })(function(){
+  fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
         .then(function(r){ return r.json(); })
         .then(function(data){
           if (!data || !data.success){
@@ -1871,6 +1877,8 @@ document.addEventListener("click", function(e){
             alert(msg);
             return;
           }
+
+          wiwtsHideRefreshingOverlay();
 
           var p = (data && data.data && data.data.preview) ? data.data.preview : null;
 
@@ -1930,8 +1938,10 @@ document.addEventListener("click", function(e){
         })
         .catch(function(err){
           console.error(err);
+          wiwtsHideRefreshingOverlay();
           alert("Reset preview failed.");
         });
+}); // closes requestAnimationFrame
 
       return;
     }
