@@ -10,7 +10,7 @@ if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
 trait WIW_Timesheet_Sync_Trait {
 
     // Store time flags for a given time entry.
-private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $clock_out_local, $scheduled_start_local, $scheduled_end_local, $tz ) {
+private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $clock_out_local, $scheduled_start_local, $scheduled_end_local, $tz, $scheduled_hours_local = null, $payable_hours_local = null ) {
     global $wpdb;
 
     $wiw_time_id = (int) $wiw_time_id;
@@ -26,6 +26,10 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
     $scheduled_start_local = is_string( $scheduled_start_local ) ? trim( $scheduled_start_local ) : '';
     $scheduled_end_local   = is_string( $scheduled_end_local ) ? trim( $scheduled_end_local ) : '';
 
+    // Optional: compare scheduled vs payable hours (used by flag 109)
+    $scheduled_hours_local = ( $scheduled_hours_local !== null ) ? (float) $scheduled_hours_local : null;
+    $payable_hours_local   = ( $payable_hours_local !== null ) ? (float) $payable_hours_local : null;
+
     // Compute which flags SHOULD be active right now (by type).
     $active_flags = array(); // ['101' => 'desc', ...]
 
@@ -35,6 +39,15 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
     }
     if ( $clock_out_local === '' ) {
         $active_flags['106'] = 'Missing clock-out time';
+    }
+
+    // Scheduled vs Payable mismatch (rounded to 2 decimals)
+    if ( $scheduled_hours_local !== null && $payable_hours_local !== null ) {
+        $s = round( (float) $scheduled_hours_local, 2 );
+        $p = round( (float) $payable_hours_local, 2 );
+        if ( $s !== $p ) {
+            $active_flags['109'] = 'Scheduled Hours do not match Payable Hours';
+        }
     }
 
     // Only run early/late logic when scheduled bounds exist AND relevant clock value exists.
@@ -55,15 +68,20 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                 $active_flags['101'] = 'Clocked in more than 15 minutes before scheduled start';
             }
 
-            // 103: clocked in after scheduled start
-// 103: clocked in more than 15 minutes after scheduled start
-// Normalize both to minute precision so exact matches don't false-flag due to seconds.
-$sched_start_ts = $sched_start_ts - ( $sched_start_ts % 60 );
-$clock_in_ts    = $clock_in_ts - ( $clock_in_ts % 60 );
+            // 107 / 103: clock-in after scheduled start (minute precision)
+            // Normalize both to minute precision so exact matches don't false-flag due to seconds.
+            $sched_start_ts = $sched_start_ts - ( $sched_start_ts % 60 );
+            $clock_in_ts    = $clock_in_ts - ( $clock_in_ts % 60 );
 
-if ( $clock_in_ts > ( $sched_start_ts + ( 15 * 60 ) ) ) {
-    $active_flags['103'] = 'Clocked in more than 15 minutes after scheduled start';
-}
+            // 107: late, but 15 minutes or less
+            if ( $clock_in_ts > $sched_start_ts && $clock_in_ts <= ( $sched_start_ts + ( 15 * 60 ) ) ) {
+                $active_flags['107'] = 'Clocked in less than 15 minutes after scheduled start';
+            }
+
+            // 103: more than 15 minutes late
+            if ( $clock_in_ts > ( $sched_start_ts + ( 15 * 60 ) ) ) {
+                $active_flags['103'] = 'Clocked in more than 15 minutes after scheduled start';
+            }
 
         }
 
@@ -361,19 +379,23 @@ try {
     continue;
 }
 
-            $key = "{$user_id}|{$week_start}|{$location_id}";
+            $key = "{$user_id}|{$week_start}";
 
             if ( ! isset( $grouped[ $key ] ) ) {
-                $grouped[ $key ] = [
-                    'employee_id'           => $user_id,
-                    'employee_name'         => $employee_name,
-                    'location_id'           => $location_id,
-                    'location_name'         => $location_name,
-                    'week_start_date'       => $week_start,
-                    'records'               => [],
-                    'total_clocked_hours'   => 0.0,
-                    'total_scheduled_hours' => 0.0,
-                ];
+$grouped[ $key ] = [
+    'employee_id'           => $user_id,
+    'employee_name'         => $employee_name,
+
+    // Timesheet headers are no longer grouped by location.
+    'location_id'           => 0,
+    'location_name'         => 'All Locations',
+
+    'week_start_date'       => $week_start,
+    'records'               => [],
+    'total_clocked_hours'   => 0.0,
+    'total_scheduled_hours' => 0.0,
+];
+
             }
 
             // ---------------- LOCAL-ONLY BREAK RULE ----------------
@@ -385,7 +407,7 @@ try {
             $break_api_minutes = $get_break_minutes_from_api( $time_entry );
 
             // If Sched. Hrs are 5.0 or more, break is EXACTLY 60.
-            $break_enforced = ( $scheduled_hours >= 5.0 ) ? 60 : (int) $break_api_minutes;
+            $break_enforced = ( $scheduled_hours > 5.0 ) ? 60 : (int) $break_api_minutes;
 
             $fallback_clocked = (float) ( $time_entry->calculated_duration ?? 0.0 );
             $adjusted_clocked = $compute_local_clocked_hours(
@@ -424,11 +446,10 @@ try {
 
             $header_id = $wpdb->get_var(
                 $wpdb->prepare(
-                    "SELECT id FROM {$table_timesheets}
-                     WHERE employee_id = %d AND week_start_date = %s AND location_id = %d",
-                    $employee_id,
-                    $week_start_date,
-                    $location_id
+"SELECT id FROM {$table_timesheets}
+ WHERE employee_id = %d AND week_start_date = %s",
+$employee_id,
+$week_start_date
                 )
             );
 
@@ -531,15 +552,7 @@ try {
                     }
                 }
 
-                // ✅ Store flags for this time record during sync (deletes old, inserts current)
-$this->wiwts_sync_store_time_flags(
-    $wiw_time_id,
-    (string) ( $clock_in_local ?? '' ),
-    (string) ( $clock_out_local ?? '' ),
-    (string) ( $scheduled_start_local ?? '' ),
-    (string) ( $scheduled_end_local ?? '' ),
-    $wp_timezone
-);
+
 
 
                 $break_minutes_local = isset( $time_entry->_wiw_local_break_minutes )
@@ -550,7 +563,6 @@ $this->wiwts_sync_store_time_flags(
                     ? (float) $time_entry->_wiw_local_clocked_hours
                     : round( (float) ( $time_entry->calculated_duration ?? 0.0 ), 2 );
 
-                // ✅ NEW: Payable hours are clamped to scheduled window (when present).
                 $payable_hours_local = $compute_local_payable_hours(
                     $clock_in_local,
                     $clock_out_local,
@@ -558,6 +570,38 @@ $this->wiwts_sync_store_time_flags(
                     $scheduled_end_local,
                     $break_minutes_local,
                     $clocked_hours_local // fallback is the already-computed clocked hours
+                );
+
+                // Additional hours = Clock Out minus Scheduled End (hours), if Clock Out is later.
+                $additional_hours_local = 0.00;
+                if ( ! empty( $scheduled_end_local ) && ! empty( $clock_out_local ) ) {
+                    try {
+                        $dt_sched_end = new DateTime( (string) $scheduled_end_local );
+                        $dt_clock_out = new DateTime( (string) $clock_out_local );
+
+                        $dt_sched_end->setTimezone( $wp_timezone );
+                        $dt_clock_out->setTimezone( $wp_timezone );
+
+                        if ( $dt_clock_out > $dt_sched_end ) {
+                            $additional_hours_local = round(
+                                ( $dt_clock_out->getTimestamp() - $dt_sched_end->getTimestamp() ) / 3600,
+                                2
+                            );
+                        }
+                    } catch ( Exception $e ) {
+                        $additional_hours_local = 0.00;
+                    }
+                }
+
+                // Compute scheduled hours (same logic as Sched. Hrs column) for flag comparisons.
+                // Compute scheduled hours for this entry (used for DB + flag 109).
+                $scheduled_hours_local_for_entry = (float) ( $time_entry->scheduled_duration ?? 0.0 );
+                if ( $scheduled_hours_local_for_entry <= 0 ) {
+                    $scheduled_hours_local_for_entry = (float) ( $time_entry->calculated_duration ?? 0.0 );
+                }
+                $scheduled_hours_local_for_entry = max(
+                    0,
+                    $scheduled_hours_local_for_entry - ( (int) $break_minutes_local / 60 )
                 );
 
                 $entry_data = [
@@ -574,16 +618,26 @@ $this->wiwts_sync_store_time_flags(
                     'scheduled_end'   => $scheduled_end_local,
 
                     'break_minutes'   => (int) $break_minutes_local,
-                    'scheduled_hours' => round( max( 0, (float) ( $time_entry->scheduled_duration ?? 0.0 ) - ( (int) $break_minutes_local / 60 ) ), 2 ),
+                     'scheduled_hours' => round( $scheduled_hours_local_for_entry, 2 ),
 
                     'clocked_hours'   => round( $clocked_hours_local, 2 ),
                     'payable_hours'   => round( $payable_hours_local, 2 ),
 
+                    'additional_hours'  => round( (float) $additional_hours_local, 2 ),
+                    'extra_time_status' => 'unset',
+
                     'status'          => 'pending',
                     'updated_at'      => $now,
+
                 ];
 
                 if ( $entry_id ) {
+
+                    // Preserve existing confirmed/denied status on resync.
+                    if ( isset( $entry_data['extra_time_status'] ) ) {
+                        unset( $entry_data['extra_time_status'] );
+                    }
+
                     $wpdb->update(
                         $table_timesheet_entries,
                         $entry_data,
@@ -593,6 +647,19 @@ $this->wiwts_sync_store_time_flags(
                     $entry_data['created_at'] = $now;
                     $wpdb->insert( $table_timesheet_entries, $entry_data );
                 }
+
+                // ✅ Store flags for this time record during sync (deletes old, inserts current)
+                $this->wiwts_sync_store_time_flags(
+                    $wiw_time_id,
+                    (string) ( $clock_in_local ?? '' ),
+                    (string) ( $clock_out_local ?? '' ),
+                    (string) ( $scheduled_start_local ?? '' ),
+                    (string) ( $scheduled_end_local ?? '' ),
+                    $wp_timezone,
+                    $scheduled_hours_local_for_entry,
+                    $payable_hours_local
+                );
+
             }
         }
     }

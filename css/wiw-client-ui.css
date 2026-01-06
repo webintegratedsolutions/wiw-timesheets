@@ -161,3 +161,37 @@
 	border: 0;
 	border-top: 1px solid #ccd0d4;
 }
+
+/* Prevent line breaks and allow column to expand */
+.wiw-col-sched {
+	min-width: 200px;
+	white-space: nowrap;
+}
+
+/* Optional: keep table from forcing wraps */
+.wiw-nowrap {
+	white-space: nowrap;
+}
+
+/* === WIWTS FIX: Normalize expandable flags table borders === */
+.wiwts-flags-wrapper {
+    padding: 0;
+    margin: 0;
+}
+
+.wiwts-flags-wrapper table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+}
+
+.wiwts-flags-wrapper table th,
+.wiwts-flags-wrapper table td {
+    border: 1px solid #dcdcde;
+}
+
+.wiwts-flags-wrapper table thead th {
+    background: #f6f7f7;
+}
+
+

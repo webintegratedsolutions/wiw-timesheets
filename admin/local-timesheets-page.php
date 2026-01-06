@@ -5,7 +5,7 @@
         
         <div class="wrap">
             <h1>📁 Local Timesheets (Database View)</h1>
-            <p>This page displays timesheets stored locally in WordPress, grouped by Employee, Pay Period, and Location.</p>
+<p>This page displays timesheets stored locally in WordPress, grouped by Employee and Pay Period.</p>
         <?php
 
         if ( $selected_id > 0 ) {
@@ -46,25 +46,7 @@
 
 <?php $is_timesheet_approved = ( strtolower( (string) ( $header->status ?? '' ) ) === 'approved' ); ?>
 
-<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin: 10px 0 20px;">
-    <input type="hidden" name="action" value="wiw_reset_local_timesheet" />
-    <input type="hidden" name="timesheet_id" value="<?php echo esc_attr( (int) $header->id ); ?>" />
-    <?php wp_nonce_field( 'wiw_reset_local_timesheet', 'wiw_reset_nonce' ); ?>
-
-    <?php if ( $is_timesheet_approved ) : ?>
-        <button type="button" class="button button-secondary" disabled="disabled"
-            style="opacity:0.6;cursor:not-allowed;"
-            title="This timesheet has been finalized and can no longer be reset.">
-            Timesheet Finalized
-        </button>
-    <?php else : ?>
-        <button type="submit" class="button button-secondary"
-            onclick="return confirm('Reset will discard ALL local edits for this timesheet and restore the original data from When I Work. Continue?');">
-            Reset from API
-        </button>
-    <?php endif; ?>
-</form>
-
+<?php /* Reset from API button removed from Local Timesheets (Database View) by request. */ ?>
 
                 <h2>Timesheet #<?php echo esc_html( $header->id ); ?> Details</h2>
                 <?php
@@ -346,22 +328,24 @@ if ( ! empty( $wiw_ids ) ) {
                 if ( empty( $entries ) ) : ?>
                     <p>No entries found for this timesheet.</p>
                 <?php else : ?>
-                    <table class="widefat fixed striped">
-                        <thead>
-                            <tr>
-                                <th width="10%">Date</th>
-                                <th width="12%">Time Record ID</th>
-                                <th width="17%">Scheduled Start/End</th>
-                                <th width="10%">Clock In</th>
-                                <th width="10%">Clock Out</th>
-                                <th width="10%">Break (min)</th>
-                                <th width="10%">Sched. Hrs</th>
-                                <th width="10%">Clocked Hrs</th>
-                                <th width="10%">Payable Hrs</th>
-                                <th width="7%">Status</th>
-                                <th width="10%">Actions</th>
-                            </tr>
-                        </thead>
+<table class="widefat fixed striped">
+<thead>
+    <tr>
+        <th width="7%">Date</th>
+        <th width="9%">Time ID</th>
+        <th width="12%">Location</th>
+        <th width="13%">Sched</th>
+        <th width="8%">In</th>
+        <th width="8%">Out</th>
+        <th width="6%">Break</th>
+        <th width="6%">Sched</th>
+        <th width="6%">Clocked</th>
+        <th width="6%">Payable</th>
+        <th width="6%">Status</th>
+        <th width="13%">Actions</th>
+    </tr>
+</thead>
+
                         <tbody>
                         <?php foreach ( $entries as $entry ) : ?>
                             <?php
@@ -385,12 +369,25 @@ if ( ! empty( $wiw_ids ) ) {
                             $clock_in_display  = $fmt( $entry->clock_in );
                             $clock_out_display = $fmt( $entry->clock_out );
 
-                            $payable_hours_val = isset( $entry->payable_hours ) ? (float) $entry->payable_hours : (float) $entry->clocked_hours;
-                            ?>
-                            <tr>
-                                <td><?php echo esc_html( $entry->date ); ?></td>
-                                <td><?php echo esc_html( (int) $entry->wiw_time_id ); ?></td>
-                                <td><?php echo esc_html( $scheduled_range ); ?></td>
+$payable_hours_val = isset( $entry->payable_hours ) ? (float) $entry->payable_hours : (float) $entry->clocked_hours;
+
+// Location display (entry-level; timesheets now include multiple locations)
+$entry_location_name = ( isset( $entry->location_name ) && (string) $entry->location_name !== '' ) ? (string) $entry->location_name : 'N/A';
+$entry_location_id   = ( isset( $entry->location_id ) && (string) $entry->location_id !== '' ) ? (string) $entry->location_id : '';
+?>
+<tr>
+
+    <td><?php echo esc_html( $entry->date ); ?></td>
+    <td><?php echo esc_html( (int) $entry->wiw_time_id ); ?></td>
+
+    <td>
+        <?php echo esc_html( $entry_location_name ); ?>
+        <?php if ( $entry_location_id !== '' ) : ?>
+            <br/><small>(ID: <?php echo esc_html( $entry_location_id ); ?>)</small>
+        <?php endif; ?>
+    </td>
+
+    <td><?php echo esc_html( $scheduled_range ); ?></td>
 
                                 <td class="wiw-local-clock-in"
                                     data-time="<?php echo esc_attr( $entry->clock_in ? substr( (string) $entry->clock_in, 11, 5 ) : '' ); ?>">
@@ -455,25 +452,33 @@ $approve_bord = $approve_bg;
 ?>
 
 <?php if ( ! $is_approved ) : ?>
-    <button type="button"
-            class="button button-small wiw-local-edit-entry"
-            data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
-        Edit
-    </button>
+    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">
 
-<button type="button"
-        class="button button-small wiw-local-approve-entry"
-        data-entry-id="<?php echo esc_attr( $entry->id ); ?>"
-        style="margin-top:6px;background:<?php echo esc_attr( $approve_bg ); ?>;border-color:<?php echo esc_attr( $approve_bord ); ?>;color:#fff;">
-    Approve Pay Period
-</button>
+        <button type="button"
+                class="button button-small wiw-local-edit-entry"
+                data-entry-id="<?php echo esc_attr( $entry->id ); ?>">
+            Edit
+        </button>
+
+        <button type="button"
+                class="button button-small wiw-local-approve-entry"
+                data-entry-id="<?php echo esc_attr( $entry->id ); ?>"
+                style="background:<?php echo esc_attr( $approve_bg ); ?>;border-color:<?php echo esc_attr( $approve_bord ); ?>;color:#fff;">
+            Approve Pay Period
+        </button>
+
+    </div>
 <?php else : ?>
-    <button type="button"
-            class="button button-small wiw-local-approve-entry wiw-local-approved"
-            disabled="disabled"
-            style="margin-top:0;background:#2271b1;border-color:#2271b1;color:#fff;opacity:1;cursor:default;">
-        Pay Period Approved
-    </button>
+    <div style="display:flex;flex-direction:column;align-items:flex-start;gap:6px;">
+
+        <button type="button"
+                class="button button-small wiw-local-approve-entry wiw-local-approved"
+                disabled="disabled"
+                style="background:#2271b1;border-color:#2271b1;color:#fff;opacity:1;cursor:default;">
+            Pay Period Approved
+        </button>
+
+    </div>
 <?php endif; ?>
 
 </td>
@@ -531,12 +536,12 @@ $logs_row_id         = 'wiw-local-logs-' . (int) $entry->id;
 ?>
 
     </td>
-    <td colspan="10"></td>
+   <td colspan="11"></td>
 </tr>
 
 <!-- ✅ Hidden flags details row toggled by the button above -->
 <tr id="<?php echo esc_attr( $flags_row_id ); ?>" style="display:none; background-color:#f9f9f9;">
-    <td colspan="11">
+    <td colspan="12">
         <div style="padding:10px; border:1px solid #ddd;">
             <?php if ( empty( $row_flags ) ) : ?>
                 <em>No flags for this record.</em>
@@ -907,7 +912,6 @@ $totals_map[ $tid ] = array(
                 <thead>
 <tr>
     <th width="2%">ID</th>
-    <th width="13%">Pay Period</th>
     <th width="6%">Date</th>
 
     <th width="11%">Sched. Start/End</th>
@@ -930,7 +934,7 @@ $totals_map[ $tid ] = array(
                 <tbody>
                 <?php foreach ( $grouped as $employee_name => $weeks ) : ?>
                     <tr class="wiw-employee-header">
-                        <td colspan="13" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
+                        <td colspan="12" style="background-color: #e6e6fa; font-weight: bold; font-size: 1.1em;">
                             👤 Employee: <?php echo esc_html( $employee_name ); ?>
                         </td>
                     </tr>
@@ -965,7 +969,7 @@ if ( ! empty( $bundle['rows'][0]->week_end_date ) ) {
                         }
                         ?>
                         <tr class="wiw-period-total">
-                            <td colspan="7" style="background-color: #f0f0ff; font-weight: bold;">
+                            <td colspan="6" style="background-color: #f0f0ff; font-weight: bold;">
                                 📅 Pay Period: <?php echo esc_html( $week_start ); ?> to <?php echo esc_html( $week_end ); ?>
                             </td>
                             <td style="background-color: #f0f0ff; font-weight: bold;"><?php echo esc_html( (int) $week_break ); ?></td>
@@ -1013,12 +1017,6 @@ $fmt_range = function( $start, $end, $separator ) use ( $fmt_time ) {
                             ?>
                             <tr>
                                 <td><?php echo esc_html( $tid ); ?></td>
-                                <td>
-                                    <?php echo esc_html( $row->week_start_date ); ?>
-                                    <?php if ( ! empty( $row->week_end_date ) ) : ?>
-                                        &nbsp;to&nbsp;<?php echo esc_html( $row->week_end_date ); ?>
-                                    <?php endif; ?>
-                                </td>
 <td><?php echo esc_html( $min_date ); ?></td>
 
 <?php
