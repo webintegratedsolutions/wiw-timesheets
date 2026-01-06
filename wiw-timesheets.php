@@ -72,11 +72,10 @@ class WIW_Timesheet_Manager {
         add_shortcode( 'wiw_timesheets_client', array( $this, 'render_client_ui' ) );
 
         // NEW: Client Filter UI Shortcode
-add_shortcode( 'wiw_timesheets_client_filter', array( $this, 'render_client_filter_ui' ) );
+        add_shortcode( 'wiw_timesheets_client_filter', array( $this, 'render_client_filter_ui' ) );
 
-// === WIWTS FLAG 104 CONFIRM/DENY POST HOOKS START ===
-add_action( 'admin_post_wiwts_flag104_extra_time', array( $this, 'handle_flag104_extra_time_action' ) );
-// === WIWTS FLAG 104 CONFIRM/DENY POST HOOKS END ===
+        // 2a. Handle admin-post actions for flagging extra time
+        add_action( 'admin_post_wiwts_flag104_extra_time', array( $this, 'handle_flag104_extra_time_action' ) );
 
         // 3. Handle AJAX requests for viewing/adjusting/approving (Crucial for interaction)
         // REMOVED: add_action( 'wp_ajax_wiw_fetch_timesheets', array( $this, 'handle_fetch_timesheets' ) );
