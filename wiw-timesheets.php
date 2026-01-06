@@ -1707,8 +1707,12 @@ $out .= '<script>
     }
   }
 
-  document.addEventListener("click", function(e){
-    var t = e.target;
+document.addEventListener("click", function(e){
+  // Use closest() so clicks on inner spans/icons still trigger the correct button handler.
+  var t = e.target;
+  if (t && t.closest) {
+    t = t.closest("button, a, input");
+  }
 
     if (t && t.classList && t.classList.contains("wiw-client-edit-btn")){
       e.preventDefault();
@@ -1739,6 +1743,16 @@ $out .= '<script>
       setEditing(row, true);
       return;
     }
+
+    if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")){
+      e.preventDefault();
+      var row2 = closestRow(t);
+      if (!row2) return;
+      restoreOriginal(row2);
+      setEditing(row2, false);
+      return;
+    }
+
 
 if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
   e.preventDefault();
