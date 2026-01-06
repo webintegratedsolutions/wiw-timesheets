@@ -1965,8 +1965,6 @@ if (!ok) {
         ? resp.data.payable_hours
         : "";
 
-      alert("Saved successfully.\n\nUpdated Payable Hrs: " + newPayable);
-
       window.location.reload();
     })
     .catch(function(){
