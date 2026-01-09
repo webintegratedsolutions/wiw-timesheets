@@ -77,6 +77,9 @@ class WIW_Timesheet_Manager
         // NEW: Client Filter UI Shortcode
         add_shortcode('wiw_timesheets_client_filter', array($this, 'render_client_filter_ui'));
 
+        // NEW: Client Records UI (Week-grouped view)
+        add_shortcode('wiw_timesheets_client_records', array($this, 'render_client_records_ui'));
+
         // 2a. Handle admin-post actions for flagging extra time
         add_action('admin_post_wiwts_flag104_extra_time', array($this, 'handle_flag104_extra_time_action'));
 
@@ -2551,6 +2554,32 @@ if (!ok) {
 
         $out .= '<hr style="margin:40px 0;" />';
 
+
+        return $out;
+    }
+
+
+    /**
+     * Front-end client UI (alternate view) via [wiw_timesheets_client_records]
+     * Safe placeholder for initial wiring; no business logic changes yet.
+     */
+    public function render_client_records_ui()
+    {
+        if (! is_user_logged_in()) {
+            return '';
+        }
+
+        $current_user_id = get_current_user_id();
+        $client_id_raw   = get_user_meta($current_user_id, 'client_account_number', true);
+        $client_id       = is_scalar($client_id_raw) ? trim((string) $client_id_raw) : '';
+        if ($client_id === '') {
+            return '';
+        }
+
+        $out  = '<div class="wiw-client-timesheets" style="margin-bottom:14px;">';
+        $out .= '<h2 style="margin:0 0 10px 0;">Timesheet Records (Week View)</h2>';
+        $out .= '<p style="margin:0 0 12px 0;"><em>Placeholder view is active.</em> Client ID: <strong>' . esc_html($client_id) . '</strong></p>';
+        $out .= '</div>';
 
         return $out;
     }
