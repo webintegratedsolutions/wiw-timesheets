@@ -1,5 +1,13 @@
 /* WIW Timesheets Client UI (front-end) */
 
+.page-template-client-page #page-content {
+    margin-top: 2rem;
+    width: 100%;
+    max-width: 1160px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
 .wiw-client-timesheets {
   margin: 20px 0;
 }

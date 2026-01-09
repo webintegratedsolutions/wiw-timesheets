@@ -3082,7 +3082,20 @@ HTML;
             return strcmp($b['week_start'], $a['week_start']);
         });
 
-        $out .= '<h2 style="margin:0 0 10px 0;">Timesheet Records (Week View)</h2>';
+$out .= '<h2 style="margin:0 0 10px 0;">Timesheet Records (Week View)</h2>';
+
+// Cache flags by timesheet_id to avoid repeated queries across weeks.
+$wiwts_flags_cache_by_timesheet = array();
+
+// Week View only: tighten spacing + prevent wrap on time columns
+$out .= '<style>
+#wiwts-client-records-view table.wp-list-table th,
+#wiwts-client-records-view table.wp-list-table td { padding: 6px 8px; vertical-align: middle; }
+#wiwts-client-records-view table.wp-list-table th { white-space: nowrap; }
+#wiwts-client-records-view .wiw-client-actions { gap: 4px !important; }
+#wiwts-client-records-view .wiw-client-actions .wiw-btn { padding: 6px 10px; }
+</style>';
+
 
         foreach ($weeks as $wk) {
 
@@ -3111,17 +3124,19 @@ HTML;
 
             // Table header = same columns as main client view (client layout; no Location column)
             $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;width:100%;">';
-            $out .= '<thead><tr>';
-            $out .= '<th>Shift Date</th>';
-            $out .= '<th style="width:180px; white-space:nowrap;">Sched. Start/End</th>';
-            $out .= '<th>Clock In</th>';
-            $out .= '<th>Clock Out</th>';
-            $out .= '<th>Break (Min)</th>';
-            $out .= '<th>Sched. Hrs</th>';
-            $out .= '<th>Clocked Hrs</th>';
-            $out .= '<th>Payable Hrs</th>';
-            $out .= '<th>Actions</th>';
-            $out .= '</tr></thead><tbody>';
+$out .= '<thead><tr>';
+$out .= '<th style="width:140px;">Shift Date</th>';
+$out .= '<th style="width:170px;">Employee</th>';
+$out .= '<th style="width:190px;">Sched. Start/End</th>';
+$out .= '<th style="width:95px;">Clock In</th>';
+$out .= '<th style="width:95px;">Clock Out</th>';
+$out .= '<th style="width:95px;">Break (Min)</th>';
+$out .= '<th style="width:90px;">Sched. Hrs</th>';
+$out .= '<th style="width:95px;">Clocked Hrs</th>';
+$out .= '<th style="width:95px;">Payable Hrs</th>';
+$out .= '<th style="width:140px;">Actions</th>';
+$out .= '</tr></thead><tbody>';
+
 
             foreach ($rows as $dr) {
 
@@ -3157,7 +3172,11 @@ HTML;
                 if ($wiw_time_id_display !== '') {
                     $date_cell_html .= '<div><small style="opacity:0.75;">(' . esc_html($wiw_time_id_display) . ')</small></div>';
                 }
-                $out .= '<td>' . $date_cell_html . '</td>';
+               $out .= '<td>' . $date_cell_html . '</td>';
+
+// Employee column (name is attached in the Week bucketing step as _wiw_employee_name)
+$employee_name = ! empty($dr->_wiw_employee_name) ? (string) $dr->_wiw_employee_name : '';
+$out .= '<td>' . esc_html($employee_name) . '</td>';
 
                 $out .= '<td style="min-width:180px; white-space:nowrap;">' . esc_html($sched_start_end) . '</td>';
 
@@ -3236,6 +3255,265 @@ HTML;
             }
 
             $out .= '</tbody></table>';
+// === Week-level expandable flags (filtered to this week range) ===
+$week_flags_all = array();
+
+// Gather unique timesheet IDs present in this week (rows may span multiple pay periods/employees)
+$week_timesheet_ids = array();
+foreach ($rows as $r) {
+    $tid = isset($r->_wiw_timesheet_id) ? absint($r->_wiw_timesheet_id) : 0;
+    if ($tid > 0) {
+        $week_timesheet_ids[$tid] = true;
+    }
+}
+
+if (! empty($week_timesheet_ids)) {
+
+    foreach (array_keys($week_timesheet_ids) as $tid) {
+
+        if (! isset($wiwts_flags_cache_by_timesheet[$tid])) {
+            $wiwts_flags_cache_by_timesheet[$tid] = $this->get_scoped_flags_for_timesheet($client_id, $tid);
+        }
+
+        $flags_for_ts = $wiwts_flags_cache_by_timesheet[$tid];
+
+        if (! empty($flags_for_ts) && is_array($flags_for_ts)) {
+            foreach ($flags_for_ts as $fg) {
+                $shift_date = isset($fg->shift_date) ? (string) $fg->shift_date : '';
+                if ($shift_date === '') {
+                    continue;
+                }
+
+                // Only include flags whose shift_date falls within this week bucket
+                if ($shift_date >= $wk_start && $shift_date <= $wk_end) {
+                    $week_flags_all[] = $fg;
+                }
+            }
+        }
+    }
+}
+
+// Apply client visibility rules (hide 109/107 for clients)
+$week_flags_visible = array();
+if (! empty($week_flags_all)) {
+    foreach ($week_flags_all as $fg) {
+        $flag_type_raw = isset($fg->flag_type) ? trim((string) $fg->flag_type) : '';
+        if (! current_user_can('manage_options') && preg_match('/^(109|107)\b/', $flag_type_raw)) {
+            continue;
+        }
+        $week_flags_visible[] = $fg;
+    }
+}
+
+$has_unresolved_week_flags = false;
+if (! empty($week_flags_visible)) {
+    $current_user_role_label = current_user_can('manage_options') ? 'Administrator' : 'Client';
+    foreach ($week_flags_visible as $fg) {
+        $st = isset($fg->flag_status) ? (string) $fg->flag_status : '';
+        if (strtolower($st) !== 'resolved') {
+            $has_unresolved_week_flags = true;
+            break;
+        }
+    }
+}
+
+$flag_icon = $has_unresolved_week_flags ? '🟠' : '🟢';
+
+$out .= '<details class="wiw-flags" style="margin:12px 0 22px;">';
+$out .= '<summary>' . $flag_icon . ' Click to Expand: Flags and Additional Time</summary>';
+$out .= '<div style="padding-top:8px;">';
+
+if (empty($week_flags_visible)) {
+
+    $out .= '<p class="description" style="margin:0;">No flags found for this week.</p>';
+
+} else {
+
+    // Border wrapper (matches existing styling approach)
+    $out .= '<div style="border:1px solid #ccd0d4; border-radius:4px; overflow:hidden; background:#fff;">';
+    $out .= '<table class="wp-list-table widefat fixed striped" style="margin:0;">';
+    $out .= '<thead><tr>';
+    $out .= '<th style="width:130px;">Shift Date</th>';
+    $out .= '<th style="width:110px;">Record ID</th>';
+    $out .= '<th style="width:110px;">Type</th>';
+    $out .= '<th>Description</th>';
+    $out .= '<th style="width:150px;">Status</th>';
+    $out .= '</tr></thead>';
+    $out .= '<tbody>';
+
+    foreach ($week_flags_visible as $fg) {
+
+        $type          = isset($fg->flag_type) ? (string) $fg->flag_type : '';
+        $shift_date    = isset($fg->shift_date) ? (string) $fg->shift_date : '';
+        $desc          = isset($fg->description) ? (string) $fg->description : '';
+        $status_raw    = isset($fg->flag_status) ? (string) $fg->flag_status : '';
+        $flag_record_id = isset($fg->wiw_time_id) ? (string) $fg->wiw_time_id : '—';
+
+        $status = (strtolower($status_raw) === 'resolved') ? 'Resolved' : 'Unresolved';
+
+        // Color rows: orange for unresolved, green for resolved
+        $row_style = ($status === 'Resolved') ? 'background:#dff0d8;' : 'background:#fff3cd;';
+        $cell_style = 'style="padding:10px 10px; vertical-align:top;"';
+
+        $out .= '<tr style="' . esc_attr($row_style) . '">';
+        $out .= '<td ' . $cell_style . '>' . esc_html($shift_date !== '' ? $shift_date : 'N/A') . '</td>';
+        $out .= '<td ' . $cell_style . '>' . esc_html($flag_record_id) . '</td>';
+        $out .= '<td ' . $cell_style . '><strong>' . esc_html($type !== '' ? $type : 'N/A') . '</strong></td>';
+        $out .= '<td ' . $cell_style . '>' . esc_html($desc !== '' ? $desc : 'N/A') . '</td>';
+        $out .= '<td ' . $cell_style . '>' . esc_html($status !== '' ? $status : 'N/A') . '</td>';
+        $out .= '</tr>';
+// Special follow-up row for flag 104 (Confirm Additional Hours) — Week View
+if ((string) $type === '104') {
+
+    $extra_hours_text      = 'N/A';
+    $show_flag104_followup = false;
+
+    // Gate: only show follow-up if clock_out is > 15 minutes after scheduled_end
+    if (! empty($fg->scheduled_end) && ! empty($fg->clock_out)) {
+        try {
+            $tz = wp_timezone();
+            $scheduled_end_dt = new DateTime((string) $fg->scheduled_end, $tz);
+            $clock_out_dt     = new DateTime((string) $fg->clock_out, $tz);
+
+            $diff_seconds = $clock_out_dt->getTimestamp() - $scheduled_end_dt->getTimestamp();
+
+            if ($diff_seconds > 0) {
+                $diff_minutes = floor($diff_seconds / 60);
+                if ($diff_minutes > 15) {
+                    $diff_hours = $diff_seconds / 3600;
+                    $extra_hours_text = number_format($diff_hours, 2);
+                    $show_flag104_followup = true;
+                }
+            }
+        } catch (Exception $e) {
+            // Leave hidden if parsing fails
+        }
+    }
+
+    if ($show_flag104_followup) {
+
+        global $wpdb;
+        $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+        $flag104_time_id = isset($fg->wiw_time_id) ? absint($fg->wiw_time_id) : 0;
+        $flag104_status  = 'unset';
+        $flag104_entry_status = '';
+        $flag104_locked_unset = false;
+
+        if ($flag104_time_id > 0) {
+
+            $where_sql = "WHERE wiw_time_id = %d";
+            $params    = array($flag104_time_id);
+
+            if ($current_user_role_label === 'Client') {
+                // Client scope: only allow action rows for their own location.
+                if (isset($client_id) && absint($client_id) > 0) {
+                    $where_sql .= " AND location_id = %d";
+                    $params[]  = absint($client_id);
+                } else {
+                    // No client scope available; do not allow actions.
+                    $where_sql = "WHERE 1=0";
+                    $params    = array();
+                }
+            }
+
+            if (! empty($params)) {
+                $sql      = "SELECT status, extra_time_status FROM {$table_entries} {$where_sql} LIMIT 1";
+                $prepared = $wpdb->prepare($sql, $params);
+                $row      = $wpdb->get_row($prepared);
+
+                if ($row && isset($row->status)) {
+                    $flag104_entry_status = strtolower(trim((string) $row->status));
+                }
+
+                if ($row && isset($row->extra_time_status) && $row->extra_time_status !== '') {
+                    $flag104_status = (string) $row->extra_time_status;
+                }
+
+                // Approved OR archived and unset -> cannot action Confirm/Deny
+                $flag104_locked_unset = (
+                    in_array($flag104_entry_status, array('approved', 'archived'), true)
+                    && ($flag104_status === '' || $flag104_status === 'unset')
+                );
+            }
+        }
+
+        // Wording based on status
+        if ($flag104_status === 'confirmed') {
+            $payable_tense = 'became payable.';
+        } elseif ($flag104_status === 'denied') {
+            $payable_tense = 'were denied.';
+        } else {
+            $payable_tense = 'will become payable.';
+        }
+
+        // Follow-up row (single cell spanning the flags table)
+        $out .= '<tr class="wiw-flag-followup wiw-flag-followup-104">';
+        $out .= '<td colspan="5" style="padding:10px 10px; border-top:1px solid #ccd0d4; background:#f9fafb;">';
+
+        if ($flag104_locked_unset) {
+
+            $out .= '<span aria-hidden="true" style="margin-right:6px;">⏱️</span>'
+                . '<strong>Confirm Additional Time</strong> not actioned as pay period is already '
+                . esc_html($flag104_entry_status !== '' ? $flag104_entry_status : 'locked')
+                . '.';
+
+        } else {
+
+            $out .= '<span aria-hidden="true" style="margin-right:6px;">⏱️</span>'
+                . '<strong>Confirm Additional Time</strong> '
+                . '(' . esc_html($extra_hours_text) . ' hours after scheduled shift end time ' . esc_html($payable_tense) . ')';
+
+            $out .= '<div style="margin-top:8px;">';
+
+            // If already actioned, show locked buttons
+            if ($flag104_status === 'confirmed') {
+
+                $out .= '<button type="button" class="wiw-btn secondary" disabled="disabled" style="opacity:0.6;cursor:not-allowed;margin-right:6px;">Confirmed</button>';
+
+            } elseif ($flag104_status === 'denied') {
+
+                $out .= '<button type="button" class="wiw-btn secondary" disabled="disabled" style="opacity:0.6;cursor:not-allowed;margin-right:6px;">Denied</button>';
+
+            } else {
+
+                $post_url = esc_url(admin_url('admin-post.php'));
+
+                $out .= '<form method="post" action="' . $post_url . '" style="display:inline-block;margin-right:6px;" onsubmit="return confirm(\'Are you sure you want to confirm this additional time?\');">'
+                    . '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
+                    . '<input type="hidden" name="decision" value="confirm" />'
+                    . '<input type="hidden" name="wiw_time_id" value="' . esc_attr($flag104_time_id) . '" />'
+                    . wp_nonce_field('wiwts_flag104_extra_time', 'wiwts_flag104_nonce', true, false)
+                    . '<button type="submit" class="wiw-btn secondary">Confirm</button>'
+                    . '</form>';
+
+                $out .= '<form method="post" action="' . $post_url . '" style="display:inline-block;" onsubmit="return confirm(\'Are you sure you want to deny this additional time?\');">'
+                    . '<input type="hidden" name="action" value="wiwts_flag104_extra_time" />'
+                    . '<input type="hidden" name="decision" value="deny" />'
+                    . '<input type="hidden" name="wiw_time_id" value="' . esc_attr($flag104_time_id) . '" />'
+                    . wp_nonce_field('wiwts_flag104_extra_time', 'wiwts_flag104_nonce', true, false)
+                    . '<button type="submit" class="wiw-btn secondary">Deny</button>'
+                    . '</form>';
+            }
+
+            $out .= '</div>';
+        }
+
+        $out .= '</td>';
+        $out .= '</tr>';
+    }
+}
+
+    }
+
+    $out .= '</tbody></table>';
+    $out .= '</div>';
+}
+
+$out .= '</div>';
+$out .= '</details>';
+// === End week-level flags ===
+
             $out .= '</div>';
         }
 
