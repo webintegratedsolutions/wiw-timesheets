@@ -125,7 +125,7 @@ class WIW_Timesheet_Manager
         $client_id_raw   = get_user_meta($current_user_id, 'client_account_number', true);
         $client_id       = is_scalar($client_id_raw) ? trim((string) $client_id_raw) : '';
 
-        $out  = '<div class="wiw-client-timesheets">';
+        $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets">';
         // === WIWTS STEP 12 BEGIN: Fix AJAX config attributes ===
         $out .= '<div id="wiwts-client-ajax"'
             . ' data-ajax-url="' . esc_url(admin_url('admin-ajax.php')) . '"'
@@ -2030,112 +2030,117 @@ if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
   return;
 }
 
+// Save (client update) — match main client UI behavior (normalize times + send nonce as "security")
 if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
   e.preventDefault();
 
   var row = closestRow(t);
-  if (!row) { alert("Save clicked but row not found"); return; }
+  if (!row) return;
 
   var cfg = document.getElementById("wiwts-client-ajax");
   if (!cfg) { alert("Missing AJAX config"); return; }
 
   var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
-  var nonce = cfg.getAttribute("data-nonce") || "";
-  if (!ajaxUrl || !nonce) { alert("Missing AJAX url/nonce"); return; }
-
+  var nonce   = cfg.getAttribute("data-nonce") || "";
   var entryId = t.getAttribute("data-entry-id") || "";
-  if (!entryId) { alert("Missing Entry ID"); return; }
 
-  var inEl = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
-  var outEl = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
+  if (!entryId) { alert("Missing Entry ID"); return; }
+  if (!ajaxUrl || !nonce) { alert("Missing save AJAX settings"); return; }
+
+  // Gather inputs
+  var inEl    = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
+  var outEl   = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
   var breakEl = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
 
-  var inVal = inEl ? (inEl.value || "").trim() : "";
-  var outVal = outEl ? (outEl.value || "").trim() : "";
-  var breakVal = breakEl ? (breakEl.value || "").trim() : "0";
+  var rawIn    = inEl ? (inEl.value || "") : "";
+  var rawOut   = outEl ? (outEl.value || "") : "";
+  var breakVal = breakEl ? (breakEl.value || "") : "0";
+
+  rawIn = (rawIn || "").trim();
+  rawOut = (rawOut || "").trim();
+  breakVal = (breakVal || "").trim();
   if (breakVal === "") breakVal = "0";
 
-// Allow N/A (blank) times.
-// Also accept 12-hour input like "8:04 am" and convert to 24-hour "08:04".
-function normalizeTime(val) {
-  val = (val || "").trim().toLowerCase();
-  if (val === "") return "";
+  // Allow blank times (treated as N/A).
+  // Accept 12-hour input like "8:04 am" and normalize to "08:04".
+  function normalizeTime(val) {
+    val = (val || "").trim().toLowerCase();
+    if (val === "") return "";
 
-  // Already HH:MM (24-hour)
-  if (/^\d{2}:\d{2}$/.test(val)) return val;
+    // Already HH:MM (24-hour)
+    if (/^\d{1,2}:\d{2}$/.test(val)) {
+      var parts = val.split(":");
+      var hh = parseInt(parts[0], 10);
+      var mm = parseInt(parts[1], 10);
+      if (isNaN(hh) || isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return "";
+      return String(hh).padStart(2,"0") + ":" + String(mm).padStart(2,"0");
+    }
 
-  // Accept H:MM am/pm or HH:MM am/pm
-  var m = val.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/);
-  if (!m) return "";
+    // 12-hour forms: "h:mm am" or "h:mmam"
+    var m = val.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/);
+    if (!m) m = val.match(/^(\d{1,2}):(\d{2})(am|pm)$/);
+    if (m) {
+      var h = parseInt(m[1], 10);
+      var min = parseInt(m[2], 10);
+      var ap = m[3];
+      if (isNaN(h) || isNaN(min) || h < 1 || h > 12 || min < 0 || min > 59) return "";
+      if (ap === "am") {
+        if (h === 12) h = 0;
+      } else {
+        if (h !== 12) h = h + 12;
+      }
+      return String(h).padStart(2,"0") + ":" + String(min).padStart(2,"0");
+    }
 
-  var h = parseInt(m[1], 10);
-  var mm = m[2];
-  var ap = m[3];
-
-  if (isNaN(h) || h < 1 || h > 12) return "";
-
-  if (ap === "am") {
-    if (h === 12) h = 0;
-  } else { // pm
-    if (h !== 12) h = h + 12;
+    return "";
   }
 
-  var hh = String(h).padStart(2, "0");
-  return hh + ":" + mm;
-}
+  var inVal  = normalizeTime(rawIn);
+  var outVal = normalizeTime(rawOut);
 
-var rawIn = inVal;
-var rawOut = outVal;
-
-inVal = normalizeTime(inVal);
-outVal = normalizeTime(outVal);
-
-// If the user typed something non-empty but we could not normalize it, stop the save.
-if (rawIn.trim() !== "" && inVal === "") {
-  alert("Clock In/Out must be HH:MM (24-hour)");
-  return;
-}
-if (rawOut.trim() !== "" && outVal === "") {
-  alert("Clock In/Out must be HH:MM (24-hour)");
-  return;
-}
+  // If user typed something but we could not normalize it, stop.
+  if (rawIn !== "" && inVal === "") {
+    alert("Clock In/Out must be HH:MM (24-hour)");
+    return;
+  }
+  if (rawOut !== "" && outVal === "") {
+    alert("Clock In/Out must be HH:MM (24-hour)");
+    return;
+  }
 
   if (!/^\d+$/.test(breakVal)) {
     alert("Break (Min) must be a whole number");
     return;
   }
 
-var displayIn  = (inVal && inVal !== "") ? inVal : "N/A";
-var displayOut = (outVal && outVal !== "") ? outVal : "N/A";
+  var ok = window.confirm(
+    "Save changes?\n\n" +
+    "Clock In: " + (inVal !== "" ? inVal : "N/A") + "\n" +
+    "Clock Out: " + (outVal !== "" ? outVal : "N/A") + "\n" +
+    "Break (Min): " + breakVal + "\n\n" +
+    "Click OK to save, or Cancel to discard changes."
+  );
 
-var ok = window.confirm(
-  "Confirm Save?\n\n" +
-  "Clock In: " + displayIn + "\n" +
-  "Clock Out: " + displayOut + "\n" +
-  "Break (Min): " + breakVal + "\n\n" +
-  "Click OK to save, or Cancel to discard changes."
-);
+  if (!ok) {
+    return;
+  }
 
-if (!ok) {
-  return;
-}
+  wiwtsShowRefreshingOverlay("Saving…");
 
+  requestAnimationFrame(function(){
 
-  var body = new URLSearchParams();
-  body.append("action", "wiw_client_update_entry");
-  body.append("security", nonce);
-  body.append("entry_id", entryId);
-  body.append("clock_in_time", inVal);
-  body.append("clock_out_time", outVal);
-  body.append("break_minutes", breakVal);
-
-  // Show modal overlay immediately (before the AJAX request)
- wiwtsShowRefreshingOverlay("Updating timesheet records…");
-
-  window.requestAnimationFrame(function(){
+    // IMPORTANT: send nonce as "security" (matches your existing handler)
+    var body = new URLSearchParams();
+    body.append("action", "wiw_client_update_entry");
+    body.append("security", nonce);
+    body.append("entry_id", entryId);
+    body.append("clock_in_time", inVal);
+    body.append("clock_out_time", outVal);
+    body.append("break_minutes", breakVal);
 
     fetch(ajaxUrl, {
       method: "POST",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
       body: body.toString()
     })
@@ -2147,11 +2152,6 @@ if (!ok) {
         alert(msg);
         return;
       }
-
-      var newPayable = (resp && resp.data && resp.data.payable_hours !== undefined)
-        ? resp.data.payable_hours
-        : "";
-
       window.location.reload();
     })
     .catch(function(){
@@ -2558,10 +2558,414 @@ if (!ok) {
         return $out;
     }
 
+    /**
+     * Shared assets for [wiw_timesheets_client_records]:
+     * - Reset Preview Modal markup
+     * - Inline JS handlers (Edit/Save/Cancel/Approve/Reset)
+     *
+     * Implemented as NOWDOC to avoid PHP quote collisions that can cause fatal parse errors.
+     */
+    private function wiwts_client_records_shared_assets()
+    {
+        $out = <<<'HTML'
+<div id="wiwts-reset-preview-modal" style="display:none;position:fixed;inset:0;z-index:99999;">
+  <div id="wiwts-reset-preview-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);"></div>
+  <div role="dialog" aria-modal="true" aria-labelledby="wiwts-reset-preview-title"
+       style="position:relative;max-width:720px;margin:6vh auto;background:#fff;border-radius:10px;padding:18px 18px 14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+      <h3 id="wiwts-reset-preview-title" style="margin:0;font-size:18px;">Reset Preview</h3>
+    </div>
+
+    <p style="margin:10px 0 14px;">
+      Review the changes below. Click <strong>Apply Reset</strong> to update the saved values.
+    </p>
+
+    <div id="wiwts-reset-preview-body" style="background:#f6f7f7;border:1px solid #dcdcde;border-radius:8px;padding:12px;white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, &quot;Liberation Mono&quot;, &quot;Courier New&quot;, monospace;font-size:13px;"></div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+      <button type="button" class="wiw-btn" id="wiwts-reset-preview-apply" style="padding:8px 14px;min-width:110px;text-align:center;">Apply Reset</button>
+      <button type="button" class="wiw-btn secondary" id="wiwts-reset-preview-close" style="padding:8px 14px;min-width:110px;text-align:center;">Close</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  function closestRow(el){
+    while(el && el.tagName && el.tagName.toLowerCase() !== "tr"){ el = el.parentNode; }
+    return el;
+  }
+
+  function inWeekView(target){
+    if (!target || !target.closest) return false;
+    return !!target.closest("#wiwts-client-records-view");
+  }
+
+  function wiwtsShowRefreshingOverlay(message){
+    try {
+      if (document.getElementById("wiwts-refreshing-overlay")) return;
+
+      var overlay = document.createElement("div");
+      overlay.id = "wiwts-refreshing-overlay";
+      overlay.setAttribute("role", "status");
+      overlay.setAttribute("aria-live", "polite");
+      overlay.style.position = "fixed";
+      overlay.style.left = "0";
+      overlay.style.top = "0";
+      overlay.style.right = "0";
+      overlay.style.bottom = "0";
+      overlay.style.background = "rgba(0,0,0,0.35)";
+      overlay.style.zIndex = "999999";
+      overlay.style.display = "flex";
+      overlay.style.alignItems = "center";
+      overlay.style.justifyContent = "center";
+      overlay.style.padding = "20px";
+
+      var box = document.createElement("div");
+      box.style.background = "#fff";
+      box.style.borderRadius = "10px";
+      box.style.padding = "16px 18px";
+      box.style.boxShadow = "0 10px 30px rgba(0,0,0,0.25)";
+      box.style.display = "flex";
+      box.style.alignItems = "center";
+      box.style.gap = "12px";
+      box.style.maxWidth = "420px";
+      box.style.width = "100%";
+
+      var spinner = document.createElement("div");
+      spinner.style.width = "18px";
+      spinner.style.height = "18px";
+      spinner.style.border = "3px solid #ddd";
+      spinner.style.borderTopColor = "#333";
+      spinner.style.borderRadius = "50%";
+      spinner.style.animation = "wiwtsSpin 0.9s linear infinite";
+
+      var text = document.createElement("div");
+      text.style.fontSize = "14px";
+      text.style.lineHeight = "1.4";
+      text.textContent = (message && String(message)) ? String(message) : "Refreshing…";
+
+      if (!document.getElementById("wiwts-spin-style")) {
+        var st = document.createElement("style");
+        st.id = "wiwts-spin-style";
+        st.type = "text/css";
+        st.textContent = "@keyframes wiwtsSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
+        document.head.appendChild(st);
+      }
+
+      box.appendChild(spinner);
+      box.appendChild(text);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      document.body.style.cursor = "wait";
+    } catch (e) {}
+  }
+
+  function wiwtsHideRefreshingOverlay(){
+    try {
+      var overlay = document.getElementById("wiwts-refreshing-overlay");
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.body.style.cursor = "";
+    } catch (e) {}
+  }
+
+  function setEditing(row, isEditing){
+    var inputs = row.querySelectorAll("input.wiw-client-edit");
+    var views  = row.querySelectorAll("span.wiw-client-view");
+
+    for (var i=0;i<inputs.length;i++){ inputs[i].style.display = isEditing ? "" : "none"; }
+    for (var j=0;j<views.length;j++){ views[j].style.display = isEditing ? "none" : ""; }
+
+    var editBtn    = row.querySelector(".wiw-client-edit-btn");
+    var saveBtn    = row.querySelector(".wiw-client-save-btn");
+    var resetBtn   = row.querySelector(".wiw-client-reset-btn");
+    var cancelBtn  = row.querySelector(".wiw-client-cancel-btn");
+    var approveBtn = row.querySelector(".wiw-client-approve-btn");
+
+    if (editBtn)   editBtn.style.display   = isEditing ? "none" : "";
+    if (saveBtn)   saveBtn.style.display   = isEditing ? "" : "none";
+    if (resetBtn)  resetBtn.style.display  = isEditing ? "" : "none";
+    if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
+    if (approveBtn) approveBtn.style.display = isEditing ? "none" : "";
+  }
+
+  function restoreOriginal(row){
+    var cells = [
+      row.querySelector("td.wiw-client-cell-clock-in"),
+      row.querySelector("td.wiw-client-cell-clock-out"),
+      row.querySelector("td.wiw-client-cell-break")
+    ];
+
+    for (var i=0;i<cells.length;i++){
+      var cell = cells[i];
+      if (!cell) continue;
+
+      var orig     = cell.getAttribute("data-orig") || "";
+      var origView = cell.getAttribute("data-orig-view") || "";
+      var input    = cell.querySelector("input.wiw-client-edit");
+      var view     = cell.querySelector("span.wiw-client-view");
+
+      if (input) input.value = orig;
+
+      if (view){
+        if (cell.classList.contains("wiw-client-cell-break")){
+          view.textContent = orig ? orig : "0";
+        } else {
+          view.textContent = origView ? origView : "N/A";
+        }
+      }
+    }
+  }
+
+  function wiwtsOpenResetPreviewModal(previewText, entryId, ajaxUrl, nonceR){
+    var modal = document.getElementById("wiwts-reset-preview-modal");
+    var body  = document.getElementById("wiwts-reset-preview-body");
+    if (!modal || !body) { alert(previewText || "Reset preview loaded."); return; }
+
+    body.textContent = previewText || "Reset preview loaded.";
+    modal.style.display = "block";
+    modal.setAttribute("data-entry-id", entryId || "");
+    modal.setAttribute("data-ajax-url", ajaxUrl || "");
+    modal.setAttribute("data-nonce-reset", nonceR || "");
+  }
+
+  function wiwtsCloseResetPreviewModal(){
+    var modal = document.getElementById("wiwts-reset-preview-modal");
+    if (modal) {
+      modal.style.display = "none";
+      modal.removeAttribute("data-entry-id");
+      modal.removeAttribute("data-ajax-url");
+      modal.removeAttribute("data-nonce-reset");
+    }
+  }
+
+  document.addEventListener("click", function(e){
+    var t = e.target;
+      // Only handle clicks inside the Week View shortcode output
+  if (!t || !t.closest || !t.closest("#wiwts-client-records-view")) {
+    return;
+  }
+
+    if (!inWeekView(t)) return;
+
+    if (t && (t.id === "wiwts-reset-preview-close" || t.id === "wiwts-reset-preview-backdrop")) {
+      e.preventDefault();
+      wiwtsCloseResetPreviewModal();
+      return;
+    }
+
+    if (t && t.id === "wiwts-reset-preview-apply") {
+      e.preventDefault();
+
+      var modal = document.getElementById("wiwts-reset-preview-modal");
+      if (!modal) return;
+
+      var entryId = modal.getAttribute("data-entry-id") || "";
+      var ajaxUrl = modal.getAttribute("data-ajax-url") || "";
+      var nonceR  = modal.getAttribute("data-nonce-reset") || "";
+
+      if (!entryId || !ajaxUrl || !nonceR) { alert("Missing reset settings."); return; }
+
+      wiwtsShowRefreshingOverlay("Applying reset…");
+
+      var fd = new FormData();
+      fd.append("action", "wiw_client_reset_entry_from_api");
+      fd.append("entry_id", entryId);
+      fd.append("preview_only", "0");
+      fd.append("security", nonceR);
+
+      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+          if (!resp || !resp.success) {
+            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Reset failed";
+            wiwtsHideRefreshingOverlay();
+            alert(msg);
+            return;
+          }
+          window.location.reload();
+        })
+        .catch(function(){
+          wiwtsHideRefreshingOverlay();
+          alert("Reset failed (network error).");
+        });
+
+      return;
+    }
+
+    if (t && t.classList && t.classList.contains("wiw-client-edit-btn")){
+      e.preventDefault();
+      var row = closestRow(t);
+      if (!row) return;
+      setEditing(row, true);
+      return;
+    }
+
+    if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")){
+      e.preventDefault();
+      var row = closestRow(t);
+      if (!row) return;
+      restoreOriginal(row);
+      setEditing(row, false);
+      return;
+    }
+
+    if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
+      e.preventDefault();
+      var row = closestRow(t);
+      if (!row) return;
+
+      var wrap = document.getElementById("wiwts-client-ajax");
+      if (!wrap) { alert("Missing reset AJAX settings"); return; }
+
+      var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
+      var nonceR  = wrap.getAttribute("data-nonce-reset") || "";
+
+      var saveBtn = row.querySelector(".wiw-client-save-btn");
+      var apprBtn = row.querySelector(".wiw-client-approve-btn");
+      var entryId = "";
+      if (saveBtn && saveBtn.getAttribute("data-entry-id")) entryId = saveBtn.getAttribute("data-entry-id");
+      if (!entryId && apprBtn && apprBtn.getAttribute("data-entry-id")) entryId = apprBtn.getAttribute("data-entry-id");
+
+      if (!entryId) { alert("Missing Entry ID"); return; }
+      if (!ajaxUrl || !nonceR) { alert("Missing reset AJAX settings"); return; }
+
+      var fd = new FormData();
+      fd.append("action", "wiw_client_reset_entry_from_api");
+      fd.append("entry_id", entryId);
+      fd.append("preview_only", "1");
+      fd.append("security", nonceR);
+
+      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+          if (!resp || !resp.success) {
+            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Reset preview failed";
+            alert(msg);
+            return;
+          }
+          var preview = (resp && resp.data && resp.data.preview) ? resp.data.preview : "Preview loaded.";
+          wiwtsOpenResetPreviewModal(preview, entryId, ajaxUrl, nonceR);
+        })
+        .catch(function(){
+          alert("Reset failed (network error).");
+        });
+
+      return;
+    }
+
+    if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
+      e.preventDefault();
+      var row = closestRow(t);
+      if (!row) return;
+
+      var wrap = document.getElementById("wiwts-client-ajax");
+      if (!wrap) { alert("Missing approve AJAX settings"); return; }
+
+      var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
+      var nonceA  = wrap.getAttribute("data-nonce-approve") || "";
+      var entryId = t.getAttribute("data-entry-id") || "";
+
+      if (!entryId) { alert("Missing Entry ID"); return; }
+      if (!ajaxUrl || !nonceA) { alert("Missing approve AJAX settings"); return; }
+
+      wiwtsShowRefreshingOverlay("Approving…");
+
+      var fd = new FormData();
+      fd.append("action", "wiw_local_approve_entry");
+      fd.append("entry_id", entryId);
+      fd.append("security", nonceA);
+
+      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+          if (!resp || !resp.success) {
+            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Approve failed";
+            wiwtsHideRefreshingOverlay();
+            alert(msg);
+            return;
+          }
+          window.location.reload();
+        })
+        .catch(function(){
+          wiwtsHideRefreshingOverlay();
+          alert("AJAX error approving entry");
+        });
+
+      return;
+    }
+
+    // Save — MUST match backend field names:
+    // check_ajax_referer('wiw_local_edit_entry', 'security')
+    // $_POST['clock_in_time'], $_POST['clock_out_time'], $_POST['break_minutes']
+    if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
+      e.preventDefault();
+      var row = closestRow(t);
+      if (!row) return;
+
+      var wrap = document.getElementById("wiwts-client-ajax");
+      if (!wrap) { alert("Missing save AJAX settings"); return; }
+
+      var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
+      var nonceS  = wrap.getAttribute("data-nonce") || "";
+      var entryId = t.getAttribute("data-entry-id") || "";
+
+      if (!entryId) { alert("Missing Entry ID"); return; }
+      if (!ajaxUrl || !nonceS) { alert("Missing save AJAX settings"); return; }
+
+      var cellIn    = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
+      var cellOut   = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
+      var cellBreak = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
+
+      var clockIn  = cellIn ? cellIn.value : "";
+      var clockOut = cellOut ? cellOut.value : "";
+      var brkMin   = cellBreak ? cellBreak.value : "";
+
+      wiwtsShowRefreshingOverlay("Saving…");
+
+fd.append("action", "wiw_client_update_entry");
+fd.append("entry_id", entryId);
+
+// Backend expects these keys:
+fd.append("clock_in_time", (clockIn || "").trim());
+fd.append("clock_out_time", (clockOut || "").trim());
+fd.append("break_minutes", (brkMin || "").trim());
+
+// Backend nonce field name:
+fd.append("security", nonceS);
+
+      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+          if (!resp || !resp.success) {
+            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Save failed";
+            wiwtsHideRefreshingOverlay();
+            alert(msg);
+            return;
+          }
+          window.location.reload();
+        })
+        .catch(function(){
+          wiwtsHideRefreshingOverlay();
+          alert("AJAX error saving entry");
+        });
+
+      return;
+    }
+
+  });
+})();
+</script>
+HTML;
+
+        return $out;
+    }
+
 
     /**
      * Front-end client UI (alternate view) via [wiw_timesheets_client_records]
-     * Safe placeholder for initial wiring; no business logic changes yet.
+     * Week-grouped (Week 1 / Week 2) display WITH the same columns + Actions behavior as the main client view.
      */
     public function render_client_records_ui()
     {
@@ -2576,9 +2980,268 @@ if (!ok) {
             return '';
         }
 
-        $out  = '<div class="wiw-client-timesheets" style="margin-bottom:14px;">';
+        $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets">';
+
+        // Same AJAX config div as the main client view (required for Actions JS).
+        $out .= '<div id="wiwts-client-ajax"'
+            . ' data-ajax-url="' . esc_url(admin_url('admin-ajax.php')) . '"'
+            . ' data-nonce="' . esc_attr(wp_create_nonce('wiw_local_edit_entry')) . '"'
+            . ' data-nonce-approve="' . esc_attr(wp_create_nonce('wiw_local_approve_entry')) . '"'
+            . ' data-nonce-reset="' . esc_attr(wp_create_nonce('wiw_client_reset_entry_from_api')) . '"'
+            . '></div>';
+
+        // For this view (initial version): All Records / All Employees
+        $filter_status   = ''; // status filter applies to entries; empty = all
+        $is_admin_front  = current_user_can('manage_options'); // keep compatible; but client view typically false
+
+        $timesheets = $this->get_scoped_local_timesheets($client_id, $filter_status);
+
+        if (empty($timesheets)) {
+            $out .= '<p><em>No timesheet records found.</em></p></div>';
+            return $out;
+        }
+
+        // Map timesheet_id => employee_name (entries table doesn't store employee_name)
+        $employee_by_timesheet = array();
+        foreach ($timesheets as $ts) {
+            if (! empty($ts->id)) {
+                $employee_by_timesheet[(int) $ts->id] = ! empty($ts->employee_name) ? (string) $ts->employee_name : '';
+            }
+        }
+
+        // Collect daily entries into Week buckets across all pay periods.
+        // Key format: weekStart|weekEnd
+        $weeks = array();
+
+        foreach ($timesheets as $ts) {
+
+            $timesheet_id = isset($ts->id) ? (int) $ts->id : 0;
+            if ($timesheet_id <= 0) {
+                continue;
+            }
+
+            $pay_period_start = ! empty($ts->week_start_date) ? (string) $ts->week_start_date : '';
+            $pay_period_end   = ! empty($ts->week_end_date) ? (string) $ts->week_end_date : '';
+            if ($pay_period_start === '' || $pay_period_end === '') {
+                continue;
+            }
+
+            // Pay period week boundaries
+            $week1_start = $pay_period_start;
+            $week1_end   = date('Y-m-d', strtotime($pay_period_start . ' +6 days'));
+            $week2_start = date('Y-m-d', strtotime($pay_period_start . ' +7 days'));
+            $week2_end   = $pay_period_end;
+
+            $daily_rows = $this->get_scoped_daily_records_for_timesheet($client_id, $timesheet_id, $filter_status);
+
+            if (empty($daily_rows)) {
+                continue;
+            }
+
+            foreach ($daily_rows as $dr) {
+
+                $row_date = isset($dr->date) ? (string) $dr->date : '';
+                if ($row_date === '') {
+                    continue;
+                }
+
+                // Determine bucket week
+                if ($row_date <= $week1_end) {
+                    $wk_start = $week1_start;
+                    $wk_end   = $week1_end;
+                } else {
+                    $wk_start = $week2_start;
+                    $wk_end   = $week2_end;
+                }
+
+                $wk_key = $wk_start . '|' . $wk_end;
+
+                if (! isset($weeks[$wk_key])) {
+                    $weeks[$wk_key] = array(
+                        'week_start' => $wk_start,
+                        'week_end'   => $wk_end,
+                        'rows'       => array(),
+                    );
+                }
+
+                // Attach timesheet_id + employee name for display
+                $dr->_wiw_timesheet_id   = $timesheet_id;
+                $dr->_wiw_employee_name  = isset($employee_by_timesheet[$timesheet_id]) ? $employee_by_timesheet[$timesheet_id] : '';
+
+                $weeks[$wk_key]['rows'][] = $dr;
+            }
+        }
+
+        if (empty($weeks)) {
+            $out .= '<p><em>No timesheet entries found.</em></p></div>';
+            return $out;
+        }
+
+        // Sort weeks newest -> oldest by week_start
+        uasort($weeks, function ($a, $b) {
+            return strcmp($b['week_start'], $a['week_start']);
+        });
+
         $out .= '<h2 style="margin:0 0 10px 0;">Timesheet Records (Week View)</h2>';
-        $out .= '<p style="margin:0 0 12px 0;"><em>Placeholder view is active.</em> Client ID: <strong>' . esc_html($client_id) . '</strong></p>';
+
+        foreach ($weeks as $wk) {
+
+            $wk_start = (string) $wk['week_start'];
+            $wk_end   = (string) $wk['week_end'];
+            $rows     = (array) $wk['rows'];
+
+            // Sort rows within week by date ASC, then id ASC
+            usort($rows, function ($r1, $r2) {
+                $d1 = isset($r1->date) ? (string) $r1->date : '';
+                $d2 = isset($r2->date) ? (string) $r2->date : '';
+                if ($d1 === $d2) {
+                    $i1 = isset($r1->id) ? (int) $r1->id : 0;
+                    $i2 = isset($r2->id) ? (int) $r2->id : 0;
+                    return $i1 <=> $i2;
+                }
+                return strcmp($d1, $d2);
+            });
+
+            $label_start = date_i18n('F d, Y', strtotime($wk_start));
+            $label_end   = date_i18n('F d, Y', strtotime($wk_end));
+
+            $out .= '<div class="wiw-week-group" style="margin:18px 0 10px 0;">';
+            $out .= '<h3 style="margin:0 0 8px 0;">Week Of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h3>';
+            $out .= '<p style="margin:0 0 10px 0;"><em>Total Records:</em> ' . esc_html((string) count($rows)) . '</p>';
+
+            // Table header = same columns as main client view (client layout; no Location column)
+            $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;width:100%;">';
+            $out .= '<thead><tr>';
+            $out .= '<th>Shift Date</th>';
+            $out .= '<th style="width:180px; white-space:nowrap;">Sched. Start/End</th>';
+            $out .= '<th>Clock In</th>';
+            $out .= '<th>Clock Out</th>';
+            $out .= '<th>Break (Min)</th>';
+            $out .= '<th>Sched. Hrs</th>';
+            $out .= '<th>Clocked Hrs</th>';
+            $out .= '<th>Payable Hrs</th>';
+            $out .= '<th>Actions</th>';
+            $out .= '</tr></thead><tbody>';
+
+            foreach ($rows as $dr) {
+
+                $timesheet_id = isset($dr->_wiw_timesheet_id) ? absint($dr->_wiw_timesheet_id) : 0;
+
+                $date_display = isset($dr->date) ? (string) $dr->date : 'N/A';
+
+                $sched_start = isset($dr->scheduled_start) ? (string) $dr->scheduled_start : '';
+                $sched_end   = isset($dr->scheduled_end) ? (string) $dr->scheduled_end : '';
+                $sched_start_end = $this->wiw_format_time_range_local($sched_start, $sched_end);
+
+                $clock_in  = isset($dr->clock_in) ? (string) $dr->clock_in : '';
+                $clock_out = isset($dr->clock_out) ? (string) $dr->clock_out : '';
+
+                $break_min = isset($dr->break_minutes) ? (string) $dr->break_minutes : '0';
+
+                $sched_hrs   = isset($dr->scheduled_hours) ? (string) $dr->scheduled_hours : '0.00';
+                $clocked_hrs = isset($dr->clocked_hours) ? (string) $dr->clocked_hours : '0.00';
+                $payable_hrs = isset($dr->payable_hours) ? (string) $dr->payable_hours : '0.00';
+
+                $status_raw = isset($dr->status) ? (string) $dr->status : '';
+                $status     = strtolower(trim($status_raw));
+
+                // Raw scheduled HH:MM for edit defaults.
+                $scheduled_start_raw = ($sched_start && strlen($sched_start) >= 16) ? substr($sched_start, 11, 5) : '';
+                $scheduled_end_raw   = ($sched_end && strlen($sched_end) >= 16) ? substr($sched_end, 11, 5) : '';
+
+                $out .= '<tr data-sched-start="' . esc_attr($scheduled_start_raw) . '" data-sched-end="' . esc_attr($scheduled_end_raw) . '">';
+
+                // Shift date cell + WIW Time ID (same as main client view)
+                $wiw_time_id_display = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+                $date_cell_html  = '<div>' . esc_html($date_display) . '</div>';
+                if ($wiw_time_id_display !== '') {
+                    $date_cell_html .= '<div><small style="opacity:0.75;">(' . esc_html($wiw_time_id_display) . ')</small></div>';
+                }
+                $out .= '<td>' . $date_cell_html . '</td>';
+
+                $out .= '<td style="min-width:180px; white-space:nowrap;">' . esc_html($sched_start_end) . '</td>';
+
+                // Raw HH:MM for edit inputs
+                $clock_in_raw  = ($clock_in && strlen((string) $clock_in) >= 16) ? substr((string) $clock_in, 11, 5) : '';
+                $clock_out_raw = ($clock_out && strlen((string) $clock_out) >= 16) ? substr((string) $clock_out, 11, 5) : '';
+
+                // Display values
+                $clock_in_display  = $this->wiw_format_time_local($clock_in);
+                $clock_out_display = $this->wiw_format_time_local($clock_out);
+
+                // Missing styling (same)
+                $clock_in_view_text   = ($clock_in_display !== '') ? $clock_in_display : 'Missing';
+                $clock_out_view_text  = ($clock_out_display !== '') ? $clock_out_display : 'Missing';
+                $clock_in_view_style  = ($clock_in_display !== '') ? '' : ' style="color:#b32d2e;font-weight:600;"';
+                $clock_out_view_style = ($clock_out_display !== '') ? '' : ' style="color:#b32d2e;font-weight:600;"';
+
+                $out .= '<td class="wiw-client-cell-clock-in" data-orig="' . esc_attr($clock_in_raw) . '" data-orig-view="' . esc_attr($clock_in_display !== '' ? $clock_in_display : 'N/A') . '">'
+                    . '<span class="wiw-client-view"' . $clock_in_view_style . '>' . esc_html($clock_in_view_text) . '</span>'
+                    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr($clock_in_raw) . '" style="display:none; width:80px;" />'
+                    . '</td>';
+
+                $out .= '<td class="wiw-client-cell-clock-out" data-orig="' . esc_attr($clock_out_raw) . '" data-orig-view="' . esc_attr($clock_out_display !== '' ? $clock_out_display : 'N/A') . '">'
+                    . '<span class="wiw-client-view"' . $clock_out_view_style . '>' . esc_html($clock_out_view_text) . '</span>'
+                    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="HH:MM" value="' . esc_attr($clock_out_raw) . '" style="display:none; width:80px;" />'
+                    . '</td>';
+
+                $out .= '<td class="wiw-client-cell-break" data-orig="' . esc_attr((string) $break_min) . '">'
+                    . '<span class="wiw-client-view">' . esc_html((string) $break_min) . '</span>'
+                    . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="0" value="' . esc_attr((string) $break_min) . '" style="display:none; width:70px;" />'
+                    . '</td>';
+
+                $out .= '<td>' . esc_html($sched_hrs) . '</td>';
+                $out .= '<td>' . esc_html($clocked_hrs) . '</td>';
+                $out .= '<td>' . esc_html($payable_hrs) . '</td>';
+
+                // Approve button gating (same)
+                $is_approved   = ($status === 'approved');
+                $approve_label = $is_approved ? 'Approved' : 'Approve';
+
+                $missing_clock_in  = ((string) $clock_in_display === '');
+                $missing_clock_out = ((string) $clock_out_display === '');
+
+                $approve_disabled = ($is_approved || $missing_clock_in || $missing_clock_out) ? ' disabled="disabled"' : '';
+
+                // Archived gating (same logic; here filter is "", so gating is driven by entry status)
+                $entry_status_for_actions = isset($dr->status) ? strtolower(trim((string) $dr->status)) : $status;
+                $is_archived_row = ($entry_status_for_actions === 'archived');
+
+                if ($is_archived_row) {
+
+                    $out .= '<td><span class="wiw-muted">Archived</span></td>';
+                } else {
+
+                    $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
+
+                    if (! $is_approved) {
+                        $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
+                    }
+
+                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+
+                    $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '">Save</button>';
+
+                    // Reset button shows only during edit mode (same as main view)
+                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" style="display:none;">Reset</button>';
+
+                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
+
+                    $actions_html .= '</div>';
+
+                    $out .= '<td>' . $actions_html . '</td>';
+                }
+
+                $out .= '</tr>';
+            }
+
+            $out .= '</tbody></table>';
+            $out .= '</div>';
+        }
+
+        // Include the same Reset Preview Modal + inline JS used by the main client view.
+        $out .= $this->wiwts_client_records_shared_assets();
+
         $out .= '</div>';
 
         return $out;
