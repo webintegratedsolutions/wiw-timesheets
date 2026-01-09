@@ -3178,17 +3178,34 @@ $out .= '<p style="margin:0 0 20px;font-size:16px;line-height:1.4;">'
             $wk_end   = (string) $wk['week_end'];
             $rows     = (array) $wk['rows'];
 
-            // Sort rows within week by date ASC, then id ASC
-            usort($rows, function ($r1, $r2) {
-                $d1 = isset($r1->date) ? (string) $r1->date : '';
-                $d2 = isset($r2->date) ? (string) $r2->date : '';
-                if ($d1 === $d2) {
-                    $i1 = isset($r1->id) ? (int) $r1->id : 0;
-                    $i2 = isset($r2->id) ? (int) $r2->id : 0;
-                    return $i1 <=> $i2;
-                }
-                return strcmp($d1, $d2);
-            });
+// Sort rows within week:
+// 1) Not approved/archived first (pending/overdue/blank/etc.)
+// 2) Approved/archived last
+// 3) Within each bucket: date ASC, then id ASC
+usort($rows, function ($r1, $r2) {
+
+    $s1 = isset($r1->status) ? strtolower(trim((string) $r1->status)) : '';
+    $s2 = isset($r2->status) ? strtolower(trim((string) $r2->status)) : '';
+
+    $is_done_1 = ($s1 === 'approved' || $s1 === 'archived');
+    $is_done_2 = ($s2 === 'approved' || $s2 === 'archived');
+
+    if ($is_done_1 !== $is_done_2) {
+        // false (not done) should come first
+        return ($is_done_1 ? 1 : -1);
+    }
+
+    $d1 = isset($r1->date) ? (string) $r1->date : '';
+    $d2 = isset($r2->date) ? (string) $r2->date : '';
+
+    if ($d1 === $d2) {
+        $i1 = isset($r1->id) ? (int) $r1->id : 0;
+        $i2 = isset($r2->id) ? (int) $r2->id : 0;
+        return $i1 <=> $i2;
+    }
+
+    return strcmp($d1, $d2);
+});
 
             $label_start = date_i18n('F d, Y', strtotime($wk_start));
             $label_end   = date_i18n('F d, Y', strtotime($wk_end));
