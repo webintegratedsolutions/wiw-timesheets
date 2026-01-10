@@ -3096,23 +3096,10 @@ HTML;
             return strcmp($b['week_start'], $a['week_start']);
         });
 
-// Dynamic header + approval deadline (mirrors the main client view)
-$is_frontend_admin = $is_admin_front;
-
-if (isset($_GET['wiw_status'])) {
-    $selected_status = sanitize_text_field(wp_unslash($_GET['wiw_status']));
-} else {
-    $selected_status = $is_frontend_admin ? 'overdue' : 'pending';
-}
-
-$heading_text = 'Timesheets Pending Approval';
-if ($selected_status === 'approved') {
-    $heading_text = 'Approved Timesheets';
-} elseif ($selected_status === 'archived') {
-    $heading_text = 'Archived Timesheets';
-} elseif ($selected_status === '') {
-    $heading_text = 'All Timesheet Records';
-}
+// Dynamic header + approval deadline
+// NOTE: [wiw_timesheets_client_records] must always behave as "All Records" (no filters on this page).
+$selected_status = '';
+$heading_text    = 'All Timesheet Records';
 
 $out .= '<h3 style="margin:0 8px 10px 0;font-size:18px;line-height:1.2;">' . esc_html($heading_text) . '</h3>';
 
