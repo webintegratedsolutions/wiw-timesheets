@@ -3023,9 +3023,10 @@ HTML;
             }
         }
 
-        // Collect daily entries into Week buckets across all pay periods.
-        // Key format: weekStart|weekEnd
-        $weeks = array();
+// Collect daily entries into Week buckets across all pay periods.
+// Key format: weekStart|weekEnd
+$weeks_pending = array(); // pending + anything not approved/archived
+$weeks_done    = array(); // approved + archived
 
         foreach ($timesheets as $ts) {
 
@@ -3068,33 +3069,57 @@ HTML;
                     $wk_end   = $week2_end;
                 }
 
-                $wk_key = $wk_start . '|' . $wk_end;
+$wk_key = $wk_start . '|' . $wk_end;
 
-                if (! isset($weeks[$wk_key])) {
-                    $weeks[$wk_key] = array(
-                        'week_start' => $wk_start,
-                        'week_end'   => $wk_end,
-                        'rows'       => array(),
-                    );
-                }
+// Decide which section this row belongs to.
+// "done" = approved/archived, everything else goes in the pending section.
+$row_status_raw = isset($dr->status) ? (string) $dr->status : '';
+$row_status     = strtolower(trim($row_status_raw));
+$is_done_row    = in_array($row_status, array('approved', 'archived'), true);
 
-                // Attach timesheet_id + employee name for display
-                $dr->_wiw_timesheet_id   = $timesheet_id;
-                $dr->_wiw_employee_name  = isset($employee_by_timesheet[$timesheet_id]) ? $employee_by_timesheet[$timesheet_id] : '';
+$target_weeks = $is_done_row ? $weeks_done : $weeks_pending;
 
-                $weeks[$wk_key]['rows'][] = $dr;
+if (! isset($target_weeks[$wk_key])) {
+    $target_weeks[$wk_key] = array(
+        'week_start' => $wk_start,
+        'week_end'   => $wk_end,
+        'rows'       => array(),
+    );
+}
+
+// Attach timesheet_id + employee name for display
+$dr->_wiw_timesheet_id   = $timesheet_id;
+$dr->_wiw_employee_name  = isset($employee_by_timesheet[$timesheet_id]) ? $employee_by_timesheet[$timesheet_id] : '';
+
+$target_weeks[$wk_key]['rows'][] = $dr;
+
+// Write back to the correct container (because $target_weeks is a copy)
+if ($is_done_row) {
+    $weeks_done = $target_weeks;
+} else {
+    $weeks_pending = $target_weeks;
+}
+
             }
         }
 
-        if (empty($weeks)) {
-            $out .= '<p><em>No timesheet entries found.</em></p></div>';
-            return $out;
-        }
+if (empty($weeks_pending) && empty($weeks_done)) {
+    $out .= '<p><em>No timesheet entries found.</em></p></div>';
+    return $out;
+}
 
-        // Sort weeks newest -> oldest by week_start
-        uasort($weeks, function ($a, $b) {
-            return strcmp($b['week_start'], $a['week_start']);
-        });
+// Sort weeks newest -> oldest by week_start (each section separately)
+if (! empty($weeks_pending)) {
+    uasort($weeks_pending, function ($a, $b) {
+        return strcmp($b['week_start'], $a['week_start']);
+    });
+}
+if (! empty($weeks_done)) {
+    uasort($weeks_done, function ($a, $b) {
+        return strcmp($b['week_start'], $a['week_start']);
+    });
+}
+
 
 // Dynamic header + approval deadline
 // NOTE: [wiw_timesheets_client_records] must always behave as "All Records" (no filters on this page).
@@ -3159,7 +3184,9 @@ $out .= '<p style="margin:0 0 20px;font-size:16px;line-height:1.4;">'
 </style>';
 
 
-        foreach ($weeks as $wk) {
+$render_weeks = function (array $weeks) use (&$out, $client_id, $tz) {
+
+    foreach ($weeks as $wk) {
 
             $wk_start = (string) $wk['week_start'];
             $wk_end   = (string) $wk['week_end'];
@@ -3589,6 +3616,21 @@ usort($rows, function ($r1, $r2) {
 
             $out .= '</div>';
         }
+
+}; // end $render_weeks
+
+// Render: Pending section first, then approved/archived section.
+if (! empty($weeks_pending)) {
+    $render_weeks($weeks_pending);
+}
+
+if (! empty($weeks_pending) && ! empty($weeks_done)) {
+    $out .= '<hr style="margin:18px 0;border:0;border-top:1px solid #dcdcde;" />';
+}
+
+if (! empty($weeks_done)) {
+    $render_weeks($weeks_done);
+}
 
         // Include the same Reset Preview Modal + inline JS used by the main client view.
         $out .= $this->wiwts_client_records_shared_assets();
