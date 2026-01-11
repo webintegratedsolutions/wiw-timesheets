@@ -8,6 +8,15 @@
     margin-right: auto;
 }
 
+
+.page-template-client-page #page-content {
+    margin-top: 2rem;
+    width: 100%;
+    max-width: 1160px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
 .wiw-client-timesheets {
   margin: 20px 0;
 }
@@ -15,6 +24,14 @@
 .wiw-client-timesheets h2,
 .wiw-client-timesheets h3 {
   margin: 18px 0 10px;
+}
+
+#page-content .wiw-client-timesheets h3 {
+  font-size: 1.4rem;
+}
+
+#page-content .wiw-client-timesheets h4 {
+  font-size: 1.15rem;
 }
 
 .wiw-client-timesheets table.wp-list-table {
@@ -79,6 +96,20 @@
   background: #e5e5e5;
   border-color: #787c82;
   color: #2c3338;
+}
+
+/* Approve button — subtle green confirmation cue */
+.wiw-client-timesheets .wiw-btn.secondary.wiw-client-approve-btn {
+        background-color: #def3e6;
+    border-color: #87b698;
+    color: #166534;
+}
+
+.wiw-client-timesheets .wiw-btn.secondary.wiw-client-approve-btn:hover,
+.wiw-client-timesheets .wiw-btn.secondary.wiw-client-approve-btn:focus {
+background-color: #c2fce4;
+    border-color: #87b698;
+    color: #025d5e;
 }
 
 /* Disabled approve button: no hover, no pointer, muted color */

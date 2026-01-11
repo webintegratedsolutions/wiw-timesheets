@@ -1183,11 +1183,11 @@ class WIW_Timesheet_Manager
 
                                 $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 
+                                $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+
                                 if (! $is_approved) {
                                     $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
                                 }
-
-                                $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
 
                                 $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '">Save</button>';
 
@@ -3126,7 +3126,7 @@ if (! empty($weeks_done)) {
 $selected_status = '';
 $heading_text    = 'All Timesheet Records';
 
-$out .= '<h3 style="margin:0 8px 10px 0;font-size:18px;line-height:1.2;">' . esc_html($heading_text) . '</h3>';
+//$out .= '<h3 style="margin:0 8px 10px 0;font-size:18px;line-height:1.2;">' . esc_html($heading_text) . '</h3>';
 
 // Dynamic approval deadline:
 // - Weeks are Sunday -> Saturday (week ends Saturday).
@@ -3225,7 +3225,7 @@ usort($rows, function ($r1, $r2) {
             $label_end   = date_i18n('F d, Y', strtotime($wk_end));
 
             $out .= '<div class="wiw-week-group" style="margin:18px 0 10px 0;">';
-            $out .= '<h3 style="margin:0 0 8px 0;">Week Of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h3>';
+            $out .= '<h4 style="margin:0 0 8px 0;">Week Of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h4>';
 
             // Table header = same columns as main client view (client layout; no Location column)
             $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;width:100%;">';
@@ -3338,11 +3338,11 @@ usort($rows, function ($r1, $r2) {
 
                     $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 
+                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+
                     if (! $is_approved) {
                         $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
                     }
-
-                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
 
                     $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '">Save</button>';
 
@@ -3621,14 +3621,22 @@ usort($rows, function ($r1, $r2) {
 
 // Render: Pending section first, then approved/archived section.
 if (! empty($weeks_pending)) {
+    $out .= '<h3 class="wiwts-section-heading wiwts-pending-heading" style="margin-bottom:40px;">'
+          . '<span class="dashicons dashicons-clock" aria-hidden="true"></span> '
+          . 'Pending Timesheet Records'
+          . '</h3>';
     $render_weeks($weeks_pending);
 }
 
 if (! empty($weeks_pending) && ! empty($weeks_done)) {
-    $out .= '<hr style="margin:18px 0;border:0;border-top:1px solid #dcdcde;" />';
+    $out .= '<hr style="margin:30px 0;border:0;border-top:1px solid #dcdcde;" />';
 }
 
 if (! empty($weeks_done)) {
+    $out .= '<h3 class="wiwts-section-heading wiwts-approved-heading" style="margin-bottom:40px;">'
+          . '<span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> '
+          . 'Approved Timesheet Records'
+          . '</h3>';
     $render_weeks($weeks_done);
 }
 
