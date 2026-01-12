@@ -1640,6 +1640,7 @@ class WIW_Timesheet_Manager
     };
   }
 
+  // === WIWTS CLIENT UI setEditing BEGIN (single source of truth) ===
   function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
@@ -1651,21 +1652,30 @@ class WIW_Timesheet_Manager
       views[j].style.display = isEditing ? "none" : "";
     }
 
-    var editBtn   = row.querySelector(".wiw-client-edit-btn");
-    var saveBtn   = row.querySelector(".wiw-client-save-btn");
-    var cancelBtn = row.querySelector(".wiw-client-cancel-btn");
+    var editBtn    = row.querySelector(".wiw-client-edit-btn");
+    var saveBtn    = row.querySelector(".wiw-client-save-btn");
+    var resetBtn   = row.querySelector(".wiw-client-reset-btn");
+    var cancelBtn  = row.querySelector(".wiw-client-cancel-btn");
+    var approveBtn = row.querySelector(".wiw-client-approve-btn");
 
-    if (editBtn)   editBtn.style.display = isEditing ? "none" : "";
-    if (saveBtn)   saveBtn.style.display = isEditing ? "" : "none";
+    if (editBtn)   editBtn.style.display   = isEditing ? "none" : "";
+    if (saveBtn)   saveBtn.style.display   = isEditing ? "" : "none";
+    if (resetBtn)  resetBtn.style.display  = isEditing ? "" : "none";
     if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
 
-    // store originals on entering edit mode
+    // Hide Approve during edit mode (prevents approving mid-edit)
+    if (approveBtn) {
+      approveBtn.style.display = isEditing ? "none" : "";
+    }
+
+    // store originals on entering edit mode (used by Cancel restore)
     if (isEditing) {
       for (var k=0;k<inputs.length;k++){
         if (!inputs[k].dataset.orig) inputs[k].dataset.orig = inputs[k].value || "";
       }
     }
   }
+  // === WIWTS CLIENT UI setEditing END ===
 
   function restoreOriginals(row){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
@@ -1676,22 +1686,63 @@ class WIW_Timesheet_Manager
     }
   }
 
-  function updateViewFromInputs(row){
-    // keep visible spans in sync after save/cancel
-    var map = [
-      ["td.wiw-client-cell-clock-in","clock_in_time"],
-      ["td.wiw-client-cell-clock-out","clock_out_time"],
-      ["td.wiw-client-cell-break","break_minutes"]
-    ];
+function updateViewFromInputs(row){
+  // keep visible spans in sync after save/cancel
+  function timeTo12h(v){
+    var s = (v || "").toString().trim();
+    if (!s || s === "N/A") return "N/A";
 
-    for (var i=0;i<map.length;i++){
-      var cell = row.querySelector(map[i][0]);
-      if (!cell) continue;
-      var input = cell.querySelector("input.wiw-client-edit");
-      var view  = cell.querySelector("span.wiw-client-view");
-      if (input && view) view.textContent = (input.value || "").trim();
-    }
+    // Expect "HH:MM" from <input type="time">
+    var parts = s.split(":");
+    if (parts.length < 2) return s;
+
+    var h = parseInt(parts[0], 10);
+    var m = (parts[1] || "").toString().trim();
+
+    if (isNaN(h)) return s;
+
+    // normalize minutes
+    if (m.length === 1) m = "0" + m;
+
+    var ampm = (h >= 12) ? "PM" : "AM";
+    var h12 = h % 12;
+    if (h12 === 0) h12 = 12;
+
+    return h12 + ":" + m + " " + ampm;
   }
+
+  var map = [
+    ["td.wiw-client-cell-clock-in","clock_in_time"],
+    ["td.wiw-client-cell-clock-out","clock_out_time"],
+    ["td.wiw-client-cell-break","break_minutes"]
+  ];
+
+  for (var i=0;i<map.length;i++){
+    var cell = row.querySelector(map[i][0]);
+    if (!cell) continue;
+
+    var input = cell.querySelector("input.wiw-client-edit");
+    var view  = cell.querySelector("span.wiw-client-view");
+    if (!input || !view) continue;
+
+    var raw = (input.value || "").toString().trim();
+
+    if (cell.classList.contains("wiw-client-cell-break")){
+      // break minutes stays numeric
+      view.textContent = raw ? raw : "0";
+      cell.setAttribute("data-orig-view", view.textContent);
+    } else {
+      // time cells show 12-hour format
+      var formatted = timeTo12h(raw);
+      view.textContent = formatted;
+      cell.setAttribute("data-orig-view", formatted);
+    }
+
+    // After save, treat current input values as the new "originals" for Cancel
+    input.dataset.orig = raw;
+    cell.setAttribute("data-orig", raw);
+  }
+}
 
   function doSave(row, btn){
     var wrap = document.getElementById("wiwts-client-ajax");
@@ -2373,22 +2424,63 @@ function setEditing(row, isEditing){
   // === WIWTS RESET PREVIEW MODAL HELPERS END ===
 
 
-  function updateViewFromInputs(row){
-    // keep visible spans in sync after save/cancel
-    var map = [
-      ["td.wiw-client-cell-clock-in","clock_in_time"],
-      ["td.wiw-client-cell-clock-out","clock_out_time"],
-      ["td.wiw-client-cell-break","break_minutes"]
-    ];
+function updateViewFromInputs(row){
+  // keep visible spans in sync after save/cancel
+  function timeTo12h(v){
+    var s = (v || "").toString().trim();
+    if (!s || s === "N/A") return "N/A";
 
-    for (var i=0;i<map.length;i++){
-      var cell = row.querySelector(map[i][0]);
-      if (!cell) continue;
-      var input = cell.querySelector("input.wiw-client-edit");
-      var view  = cell.querySelector("span.wiw-client-view");
-      if (input && view) view.textContent = (input.value || "").trim();
-    }
+    // Expect "HH:MM" from <input type="time">
+    var parts = s.split(":");
+    if (parts.length < 2) return s;
+
+    var h = parseInt(parts[0], 10);
+    var m = (parts[1] || "").toString().trim();
+
+    if (isNaN(h)) return s;
+
+    // normalize minutes
+    if (m.length === 1) m = "0" + m;
+
+    var ampm = (h >= 12) ? "PM" : "AM";
+    var h12 = h % 12;
+    if (h12 === 0) h12 = 12;
+
+    return h12 + ":" + m + " " + ampm;
   }
+
+  var map = [
+    ["td.wiw-client-cell-clock-in","clock_in_time"],
+    ["td.wiw-client-cell-clock-out","clock_out_time"],
+    ["td.wiw-client-cell-break","break_minutes"]
+  ];
+
+  for (var i=0;i<map.length;i++){
+    var cell = row.querySelector(map[i][0]);
+    if (!cell) continue;
+
+    var input = cell.querySelector("input.wiw-client-edit");
+    var view  = cell.querySelector("span.wiw-client-view");
+    if (!input || !view) continue;
+
+    var raw = (input.value || "").toString().trim();
+
+    if (cell.classList.contains("wiw-client-cell-break")){
+      // break minutes stays numeric
+      view.textContent = raw ? raw : "0";
+      cell.setAttribute("data-orig-view", view.textContent);
+    } else {
+      // time cells show 12-hour format
+      var formatted = timeTo12h(raw);
+      view.textContent = formatted;
+      cell.setAttribute("data-orig-view", formatted);
+    }
+
+    // After save, treat current input values as the new "originals" for Cancel
+    input.dataset.orig = raw;
+    cell.setAttribute("data-orig", raw);
+  }
+}
 
   function doSave(row, btn){
     var wrap = document.getElementById("wiwts-client-ajax");
