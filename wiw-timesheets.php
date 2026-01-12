@@ -111,13 +111,14 @@ class WIW_Timesheet_Manager
 $this->register_ajax_hooks();
 
 // 8. Auto-approval dry-run (WP-Cron)
-// - Adds "weekly" schedule if missing
-// - Ensures event is scheduled
-// - Provides a manual admin trigger for testing
+// IMPORTANT: Do NOT schedule events on 'init' (runs during admin-ajax and can stall Save).
+// Scheduling happens on activation. These hooks only define schedules + handlers.
 add_filter('cron_schedules', array($this, 'wiwts_add_weekly_cron_schedule'));
-add_action('init', array($this, 'wiwts_ensure_auto_approve_dry_run_scheduled'));
 add_action('wiwts_auto_approve_past_due_dry_run', array($this, 'wiwts_cron_auto_approve_past_due_dry_run'));
-add_action('init', array($this, 'wiwts_maybe_run_auto_approve_dry_run_manual'));
+
+// Manual trigger should only run in wp-admin context (not during front-end + not during admin-ajax).
+add_action('admin_init', array($this, 'wiwts_maybe_run_auto_approve_dry_run_manual'));
+
 
     }
 
@@ -1557,627 +1558,250 @@ add_action('init', array($this, 'wiwts_maybe_run_auto_approve_dry_run_manual'));
         $out .= '<script>
 (function(){
   function closestRow(el){
-    while(el && el.tagName && el.tagName.toLowerCase() !== "tr"){ el = el.parentNode; }
-    return el;
+    while (el && el.nodeType === 1) {
+      if (el.matches && el.matches("tr")) return el;
+      el = el.parentNode;
+    }
+    return null;
   }
 
-  // Show a simple overlay so users know the page is refreshing.
-  function wiwtsShowRefreshingOverlay(message){
-    try {
-      if (document.getElementById("wiwts-refreshing-overlay")) return;
+  function ensureOverlayHelpers(){
+    if (window.wiwtsShowRefreshingOverlay && window.wiwtsHideRefreshingOverlay) return;
 
-      var overlay = document.createElement("div");
-      overlay.id = "wiwts-refreshing-overlay";
-      overlay.setAttribute("role", "status");
-      overlay.setAttribute("aria-live", "polite");
-      overlay.style.position = "fixed";
-      overlay.style.left = "0";
-      overlay.style.top = "0";
-      overlay.style.right = "0";
-      overlay.style.bottom = "0";
-      overlay.style.background = "rgba(0,0,0,0.35)";
-      overlay.style.zIndex = "999999";
-      overlay.style.display = "flex";
-      overlay.style.alignItems = "center";
-      overlay.style.justifyContent = "center";
-      overlay.style.padding = "20px";
+    window.wiwtsShowRefreshingOverlay = function(message){
+      try {
+        if (document.getElementById("wiwts-refreshing-overlay")) return;
 
-      var box = document.createElement("div");
-      box.style.background = "#fff";
-      box.style.borderRadius = "10px";
-      box.style.padding = "16px 18px";
-      box.style.boxShadow = "0 10px 30px rgba(0,0,0,0.25)";
-      box.style.display = "flex";
-      box.style.alignItems = "center";
-      box.style.gap = "12px";
-      box.style.maxWidth = "420px";
-      box.style.width = "100%";
+        var overlay = document.createElement("div");
+        overlay.id = "wiwts-refreshing-overlay";
+        overlay.setAttribute("role","status");
+        overlay.setAttribute("aria-live","polite");
+        overlay.style.position="fixed";
+        overlay.style.left="0";
+        overlay.style.top="0";
+        overlay.style.right="0";
+        overlay.style.bottom="0";
+        overlay.style.background="rgba(0,0,0,0.35)";
+        overlay.style.zIndex="999999";
+        overlay.style.display="flex";
+        overlay.style.alignItems="center";
+        overlay.style.justifyContent="center";
+        overlay.style.padding="20px";
 
-      var spinner = document.createElement("div");
-      spinner.style.width = "18px";
-      spinner.style.height = "18px";
-      spinner.style.border = "3px solid #ddd";
-      spinner.style.borderTopColor = "#333";
-      spinner.style.borderRadius = "50%";
-      spinner.style.animation = "wiwtsSpin 0.9s linear infinite";
+        var box = document.createElement("div");
+        box.style.background="#fff";
+        box.style.borderRadius="10px";
+        box.style.padding="16px 18px";
+        box.style.boxShadow="0 10px 30px rgba(0,0,0,0.25)";
+        box.style.display="flex";
+        box.style.alignItems="center";
+        box.style.gap="12px";
+        box.style.maxWidth="420px";
+        box.style.width="100%";
 
-      var text = document.createElement("div");
-      text.style.fontSize = "14px";
-      text.style.lineHeight = "1.4";
-      text.textContent = (message && String(message)) ? String(message) : "Refreshing…";
+        var spinner = document.createElement("div");
+        spinner.style.width="18px";
+        spinner.style.height="18px";
+        spinner.style.border="3px solid #ddd";
+        spinner.style.borderTopColor="#333";
+        spinner.style.borderRadius="50%";
+        spinner.style.animation="wiwtsSpin 0.9s linear infinite";
 
-      // Inject keyframes once
-      if (!document.getElementById("wiwts-spin-style")) {
-        var st = document.createElement("style");
-        st.id = "wiwts-spin-style";
-        st.type = "text/css";
-        st.textContent = "@keyframes wiwtsSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
-        document.head.appendChild(st);
-      }
+        var text = document.createElement("div");
+        text.style.fontSize="14px";
+        text.style.lineHeight="1.4";
+        text.textContent = message ? String(message) : "Saving…";
 
-      box.appendChild(spinner);
-      box.appendChild(text);
-      overlay.appendChild(box);
-      document.body.appendChild(overlay);
+        if (!document.getElementById("wiwts-spin-style")) {
+          var st = document.createElement("style");
+          st.id = "wiwts-spin-style";
+          st.type = "text/css";
+          st.textContent = "@keyframes wiwtsSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
+          document.head.appendChild(st);
+        }
 
-      document.body.style.cursor = "wait";
-    } catch (e) {}
-  }
+        box.appendChild(spinner);
+        box.appendChild(text);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        document.body.style.cursor="wait";
 
-    // Hide overlay if an error occurs (so user is not stuck on a blocking screen).
-  function wiwtsHideRefreshingOverlay(){
-    try {
-      var overlay = document.getElementById("wiwts-refreshing-overlay");
-      if (overlay && overlay.parentNode) {
-        overlay.parentNode.removeChild(overlay);
-      }
-      document.body.style.cursor = "";
-    } catch (e) {}
+        // hard failsafe
+        window.setTimeout(function(){
+          try { window.wiwtsHideRefreshingOverlay(); } catch(e) {}
+        }, 30000);
+      } catch(e) {}
+    };
+
+    window.wiwtsHideRefreshingOverlay = function(){
+      try {
+        var overlay = document.getElementById("wiwts-refreshing-overlay");
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        document.body.style.cursor="";
+      } catch(e) {}
+    };
   }
 
   function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
 
-    for (var i=0;i<inputs.length;i++){ inputs[i].style.display = isEditing ? "" : "none"; }
-    for (var j=0;j<views.length;j++){ views[j].style.display = isEditing ? "none" : ""; }
-
-    var editBtn    = row.querySelector(".wiw-client-edit-btn");
-    var saveBtn    = row.querySelector(".wiw-client-save-btn");
-    var resetBtn   = row.querySelector(".wiw-client-reset-btn");
-    var cancelBtn  = row.querySelector(".wiw-client-cancel-btn");
-    var approveBtn = row.querySelector(".wiw-client-approve-btn");
-
-    if (editBtn)   editBtn.style.display   = isEditing ? "none" : "";
-    if (saveBtn)   saveBtn.style.display   = isEditing ? "" : "none";
-    if (resetBtn)  resetBtn.style.display  = isEditing ? "" : "none";
-    if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
-
-    // Universal: hide Approve during edit mode, restore after.
-    if (approveBtn) {
-        approveBtn.style.display = isEditing ? "none" : "";
+    for (var i=0;i<inputs.length;i++){
+      inputs[i].style.display = isEditing ? "" : "none";
+    }
+    for (var j=0;j<views.length;j++){
+      views[j].style.display = isEditing ? "none" : "";
     }
 
+    var editBtn   = row.querySelector(".wiw-client-edit-btn");
+    var saveBtn   = row.querySelector(".wiw-client-save-btn");
+    var cancelBtn = row.querySelector(".wiw-client-cancel-btn");
+
+    if (editBtn)   editBtn.style.display = isEditing ? "none" : "";
+    if (saveBtn)   saveBtn.style.display = isEditing ? "" : "none";
+    if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
+
+    // store originals on entering edit mode
+    if (isEditing) {
+      for (var k=0;k<inputs.length;k++){
+        if (!inputs[k].dataset.orig) inputs[k].dataset.orig = inputs[k].value || "";
+      }
+    }
+  }
+
+  function restoreOriginals(row){
+    var inputs = row.querySelectorAll("input.wiw-client-edit");
+    for (var i=0;i<inputs.length;i++){
+      if (typeof inputs[i].dataset.orig !== "undefined") {
+        inputs[i].value = inputs[i].dataset.orig;
+      }
+    }
   }
 
   function updateViewFromInputs(row){
-    // Update the visible spans from current input values (no validation/persistence yet)
-    var cellIn    = row.querySelector("td.wiw-client-cell-clock-in");
-    var cellOut   = row.querySelector("td.wiw-client-cell-clock-out");
-    var cellBreak = row.querySelector("td.wiw-client-cell-break");
-
-    if (cellIn){
-      var inInput = cellIn.querySelector("input.wiw-client-edit");
-      var inView  = cellIn.querySelector("span.wiw-client-view");
-      if (inInput && inView){ inView.textContent = inInput.value ? inInput.value : "N/A"; }
-    }
-    if (cellOut){
-      var outInput = cellOut.querySelector("input.wiw-client-edit");
-      var outView  = cellOut.querySelector("span.wiw-client-view");
-      if (outInput && outView){ outView.textContent = outInput.value ? outInput.value : "N/A"; }
-    }
-    if (cellBreak){
-      var bInput = cellBreak.querySelector("input.wiw-client-edit");
-      var bView  = cellBreak.querySelector("span.wiw-client-view");
-      if (bInput && bView){ bView.textContent = bInput.value ? bInput.value : "0"; }
-    }
-  }
-
-  function restoreOriginal(row){
-    var cells = [
-      row.querySelector("td.wiw-client-cell-clock-in"),
-      row.querySelector("td.wiw-client-cell-clock-out"),
-      row.querySelector("td.wiw-client-cell-break")
+    // keep visible spans in sync after save/cancel
+    var map = [
+      ["td.wiw-client-cell-clock-in","clock_in_time"],
+      ["td.wiw-client-cell-clock-out","clock_out_time"],
+      ["td.wiw-client-cell-break","break_minutes"]
     ];
 
-    for (var i=0;i<cells.length;i++){
-      var cell = cells[i];
+    for (var i=0;i<map.length;i++){
+      var cell = row.querySelector(map[i][0]);
       if (!cell) continue;
+      var input = cell.querySelector("input.wiw-client-edit");
+      var view  = cell.querySelector("span.wiw-client-view");
+      if (input && view) view.textContent = (input.value || "").trim();
+    }
+  }
 
-      var orig     = cell.getAttribute("data-orig") || "";
-      var origView = cell.getAttribute("data-orig-view") || "";
-      var input    = cell.querySelector("input.wiw-client-edit");
-      var view     = cell.querySelector("span.wiw-client-view");
+  function doSave(row, btn){
+    var wrap = document.getElementById("wiwts-client-ajax");
+    if (!wrap) { alert("Missing save AJAX settings"); return; }
 
-      if (input) input.value = orig;
+    var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
+    var nonceS  = wrap.getAttribute("data-nonce") || "";
+    var entryId = btn.getAttribute("data-entry-id") || "";
 
-      if (view){
-        if (cell.classList.contains("wiw-client-cell-break")){
-          view.textContent = orig ? orig : "0";
-        } else {
-          // Always restore the formatted 12-hour display (what the user originally saw).
-          view.textContent = origView ? origView : "N/A";
+    if (!ajaxUrl || !nonceS) { alert("Missing save AJAX settings"); return; }
+    if (!entryId) { alert("Missing Entry ID"); return; }
+
+    var cellIn    = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
+    var cellOut   = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
+    var cellBreak = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
+
+    var clockIn  = cellIn ? cellIn.value : "";
+    var clockOut = cellOut ? cellOut.value : "";
+    var brkMin   = cellBreak ? cellBreak.value : "";
+
+    ensureOverlayHelpers();
+    window.wiwtsShowRefreshingOverlay("Saving…");
+
+    var fd = new FormData();
+    fd.append("action", "wiw_client_update_entry");
+    fd.append("entry_id", entryId);
+    fd.append("clock_in_time", (clockIn || "").trim());
+    fd.append("clock_out_time", (clockOut || "").trim());
+    fd.append("break_minutes", (brkMin || "").trim());
+    fd.append("security", nonceS);
+
+    var done = false;
+    var timeoutId = window.setTimeout(function(){
+      if (done) return;
+      done = true;
+      window.wiwtsHideRefreshingOverlay();
+      alert("Save timed out. Please reload and try again.");
+    }, 20000);
+
+    fetch(ajaxUrl, { method:"POST", credentials:"same-origin", body: fd })
+      .then(function(r){ return r.text().then(function(txt){ return {status:r.status, text:txt}; }); })
+      .then(function(payload){
+        if (done) return;
+        done = true;
+        window.clearTimeout(timeoutId);
+
+        var resp = null;
+        try { resp = JSON.parse(payload.text); } catch(e) {}
+
+        if (!resp) {
+          window.wiwtsHideRefreshingOverlay();
+          alert("Save failed: Non-JSON response (" + payload.status + ")");
+          return;
         }
-      }
 
-    }
-  }
+        if (!resp.success) {
+          var msg = (resp.data && resp.data.message) ? resp.data.message : "Save failed";
+          window.wiwtsHideRefreshingOverlay();
+          alert(msg);
+          return;
+        }
 
-  // === WIWTS Reset Preview Modal wiring (Apply + Close) ===
-  function wiwtsOpenResetPreviewModal(previewText, entryId, ajaxUrl, nonceR){
-    var modal = document.getElementById("wiwts-reset-preview-modal");
-    var body  = document.getElementById("wiwts-reset-preview-body");
-    if (!modal || !body) {
-      alert(previewText || "Reset preview loaded.");
-      return;
-    }
-
-    body.textContent = previewText || "Reset preview loaded.";
-    modal.style.display = "block";
-
-    // Store context for Apply Reset.
-    modal.setAttribute("data-entry-id", entryId || "");
-    modal.setAttribute("data-ajax-url", ajaxUrl || "");
-    modal.setAttribute("data-nonce-reset", nonceR || "");
-  }
-
-  function wiwtsCloseResetPreviewModal(){
-    var modal = document.getElementById("wiwts-reset-preview-modal");
-    if (modal) {
-      modal.style.display = "none";
-      modal.removeAttribute("data-entry-id");
-      modal.removeAttribute("data-ajax-url");
-      modal.removeAttribute("data-nonce-reset");
-    }
-  }
-
-  // Wire modal buttons once.
-  (function(){
-    var closeBtn = document.getElementById("wiwts-reset-preview-close");
-    var applyBtn = document.getElementById("wiwts-reset-preview-apply");
-    var backdrop = document.getElementById("wiwts-reset-preview-backdrop");
-
-    if (closeBtn) closeBtn.addEventListener("click", function(){
-      wiwtsCloseResetPreviewModal();
-    });
-
-    if (backdrop) backdrop.addEventListener("click", function(){
-      wiwtsCloseResetPreviewModal();
-    });
-
-    if (applyBtn) applyBtn.addEventListener("click", function(){
-      var modal = document.getElementById("wiwts-reset-preview-modal");
-      if (!modal) return;
-
-      var entryId = modal.getAttribute("data-entry-id") || "";
-      var ajaxUrl = modal.getAttribute("data-ajax-url") || "";
-      var nonceR  = modal.getAttribute("data-nonce-reset") || "";
-
-      if (!entryId || !ajaxUrl || !nonceR) {
-        alert("Missing reset context.");
-        return;
-      }
-
-      // Apply reset now.
-      var formData2 = new FormData();
-      formData2.append("action", "wiw_client_reset_entry_from_api");
-      formData2.append("security", nonceR);
-      formData2.append("entry_id", entryId);
-      formData2.append("apply_reset", "1");
-
-      wiwtsShowRefreshingOverlay("Updating timesheet records…");
-
-      (window.requestAnimationFrame || function(cb){ setTimeout(cb, 0); })(function(){
-        fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: formData2 })
-          .then(function(r){ return r.json(); })
-          .then(function(resp2){
-            if (!resp2 || !resp2.success){
-              wiwtsHideRefreshingOverlay();
-              var m2 = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
-              alert(m2);
-              return;
-            }
-            window.location.reload();
-          })
-          .catch(function(err){
-            console.error(err);
-            wiwtsHideRefreshingOverlay();
-            alert("Reset failed.");
-          });
+        // success → reload
+        window.location.reload();
+      })
+      .catch(function(err){
+        if (done) return;
+        done = true;
+        window.clearTimeout(timeoutId);
+        window.wiwtsHideRefreshingOverlay();
+        alert("AJAX error saving entry");
+        try { console.error(err); } catch(e) {}
       });
-    });
-  })();
-  // === END Reset Preview Modal wiring ===
-
-document.addEventListener("click", function(e){
-  // Use closest() so clicks on inner spans/icons still trigger the correct button handler.
-  var t = e.target;
-  if (t && t.closest) {
-    t = t.closest("button, a, input");
   }
 
-    if (t && t.classList && t.classList.contains("wiw-client-edit-btn")){
+  document.addEventListener("click", function(e){
+    var t = e.target;
+
+    if (t && t.classList && t.classList.contains("wiw-client-edit-btn")) {
       e.preventDefault();
       var row = closestRow(t);
       if (!row) return;
-
-      // If Clock In/Out is N/A (blank input), default to scheduled start/end.
-      var schedStart = row.getAttribute("data-sched-start") || "";
-      var schedEnd   = row.getAttribute("data-sched-end") || "";
-
-      var cellIn  = row.querySelector("td.wiw-client-cell-clock-in");
-      var cellOut = row.querySelector("td.wiw-client-cell-clock-out");
-
-      if (cellIn){
-        var inInput = cellIn.querySelector("input.wiw-client-edit");
-        if (inInput && !inInput.value && schedStart){
-          inInput.value = schedStart;
-        }
-      }
-
-      if (cellOut){
-        var outInput = cellOut.querySelector("input.wiw-client-edit");
-        if (outInput && !outInput.value && schedEnd){
-          outInput.value = schedEnd;
-        }
-      }
-
       setEditing(row, true);
       return;
     }
 
-    if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")){
+    if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")) {
       e.preventDefault();
       var row2 = closestRow(t);
       if (!row2) return;
-      restoreOriginal(row2);
+      restoreOriginals(row2);
+      updateViewFromInputs(row2);
       setEditing(row2, false);
       return;
     }
 
-    if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
+    if (t && t.classList && t.classList.contains("wiw-client-save-btn")) {
       e.preventDefault();
-
-      var row = closestRow(t);
-      if (!row) { alert("Reset clicked but row not found"); return; }
-
-      var cfg = document.getElementById("wiwts-client-ajax");
-      if (!cfg) { alert("Missing AJAX config"); return; }
-
-      var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
-      var nonceR  = cfg.getAttribute("data-nonce-reset") || "";
-      if (!ajaxUrl || !nonceR) { alert("Missing reset AJAX settings"); return; }
-
-      // Entry ID is stored on the Save button for the row.
-      var saveBtn = row.querySelector("button.wiw-client-save-btn");
-      var entryId = saveBtn ? (saveBtn.getAttribute("data-entry-id") || "") : "";
-      if (!entryId) { alert("Missing Entry ID"); return; }
-
-      // Preview request first (no DB writes).
-// Preview request first (no DB writes).
-var form = new FormData();
-form.append("action", "wiw_client_reset_entry_from_api");
-form.append("security", nonceR);
-form.append("entry_id", entryId);
-
-// Show overlay immediately so the user gets instant feedback.
-wiwtsShowRefreshingOverlay("Loading reset preview…");
-
-// Yield one frame so the overlay can paint before starting the fetch.
-(window.requestAnimationFrame || function(cb){ setTimeout(cb, 0); })(function(){
-  fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
-        .then(function(r){ return r.json(); })
-        .then(function(data){
-          if (!data || !data.success){
-            var msg = (data && data.data && data.data.message) ? data.data.message : "Reset preview failed.";
-            alert(msg);
-            return;
-          }
-
-          wiwtsHideRefreshingOverlay();
-
-          var p = (data && data.data && data.data.preview) ? data.data.preview : null;
-
-          // Build preview text.
-          var msg2 = (data.data && data.data.message) ? data.data.message : "Reset preview loaded.";
-          if (p) {
-            msg2 += "\n\nCurrent (Saved):";
-            msg2 += "\nClock In: " + ((p.current && p.current.clock_in) ? p.current.clock_in : "N/A");
-            msg2 += "\nClock Out: " + ((p.current && p.current.clock_out) ? p.current.clock_out : "N/A");
-            msg2 += "\nBreak (Min): " + ((p.current && typeof p.current.break_minutes !== "undefined") ? p.current.break_minutes : "0");
-
-            msg2 += "\n\nFrom When I Work (Would Reset To):";
-            msg2 += "\nClock In: " + ((p.api && p.api.clock_in) ? p.api.clock_in : "N/A");
-            msg2 += "\nClock Out: " + ((p.api && p.api.clock_out) ? p.api.clock_out : "N/A");
-            msg2 += "\nBreak (Min): " + ((p.api && typeof p.api.break_minutes !== "undefined") ? p.api.break_minutes : "0");
-          }
-
-          // If preview-only reset, open modal (admin approved rows).
-          var previewOnly = (t.getAttribute && t.getAttribute("data-reset-preview-only") === "1");
-          if (previewOnly) {
-            wiwtsOpenResetPreviewModal(msg2, entryId, ajaxUrl, nonceR);
-            return;
-          }
-
-          // Normal reset confirmation:
-          if (!window.confirm(msg2 + "\n\nApply this reset now?")) {
-            return;
-          }
-
-          // Apply reset
-          var formData2 = new FormData();
-          formData2.append("action", "wiw_client_reset_entry_from_api");
-          formData2.append("security", nonceR);
-          formData2.append("entry_id", entryId);
-          formData2.append("apply_reset", "1");
-
-          wiwtsShowRefreshingOverlay("Updating timesheet records…");
-
-          (window.requestAnimationFrame || function(cb){ setTimeout(cb, 0); })(function(){
-            fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: formData2 })
-              .then(function(r){ return r.json(); })
-              .then(function(resp2){
-                if (!resp2 || !resp2.success){
-                  wiwtsHideRefreshingOverlay();
-                  var m2 = (resp2 && resp2.data && resp2.data.message) ? resp2.data.message : "Reset failed.";
-                  alert(m2);
-                  return;
-                }
-                window.location.reload();
-              })
-              .catch(function(err){
-                console.error(err);
-                wiwtsHideRefreshingOverlay();
-                alert("Reset failed.");
-              });
-          });
-        })
-        .catch(function(err){
-          console.error(err);
-          wiwtsHideRefreshingOverlay();
-          alert("Reset preview failed.");
-        });
-}); // closes requestAnimationFrame
-
+      var row3 = closestRow(t);
+      if (!row3) return;
+      doSave(row3, t);
       return;
     }
-
-if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
-  e.preventDefault();
-
-  if (t.disabled) { return; }
-
-  var flagsRaw = t.getAttribute("data-unresolved-flags") || "";
-  var msg = "Approve this entry?";
-
-  if (flagsRaw) {
-    var parts = flagsRaw.split("||").map(function(s){ return (s || "").trim(); }).filter(Boolean);
-    if (parts.length) {
-      msg = "This entry has unresolved flags:\n\n";
-      parts.forEach(function(line){
-        msg += "• " + line + "\n";
-      });
-      msg += "\nApprove this entry?";
-    }
-  }
-
-  if (!confirm(msg)) { return; }
-
-  var row = closestRow(t);
-  if (!row) { alert("Approve clicked but row not found"); return; }
-
-  var cfg = document.getElementById("wiwts-client-ajax");
-  if (!cfg) { alert("Missing AJAX config"); return; }
-
-  var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
-  var nonceA  = cfg.getAttribute("data-nonce-approve") || "";
-  if (!ajaxUrl || !nonceA) { alert("Missing AJAX url/approve nonce"); return; }
-
-  var entryId = t.getAttribute("data-entry-id") || "";
-  if (!entryId) { alert("Missing Entry ID"); return; }
-
-  var form = new FormData();
-  form.append("action", "wiw_local_approve_entry");
-  form.append("security", nonceA);
-  form.append("entry_id", entryId);
-
-  // Show overlay immediately (before network call) so it appears instantly on click.
-  wiwtsShowRefreshingOverlay("Updating timesheet records…");
-
-  // Prevent double-click while request is in-flight.
-  t.disabled = true;
-
-  // Yield one frame so the overlay can paint before starting the fetch.
-  (window.requestAnimationFrame || function(cb){ setTimeout(cb, 0); })(function(){
-
-    fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: form })
-      .then(function(r){ return r.json(); })
-      .then(function(data){
-        if (!data || !data.success){
-          var m = (data && data.data && data.data.message) ? data.data.message : "Approve failed.";
-          wiwtsHideRefreshingOverlay();
-          t.disabled = false;
-          alert(m);
-          return;
-        }
-
-        // Update the Status cell in the row.
-        var statusCell = row.querySelector("td.wiw-client-cell-status");
-        if (statusCell) statusCell.textContent = "approved";
-
-        // Mark approved in UI.
-        t.textContent = "Approved";
-
-        // Refresh so server-rendered UI updates (Reset button + Sign Off gating).
-        setTimeout(function () {
-          window.location.reload();
-        }, 50);
-
-        // Hide Edit button for this row.
-        var editBtn = row.querySelector("button.wiw-client-edit-btn");
-        if (editBtn) {
-          editBtn.style.display = "none";
-        }
-      })
-      .catch(function(err){
-        console.error(err);
-        wiwtsHideRefreshingOverlay();
-        t.disabled = false;
-        alert("Approve failed (network error).");
-      });
-
   });
 
-  return;
-}
-
-// Save (client update) — match main client UI behavior (normalize times + send nonce as "security")
-if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
-  e.preventDefault();
-
-  var row = closestRow(t);
-  if (!row) return;
-
-  var cfg = document.getElementById("wiwts-client-ajax");
-  if (!cfg) { alert("Missing AJAX config"); return; }
-
-  var ajaxUrl = cfg.getAttribute("data-ajax-url") || "";
-  var nonce   = cfg.getAttribute("data-nonce") || "";
-  var entryId = t.getAttribute("data-entry-id") || "";
-
-  if (!entryId) { alert("Missing Entry ID"); return; }
-  if (!ajaxUrl || !nonce) { alert("Missing save AJAX settings"); return; }
-
-  // Gather inputs
-  var inEl    = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
-  var outEl   = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
-  var breakEl = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
-
-  var rawIn    = inEl ? (inEl.value || "") : "";
-  var rawOut   = outEl ? (outEl.value || "") : "";
-  var breakVal = breakEl ? (breakEl.value || "") : "0";
-
-  rawIn = (rawIn || "").trim();
-  rawOut = (rawOut || "").trim();
-  breakVal = (breakVal || "").trim();
-  if (breakVal === "") breakVal = "0";
-
-  // Allow blank times (treated as N/A).
-  // Accept 12-hour input like "8:04 am" and normalize to "08:04".
-  function normalizeTime(val) {
-    val = (val || "").trim().toLowerCase();
-    if (val === "") return "";
-
-    // Already HH:MM (24-hour)
-    if (/^\d{1,2}:\d{2}$/.test(val)) {
-      var parts = val.split(":");
-      var hh = parseInt(parts[0], 10);
-      var mm = parseInt(parts[1], 10);
-      if (isNaN(hh) || isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return "";
-      return String(hh).padStart(2,"0") + ":" + String(mm).padStart(2,"0");
-    }
-
-    // 12-hour forms: "h:mm am" or "h:mmam"
-    var m = val.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/);
-    if (!m) m = val.match(/^(\d{1,2}):(\d{2})(am|pm)$/);
-    if (m) {
-      var h = parseInt(m[1], 10);
-      var min = parseInt(m[2], 10);
-      var ap = m[3];
-      if (isNaN(h) || isNaN(min) || h < 1 || h > 12 || min < 0 || min > 59) return "";
-      if (ap === "am") {
-        if (h === 12) h = 0;
-      } else {
-        if (h !== 12) h = h + 12;
-      }
-      return String(h).padStart(2,"0") + ":" + String(min).padStart(2,"0");
-    }
-
-    return "";
-  }
-
-  var inVal  = normalizeTime(rawIn);
-  var outVal = normalizeTime(rawOut);
-
-  // If user typed something but we could not normalize it, stop.
-  if (rawIn !== "" && inVal === "") {
-    alert("Clock In/Out must be HH:MM (24-hour)");
-    return;
-  }
-  if (rawOut !== "" && outVal === "") {
-    alert("Clock In/Out must be HH:MM (24-hour)");
-    return;
-  }
-
-  if (!/^\d+$/.test(breakVal)) {
-    alert("Break (Min) must be a whole number");
-    return;
-  }
-
-  var ok = window.confirm(
-    "Save changes?\n\n" +
-    "Clock In: " + (inVal !== "" ? inVal : "N/A") + "\n" +
-    "Clock Out: " + (outVal !== "" ? outVal : "N/A") + "\n" +
-    "Break (Min): " + breakVal + "\n\n" +
-    "Click OK to save, or Cancel to discard changes."
-  );
-
-  if (!ok) {
-    return;
-  }
-
-  wiwtsShowRefreshingOverlay("Saving…");
-
-  requestAnimationFrame(function(){
-
-    // IMPORTANT: send nonce as "security" (matches your existing handler)
-    var body = new URLSearchParams();
-    body.append("action", "wiw_client_update_entry");
-    body.append("security", nonce);
-    body.append("entry_id", entryId);
-    body.append("clock_in_time", inVal);
-    body.append("clock_out_time", outVal);
-    body.append("break_minutes", breakVal);
-
-    fetch(ajaxUrl, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
-      body: body.toString()
-    })
-    .then(function(r){ return r.json(); })
-    .then(function(resp){
-      if (!resp || !resp.success) {
-        var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Save failed";
-        wiwtsHideRefreshingOverlay();
-        alert(msg);
-        return;
-      }
-      window.location.reload();
-    })
-    .catch(function(){
-      wiwtsHideRefreshingOverlay();
-      alert("AJAX error saving entry");
-    });
-
-  }); // ✅ closes requestAnimationFrame
-
-  return;
-}
-
-  });
 })();
-</script>';
+</script>
+';
 
         return $out;
     }
@@ -2604,208 +2228,221 @@ if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
 <script>
 (function(){
   function closestRow(el){
-    while(el && el.tagName && el.tagName.toLowerCase() !== "tr"){ el = el.parentNode; }
-    return el;
+    while (el && el.nodeType === 1) {
+      if (el.matches && el.matches("tr")) return el;
+      el = el.parentNode;
+    }
+    return null;
   }
 
-  function inWeekView(target){
-    if (!target || !target.closest) return false;
-    return !!target.closest("#wiwts-client-records-view");
-  }
+  function ensureOverlayHelpers(){
+    if (window.wiwtsShowRefreshingOverlay && window.wiwtsHideRefreshingOverlay) return;
 
-  function wiwtsShowRefreshingOverlay(message){
-    try {
-      if (document.getElementById("wiwts-refreshing-overlay")) return;
+    window.wiwtsShowRefreshingOverlay = function(message){
+      try {
+        if (document.getElementById("wiwts-refreshing-overlay")) return;
 
-      var overlay = document.createElement("div");
-      overlay.id = "wiwts-refreshing-overlay";
-      overlay.setAttribute("role", "status");
-      overlay.setAttribute("aria-live", "polite");
-      overlay.style.position = "fixed";
-      overlay.style.left = "0";
-      overlay.style.top = "0";
-      overlay.style.right = "0";
-      overlay.style.bottom = "0";
-      overlay.style.background = "rgba(0,0,0,0.35)";
-      overlay.style.zIndex = "999999";
-      overlay.style.display = "flex";
-      overlay.style.alignItems = "center";
-      overlay.style.justifyContent = "center";
-      overlay.style.padding = "20px";
+        var overlay = document.createElement("div");
+        overlay.id = "wiwts-refreshing-overlay";
+        overlay.setAttribute("role","status");
+        overlay.setAttribute("aria-live","polite");
+        overlay.style.position="fixed";
+        overlay.style.left="0";
+        overlay.style.top="0";
+        overlay.style.right="0";
+        overlay.style.bottom="0";
+        overlay.style.background="rgba(0,0,0,0.35)";
+        overlay.style.zIndex="999999";
+        overlay.style.display="flex";
+        overlay.style.alignItems="center";
+        overlay.style.justifyContent="center";
+        overlay.style.padding="20px";
 
-      var box = document.createElement("div");
-      box.style.background = "#fff";
-      box.style.borderRadius = "10px";
-      box.style.padding = "16px 18px";
-      box.style.boxShadow = "0 10px 30px rgba(0,0,0,0.25)";
-      box.style.display = "flex";
-      box.style.alignItems = "center";
-      box.style.gap = "12px";
-      box.style.maxWidth = "420px";
-      box.style.width = "100%";
+        var box = document.createElement("div");
+        box.style.background="#fff";
+        box.style.borderRadius="10px";
+        box.style.padding="16px 18px";
+        box.style.boxShadow="0 10px 30px rgba(0,0,0,0.25)";
+        box.style.display="flex";
+        box.style.alignItems="center";
+        box.style.gap="12px";
+        box.style.maxWidth="420px";
+        box.style.width="100%";
 
-      var spinner = document.createElement("div");
-      spinner.style.width = "18px";
-      spinner.style.height = "18px";
-      spinner.style.border = "3px solid #ddd";
-      spinner.style.borderTopColor = "#333";
-      spinner.style.borderRadius = "50%";
-      spinner.style.animation = "wiwtsSpin 0.9s linear infinite";
+        var spinner = document.createElement("div");
+        spinner.style.width="18px";
+        spinner.style.height="18px";
+        spinner.style.border="3px solid #ddd";
+        spinner.style.borderTopColor="#333";
+        spinner.style.borderRadius="50%";
+        spinner.style.animation="wiwtsSpin 0.9s linear infinite";
 
-      var text = document.createElement("div");
-      text.style.fontSize = "14px";
-      text.style.lineHeight = "1.4";
-      text.textContent = (message && String(message)) ? String(message) : "Refreshing…";
+        var text = document.createElement("div");
+        text.style.fontSize="14px";
+        text.style.lineHeight="1.4";
+        text.textContent = message ? String(message) : "Saving…";
 
-      if (!document.getElementById("wiwts-spin-style")) {
-        var st = document.createElement("style");
-        st.id = "wiwts-spin-style";
-        st.type = "text/css";
-        st.textContent = "@keyframes wiwtsSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
-        document.head.appendChild(st);
-      }
+        if (!document.getElementById("wiwts-spin-style")) {
+          var st = document.createElement("style");
+          st.id = "wiwts-spin-style";
+          st.type = "text/css";
+          st.textContent = "@keyframes wiwtsSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
+          document.head.appendChild(st);
+        }
 
-      box.appendChild(spinner);
-      box.appendChild(text);
-      overlay.appendChild(box);
-      document.body.appendChild(overlay);
-      document.body.style.cursor = "wait";
-    } catch (e) {}
-  }
+        box.appendChild(spinner);
+        box.appendChild(text);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        document.body.style.cursor="wait";
 
-  function wiwtsHideRefreshingOverlay(){
-    try {
-      var overlay = document.getElementById("wiwts-refreshing-overlay");
-      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      document.body.style.cursor = "";
-    } catch (e) {}
+        // hard failsafe
+        window.setTimeout(function(){
+          try { window.wiwtsHideRefreshingOverlay(); } catch(e) {}
+        }, 30000);
+      } catch(e) {}
+    };
+
+    window.wiwtsHideRefreshingOverlay = function(){
+      try {
+        var overlay = document.getElementById("wiwts-refreshing-overlay");
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        document.body.style.cursor="";
+      } catch(e) {}
+    };
   }
 
   function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
 
-    for (var i=0;i<inputs.length;i++){ inputs[i].style.display = isEditing ? "" : "none"; }
-    for (var j=0;j<views.length;j++){ views[j].style.display = isEditing ? "none" : ""; }
+    for (var i=0;i<inputs.length;i++){
+      inputs[i].style.display = isEditing ? "" : "none";
+    }
+    for (var j=0;j<views.length;j++){
+      views[j].style.display = isEditing ? "none" : "";
+    }
 
-    var editBtn    = row.querySelector(".wiw-client-edit-btn");
-    var saveBtn    = row.querySelector(".wiw-client-save-btn");
-    var resetBtn   = row.querySelector(".wiw-client-reset-btn");
-    var cancelBtn  = row.querySelector(".wiw-client-cancel-btn");
-    var approveBtn = row.querySelector(".wiw-client-approve-btn");
+    var editBtn   = row.querySelector(".wiw-client-edit-btn");
+    var saveBtn   = row.querySelector(".wiw-client-save-btn");
+    var cancelBtn = row.querySelector(".wiw-client-cancel-btn");
 
-    if (editBtn)   editBtn.style.display   = isEditing ? "none" : "";
-    if (saveBtn)   saveBtn.style.display   = isEditing ? "" : "none";
-    if (resetBtn)  resetBtn.style.display  = isEditing ? "" : "none";
+    if (editBtn)   editBtn.style.display = isEditing ? "none" : "";
+    if (saveBtn)   saveBtn.style.display = isEditing ? "" : "none";
     if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
-    if (approveBtn) approveBtn.style.display = isEditing ? "none" : "";
-  }
 
-  function restoreOriginal(row){
-    var cells = [
-      row.querySelector("td.wiw-client-cell-clock-in"),
-      row.querySelector("td.wiw-client-cell-clock-out"),
-      row.querySelector("td.wiw-client-cell-break")
-    ];
-
-    for (var i=0;i<cells.length;i++){
-      var cell = cells[i];
-      if (!cell) continue;
-
-      var orig     = cell.getAttribute("data-orig") || "";
-      var origView = cell.getAttribute("data-orig-view") || "";
-      var input    = cell.querySelector("input.wiw-client-edit");
-      var view     = cell.querySelector("span.wiw-client-view");
-
-      if (input) input.value = orig;
-
-      if (view){
-        if (cell.classList.contains("wiw-client-cell-break")){
-          view.textContent = orig ? orig : "0";
-        } else {
-          view.textContent = origView ? origView : "N/A";
-        }
+    // store originals on entering edit mode
+    if (isEditing) {
+      for (var k=0;k<inputs.length;k++){
+        if (!inputs[k].dataset.orig) inputs[k].dataset.orig = inputs[k].value || "";
       }
     }
   }
 
-  function wiwtsOpenResetPreviewModal(previewText, entryId, ajaxUrl, nonceR){
-    var modal = document.getElementById("wiwts-reset-preview-modal");
-    var body  = document.getElementById("wiwts-reset-preview-body");
-    if (!modal || !body) { alert(previewText || "Reset preview loaded."); return; }
-
-    body.textContent = previewText || "Reset preview loaded.";
-    modal.style.display = "block";
-    modal.setAttribute("data-entry-id", entryId || "");
-    modal.setAttribute("data-ajax-url", ajaxUrl || "");
-    modal.setAttribute("data-nonce-reset", nonceR || "");
+  function restoreOriginals(row){
+    var inputs = row.querySelectorAll("input.wiw-client-edit");
+    for (var i=0;i<inputs.length;i++){
+      if (typeof inputs[i].dataset.orig !== "undefined") {
+        inputs[i].value = inputs[i].dataset.orig;
+      }
+    }
   }
 
-  function wiwtsCloseResetPreviewModal(){
-    var modal = document.getElementById("wiwts-reset-preview-modal");
-    if (modal) {
-      modal.style.display = "none";
-      modal.removeAttribute("data-entry-id");
-      modal.removeAttribute("data-ajax-url");
-      modal.removeAttribute("data-nonce-reset");
+  function updateViewFromInputs(row){
+    // keep visible spans in sync after save/cancel
+    var map = [
+      ["td.wiw-client-cell-clock-in","clock_in_time"],
+      ["td.wiw-client-cell-clock-out","clock_out_time"],
+      ["td.wiw-client-cell-break","break_minutes"]
+    ];
+
+    for (var i=0;i<map.length;i++){
+      var cell = row.querySelector(map[i][0]);
+      if (!cell) continue;
+      var input = cell.querySelector("input.wiw-client-edit");
+      var view  = cell.querySelector("span.wiw-client-view");
+      if (input && view) view.textContent = (input.value || "").trim();
     }
+  }
+
+  function doSave(row, btn){
+    var wrap = document.getElementById("wiwts-client-ajax");
+    if (!wrap) { alert("Missing save AJAX settings"); return; }
+
+    var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
+    var nonceS  = wrap.getAttribute("data-nonce") || "";
+    var entryId = btn.getAttribute("data-entry-id") || "";
+
+    if (!ajaxUrl || !nonceS) { alert("Missing save AJAX settings"); return; }
+    if (!entryId) { alert("Missing Entry ID"); return; }
+
+    var cellIn    = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
+    var cellOut   = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
+    var cellBreak = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
+
+    var clockIn  = cellIn ? cellIn.value : "";
+    var clockOut = cellOut ? cellOut.value : "";
+    var brkMin   = cellBreak ? cellBreak.value : "";
+
+    ensureOverlayHelpers();
+    window.wiwtsShowRefreshingOverlay("Saving…");
+
+    var fd = new FormData();
+    fd.append("action", "wiw_client_update_entry");
+    fd.append("entry_id", entryId);
+    fd.append("clock_in_time", (clockIn || "").trim());
+    fd.append("clock_out_time", (clockOut || "").trim());
+    fd.append("break_minutes", (brkMin || "").trim());
+    fd.append("security", nonceS);
+
+    var done = false;
+    var timeoutId = window.setTimeout(function(){
+      if (done) return;
+      done = true;
+      window.wiwtsHideRefreshingOverlay();
+      alert("Save timed out. Please reload and try again.");
+    }, 20000);
+
+    fetch(ajaxUrl, { method:"POST", credentials:"same-origin", body: fd })
+      .then(function(r){ return r.text().then(function(txt){ return {status:r.status, text:txt}; }); })
+      .then(function(payload){
+        if (done) return;
+        done = true;
+        window.clearTimeout(timeoutId);
+
+        var resp = null;
+        try { resp = JSON.parse(payload.text); } catch(e) {}
+
+        if (!resp) {
+          window.wiwtsHideRefreshingOverlay();
+          alert("Save failed: Non-JSON response (" + payload.status + ")");
+          return;
+        }
+
+        if (!resp.success) {
+          var msg = (resp.data && resp.data.message) ? resp.data.message : "Save failed";
+          window.wiwtsHideRefreshingOverlay();
+          alert(msg);
+          return;
+        }
+
+        // success → reload
+        window.location.reload();
+      })
+      .catch(function(err){
+        if (done) return;
+        done = true;
+        window.clearTimeout(timeoutId);
+        window.wiwtsHideRefreshingOverlay();
+        alert("AJAX error saving entry");
+        try { console.error(err); } catch(e) {}
+      });
   }
 
   document.addEventListener("click", function(e){
     var t = e.target;
-      // Only handle clicks inside the Week View shortcode output
-  if (!t || !t.closest || !t.closest("#wiwts-client-records-view")) {
-    return;
-  }
 
-    if (!inWeekView(t)) return;
-
-    if (t && (t.id === "wiwts-reset-preview-close" || t.id === "wiwts-reset-preview-backdrop")) {
-      e.preventDefault();
-      wiwtsCloseResetPreviewModal();
-      return;
-    }
-
-    if (t && t.id === "wiwts-reset-preview-apply") {
-      e.preventDefault();
-
-      var modal = document.getElementById("wiwts-reset-preview-modal");
-      if (!modal) return;
-
-      var entryId = modal.getAttribute("data-entry-id") || "";
-      var ajaxUrl = modal.getAttribute("data-ajax-url") || "";
-      var nonceR  = modal.getAttribute("data-nonce-reset") || "";
-
-      if (!entryId || !ajaxUrl || !nonceR) { alert("Missing reset settings."); return; }
-
-      wiwtsShowRefreshingOverlay("Applying reset…");
-
-      var fd = new FormData();
-      fd.append("action", "wiw_client_reset_entry_from_api");
-      fd.append("entry_id", entryId);
-      fd.append("preview_only", "0");
-      fd.append("security", nonceR);
-
-      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
-        .then(function(r){ return r.json(); })
-        .then(function(resp){
-          if (!resp || !resp.success) {
-            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Reset failed";
-            wiwtsHideRefreshingOverlay();
-            alert(msg);
-            return;
-          }
-          window.location.reload();
-        })
-        .catch(function(){
-          wiwtsHideRefreshingOverlay();
-          alert("Reset failed (network error).");
-        });
-
-      return;
-    }
-
-    if (t && t.classList && t.classList.contains("wiw-client-edit-btn")){
+    if (t && t.classList && t.classList.contains("wiw-client-edit-btn")) {
       e.preventDefault();
       var row = closestRow(t);
       if (!row) return;
@@ -2813,175 +2450,28 @@ if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
       return;
     }
 
-    if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")){
+    if (t && t.classList && t.classList.contains("wiw-client-cancel-btn")) {
       e.preventDefault();
-      var row = closestRow(t);
-      if (!row) return;
-      restoreOriginal(row);
-      setEditing(row, false);
+      var row2 = closestRow(t);
+      if (!row2) return;
+      restoreOriginals(row2);
+      updateViewFromInputs(row2);
+      setEditing(row2, false);
       return;
     }
 
-    if (t && t.classList && t.classList.contains("wiw-client-reset-btn")){
+    if (t && t.classList && t.classList.contains("wiw-client-save-btn")) {
       e.preventDefault();
-      var row = closestRow(t);
-      if (!row) return;
-
-      var wrap = document.getElementById("wiwts-client-ajax");
-      if (!wrap) { alert("Missing reset AJAX settings"); return; }
-
-      var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
-      var nonceR  = wrap.getAttribute("data-nonce-reset") || "";
-
-      var saveBtn = row.querySelector(".wiw-client-save-btn");
-      var apprBtn = row.querySelector(".wiw-client-approve-btn");
-      var entryId = "";
-      if (saveBtn && saveBtn.getAttribute("data-entry-id")) entryId = saveBtn.getAttribute("data-entry-id");
-      if (!entryId && apprBtn && apprBtn.getAttribute("data-entry-id")) entryId = apprBtn.getAttribute("data-entry-id");
-
-      if (!entryId) { alert("Missing Entry ID"); return; }
-      if (!ajaxUrl || !nonceR) { alert("Missing reset AJAX settings"); return; }
-
-      var fd = new FormData();
-      fd.append("action", "wiw_client_reset_entry_from_api");
-      fd.append("entry_id", entryId);
-      fd.append("preview_only", "1");
-      fd.append("security", nonceR);
-
-      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
-        .then(function(r){ return r.json(); })
-        .then(function(resp){
-          if (!resp || !resp.success) {
-            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Reset preview failed";
-            alert(msg);
-            return;
-          }
-          var preview = (resp && resp.data && resp.data.preview !== undefined) ? resp.data.preview : "Preview loaded.";
-
-// Normalize preview into a readable string (prevents [object Object])
-if (Array.isArray(preview)) {
-  // If array of strings/rows
-  preview = preview.map(function(x){
-    if (x === null || x === undefined) return "";
-    return (typeof x === "string") ? x : JSON.stringify(x);
-  }).join("\n");
-} else if (preview && typeof preview === "object") {
-  preview = JSON.stringify(preview, null, 2);
-} else {
-  preview = String(preview || "Preview loaded.");
-}
-
-          wiwtsOpenResetPreviewModal(preview, entryId, ajaxUrl, nonceR);
-        })
-        .catch(function(){
-          alert("Reset failed (network error).");
-        });
-
+      var row3 = closestRow(t);
+      if (!row3) return;
+      doSave(row3, t);
       return;
     }
-
-    if (t && t.classList && t.classList.contains("wiw-client-approve-btn")){
-      e.preventDefault();
-      var row = closestRow(t);
-      if (!row) return;
-
-      var wrap = document.getElementById("wiwts-client-ajax");
-      if (!wrap) { alert("Missing approve AJAX settings"); return; }
-
-      var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
-      var nonceA  = wrap.getAttribute("data-nonce-approve") || "";
-      var entryId = t.getAttribute("data-entry-id") || "";
-
-      if (!entryId) { alert("Missing Entry ID"); return; }
-      if (!ajaxUrl || !nonceA) { alert("Missing approve AJAX settings"); return; }
-
-      wiwtsShowRefreshingOverlay("Approving…");
-
-      var fd = new FormData();
-      fd.append("action", "wiw_local_approve_entry");
-      fd.append("entry_id", entryId);
-      fd.append("security", nonceA);
-
-      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
-        .then(function(r){ return r.json(); })
-        .then(function(resp){
-          if (!resp || !resp.success) {
-            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Approve failed";
-            wiwtsHideRefreshingOverlay();
-            alert(msg);
-            return;
-          }
-          window.location.reload();
-        })
-        .catch(function(){
-          wiwtsHideRefreshingOverlay();
-          alert("AJAX error approving entry");
-        });
-
-      return;
-    }
-
-    // Save — MUST match backend field names:
-    // check_ajax_referer('wiw_local_edit_entry', 'security')
-    // $_POST['clock_in_time'], $_POST['clock_out_time'], $_POST['break_minutes']
-    if (t && t.classList && t.classList.contains("wiw-client-save-btn")){
-      e.preventDefault();
-      var row = closestRow(t);
-      if (!row) return;
-
-      var wrap = document.getElementById("wiwts-client-ajax");
-      if (!wrap) { alert("Missing save AJAX settings"); return; }
-
-      var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
-      var nonceS  = wrap.getAttribute("data-nonce") || "";
-      var entryId = t.getAttribute("data-entry-id") || "";
-
-      if (!entryId) { alert("Missing Entry ID"); return; }
-      if (!ajaxUrl || !nonceS) { alert("Missing save AJAX settings"); return; }
-
-      var cellIn    = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
-      var cellOut   = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
-      var cellBreak = row.querySelector("td.wiw-client-cell-break input.wiw-client-edit");
-
-      var clockIn  = cellIn ? cellIn.value : "";
-      var clockOut = cellOut ? cellOut.value : "";
-      var brkMin   = cellBreak ? cellBreak.value : "";
-
-      wiwtsShowRefreshingOverlay("Saving…");
-
-fd.append("action", "wiw_client_update_entry");
-fd.append("entry_id", entryId);
-
-// Backend expects these keys:
-fd.append("clock_in_time", (clockIn || "").trim());
-fd.append("clock_out_time", (clockOut || "").trim());
-fd.append("break_minutes", (brkMin || "").trim());
-
-// Backend nonce field name:
-fd.append("security", nonceS);
-
-      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
-        .then(function(r){ return r.json(); })
-        .then(function(resp){
-          if (!resp || !resp.success) {
-            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Save failed";
-            wiwtsHideRefreshingOverlay();
-            alert(msg);
-            return;
-          }
-          window.location.reload();
-        })
-        .catch(function(){
-          wiwtsHideRefreshingOverlay();
-          alert("AJAX error saving entry");
-        });
-
-      return;
-    }
-
   });
+
 })();
 </script>
+
 HTML;
 
         return $out;
@@ -3348,6 +2838,8 @@ usort($rows, function ($r1, $r2) {
                 } else {
 
                     $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
+
+                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
 
                     if (! $is_approved) {
                         $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
