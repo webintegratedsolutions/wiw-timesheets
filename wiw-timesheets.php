@@ -1640,7 +1640,7 @@ class WIW_Timesheet_Manager
     };
   }
 
-  // === WIWTS CLIENT UI setEditing BEGIN (single source of truth) ===
+  // === WIWTS setEditing BEGIN (front-end admin view) ===
   function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
@@ -1658,24 +1658,21 @@ class WIW_Timesheet_Manager
     var cancelBtn  = row.querySelector(".wiw-client-cancel-btn");
     var approveBtn = row.querySelector(".wiw-client-approve-btn");
 
-    if (editBtn)   editBtn.style.display   = isEditing ? "none" : "";
-    if (saveBtn)   saveBtn.style.display   = isEditing ? "" : "none";
-    if (resetBtn)  resetBtn.style.display  = isEditing ? "" : "none";
-    if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
+    if (editBtn)    editBtn.style.display    = isEditing ? "none" : "";
+    if (approveBtn) approveBtn.style.display = isEditing ? "none" : "";
 
-    // Hide Approve during edit mode (prevents approving mid-edit)
-    if (approveBtn) {
-      approveBtn.style.display = isEditing ? "none" : "";
-    }
+    if (saveBtn)    saveBtn.style.display    = isEditing ? "" : "none";
+    if (resetBtn)   resetBtn.style.display   = isEditing ? "" : "none";
+    if (cancelBtn)  cancelBtn.style.display  = isEditing ? "" : "none";
 
-    // store originals on entering edit mode (used by Cancel restore)
+    // store originals on entering edit mode
     if (isEditing) {
       for (var k=0;k<inputs.length;k++){
         if (!inputs[k].dataset.orig) inputs[k].dataset.orig = inputs[k].value || "";
       }
     }
   }
-  // === WIWTS CLIENT UI setEditing END ===
+  // === WIWTS setEditing END (front-end admin view) ===
 
   function restoreOriginals(row){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
@@ -2361,7 +2358,8 @@ function updateViewFromInputs(row){
     };
   }
 
-function setEditing(row, isEditing){
+  // === WIWTS setEditing BEGIN (records view) ===
+  function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
 
@@ -2372,15 +2370,18 @@ function setEditing(row, isEditing){
       views[j].style.display = isEditing ? "none" : "";
     }
 
-    var editBtn   = row.querySelector(".wiw-client-edit-btn");
-    var saveBtn   = row.querySelector(".wiw-client-save-btn");
-    var resetBtn  = row.querySelector(".wiw-client-reset-btn");
-    var cancelBtn = row.querySelector(".wiw-client-cancel-btn");
+    var editBtn    = row.querySelector(".wiw-client-edit-btn");
+    var saveBtn    = row.querySelector(".wiw-client-save-btn");
+    var resetBtn   = row.querySelector(".wiw-client-reset-btn");
+    var cancelBtn  = row.querySelector(".wiw-client-cancel-btn");
+    var approveBtn = row.querySelector(".wiw-client-approve-btn");
 
-    if (editBtn)   editBtn.style.display = isEditing ? "none" : "";
-    if (saveBtn)   saveBtn.style.display = isEditing ? "" : "none";
-    if (resetBtn)  resetBtn.style.display = isEditing ? "" : "none";
-    if (cancelBtn) cancelBtn.style.display = isEditing ? "" : "none";
+    if (editBtn)    editBtn.style.display    = isEditing ? "none" : "";
+    if (approveBtn) approveBtn.style.display = isEditing ? "none" : "";
+
+    if (saveBtn)    saveBtn.style.display    = isEditing ? "" : "none";
+    if (resetBtn)   resetBtn.style.display   = isEditing ? "" : "none";
+    if (cancelBtn)  cancelBtn.style.display  = isEditing ? "" : "none";
 
     // store originals on entering edit mode
     if (isEditing) {
@@ -2389,6 +2390,7 @@ function setEditing(row, isEditing){
       }
     }
   }
+  // === WIWTS setEditing END (records view) ===
 
   function restoreOriginals(row){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
