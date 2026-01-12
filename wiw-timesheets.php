@@ -2674,14 +2674,49 @@ function updateViewFromInputs(row){
 
           var preview = (resp && resp.data && resp.data.preview !== undefined) ? resp.data.preview : "Preview loaded.";
 
-          // Normalize preview into a readable string (prevents [object Object])
+          // Format preview data into a readable string
+          function fmtVal(v){
+            if (v === null || v === undefined || v === "") return "N/A";
+            return String(v);
+          }
+
+          // Format the reset preview object into a readable string
+          function formatResetPreview(p){
+            // Expected shape:
+            // { current: {clock_in, clock_out, break_minutes}, api: {clock_in, clock_out, break_minutes} }
+            if (!p || typeof p !== "object") return String(p || "");
+
+            if (p.current && p.api) {
+              var cur = p.current || {};
+              var api = p.api || {};
+
+              var lines = [];
+              lines.push("Current Values");
+              lines.push("Clock In: " + fmtVal(cur.clock_in));
+              lines.push("Clock Out: " + fmtVal(cur.clock_out));
+              lines.push("Break Minutes: " + fmtVal(cur.break_minutes));
+              lines.push("");
+              lines.push("Reset Values (When I Work)");
+              lines.push("Clock In: " + fmtVal(api.clock_in));
+              lines.push("Clock Out: " + fmtVal(api.clock_out));
+              lines.push("Break Minutes: " + fmtVal(api.break_minutes));
+
+              return lines.join("\n");
+            }
+
+            // Fallback: pretty JSON
+            try { return JSON.stringify(p, null, 2); } catch(e) {}
+            return String(p);
+          }
+
+          // Normalize preview into a readable string
           if (Array.isArray(preview)) {
             preview = preview.map(function(x){
               if (x === null || x === undefined) return "";
-              return (typeof x === "string") ? x : JSON.stringify(x);
+              return (typeof x === "string") ? x : formatResetPreview(x);
             }).join("\n");
           } else if (preview && typeof preview === "object") {
-            preview = JSON.stringify(preview, null, 2);
+            preview = formatResetPreview(preview);
           } else {
             preview = String(preview || "Preview loaded.");
           }
