@@ -2587,7 +2587,6 @@ function updateViewFromInputs(row){
       ensureOverlayHelpers();
       window.wiwtsShowRefreshingOverlay("Applying reset…");
 
-
       var fd = new FormData();
       fd.append("action", "wiw_client_reset_entry_from_api");
       fd.append("security", nonceR);
@@ -2652,6 +2651,11 @@ function updateViewFromInputs(row){
       if (!entryId) { alert("Missing Entry ID"); return; }
       if (!ajaxUrl || !nonceR) { alert("Missing reset AJAX settings"); return; }
 
+      // Show immediate feedback (no perceived delay)
+      // Show immediate feedback using the SAME spinner overlay used for "Applying reset…"
+      ensureOverlayHelpers();
+      window.wiwtsShowRefreshingOverlay("Loading reset values…");
+
       var fd = new FormData();
       fd.append("action", "wiw_client_reset_entry_from_api");
       fd.append("security", nonceR);
@@ -2662,10 +2666,12 @@ function updateViewFromInputs(row){
         .then(function(r){ return r.json(); })
         .then(function(resp){
           if (!resp || !resp.success) {
+            window.wiwtsHideRefreshingOverlay();
             var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Reset preview failed";
             alert(msg);
             return;
           }
+
           var preview = (resp && resp.data && resp.data.preview !== undefined) ? resp.data.preview : "Preview loaded.";
 
           // Normalize preview into a readable string (prevents [object Object])
@@ -2680,9 +2686,13 @@ function updateViewFromInputs(row){
             preview = String(preview || "Preview loaded.");
           }
 
+          // Hide spinner overlay, then show preview modal
+          window.wiwtsHideRefreshingOverlay();
           wiwtsOpenResetPreviewModal(preview, entryId, ajaxUrl, nonceR);
+
         })
         .catch(function(){
+          window.wiwtsHideRefreshingOverlay();
           alert("Reset failed (network error).");
         });
 
