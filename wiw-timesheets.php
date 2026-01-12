@@ -107,7 +107,18 @@ class WIW_Timesheet_Manager
         add_action('admin_post_wiw_finalize_local_timesheet', array($this, 'handle_finalize_local_timesheet'));
 
         // ✅ Register additional AJAX hooks (THIS was missing)
-        $this->register_ajax_hooks();
+// ✅ Register additional AJAX hooks (THIS was missing)
+$this->register_ajax_hooks();
+
+// 8. Auto-approval dry-run (WP-Cron)
+// - Adds "weekly" schedule if missing
+// - Ensures event is scheduled
+// - Provides a manual admin trigger for testing
+add_filter('cron_schedules', array($this, 'wiwts_add_weekly_cron_schedule'));
+add_action('init', array($this, 'wiwts_ensure_auto_approve_dry_run_scheduled'));
+add_action('wiwts_auto_approve_past_due_dry_run', array($this, 'wiwts_cron_auto_approve_past_due_dry_run'));
+add_action('init', array($this, 'wiwts_maybe_run_auto_approve_dry_run_manual'));
+
     }
 
 
@@ -3338,8 +3349,6 @@ usort($rows, function ($r1, $r2) {
 
                     $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 
-                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
-
                     if (! $is_approved) {
                         $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
                     }
@@ -4216,6 +4225,124 @@ if (! empty($weeks_done)) {
         add_action('wp_ajax_wiw_local_approve_entry', array($this, 'ajax_local_approve_entry'));
         // === WIWTS APPROVE TIME RECORD AJAX HOOK ADD END ===
 
+    }
+
+    /**
+     * Auto-approve past-due (DRY RUN ONLY) — cron + manual trigger helpers
+     * Hook: wiwts_auto_approve_past_due_dry_run
+     */
+
+    public function wiwts_add_weekly_cron_schedule($schedules)
+    {
+        // WP does not include "weekly" by default on some installs.
+        if (! isset($schedules['weekly'])) {
+            $schedules['weekly'] = array(
+                'interval' => 7 * DAY_IN_SECONDS,
+                'display'  => 'Once Weekly',
+            );
+        }
+        return $schedules;
+    }
+
+    public function wiwts_ensure_auto_approve_dry_run_scheduled(): void
+    {
+        // Ensure the event is scheduled (safe guard if activation scheduling didn’t run)
+        if (! wp_next_scheduled('wiwts_auto_approve_past_due_dry_run')) {
+            $ts = $this->wiwts_get_next_tuesday_8am_timestamp();
+            wp_schedule_event($ts, 'weekly', 'wiwts_auto_approve_past_due_dry_run');
+        }
+    }
+
+    /**
+     * Manual admin-only trigger:
+     * Add ?wiwts_auto_approve_dry_run=1 while logged in as admin.
+     */
+    public function wiwts_maybe_run_auto_approve_dry_run_manual(): void
+    {
+        if (! is_user_logged_in() || ! current_user_can('manage_options')) {
+            return;
+        }
+
+        if (! isset($_GET['wiwts_auto_approve_dry_run'])) {
+            return;
+        }
+
+        $report = $this->wiwts_build_auto_approve_dry_run_report();
+
+        wp_die(
+            '<h2>WIW Timesheets — Auto-Approve Past Due (Dry Run)</h2>'
+            . '<pre style="white-space:pre-wrap;">' . esc_html($report) . '</pre>',
+            'WIW Timesheets Dry Run'
+        );
+    }
+
+    /**
+     * Cron handler (dry run only)
+     */
+    public function wiwts_cron_auto_approve_past_due_dry_run(): void
+    {
+        $report = $this->wiwts_build_auto_approve_dry_run_report();
+        error_log('[WIWTS][AUTO-APPROVE DRY RUN] ' . str_replace("\n", ' | ', $report));
+    }
+
+    private function wiwts_get_next_tuesday_8am_timestamp(): int
+    {
+        $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+        $now = new DateTimeImmutable('now', $tz);
+
+        // PHP w: 0 Sun ... 6 Sat. Tuesday = 2.
+        $dow             = (int) $now->format('w');
+        $days_until_tues = (2 - $dow + 7) % 7;
+
+        $tues_8am = $now->setTime(8, 0, 0)->modify('+' . $days_until_tues . ' days');
+
+        // If we’re at/after this Tue 8am, schedule next week.
+        if ($now >= $tues_8am) {
+            $tues_8am = $tues_8am->modify('+7 days');
+        }
+
+        return $tues_8am->getTimestamp();
+    }
+
+    /**
+     * Dry-run report:
+     * Counts pending records older than the current approval cutoff.
+     */
+    private function wiwts_build_auto_approve_dry_run_report(): string
+    {
+        global $wpdb;
+
+        $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+        $now = new DateTimeImmutable('now', $tz);
+
+        // Week starts Sunday 00:00
+        $dow            = (int) $now->format('w'); // 0 Sun ... 6 Sat
+        $days_since_sun = ($dow - 0 + 7) % 7;
+        $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
+
+        // This week's Tuesday 08:00
+        $days_until_tues = (2 - $dow + 7) % 7;
+        $tuesday_8am_dt  = $now->setTime(8, 0, 0)->modify('+' . $days_until_tues . ' days');
+
+        // Before Tue 8am → still "last week approval window", so cutoff is last week's Sunday
+        $approval_week_start_dt  = ($now < $tuesday_8am_dt) ? $week_start_dt->modify('-7 days') : $week_start_dt;
+        $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
+
+        $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+        $past_due_pending_count = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$table_entries} WHERE status = 'pending' AND date < %s",
+                $approval_week_start_ymd
+            )
+        );
+
+        $lines   = array();
+        $lines[] = 'Now: ' . $now->format('Y-m-d H:i:s T');
+        $lines[] = 'Approval cutoff (approval_week_start): ' . $approval_week_start_ymd;
+        $lines[] = 'Would auto-approve (pending past due entries): ' . $past_due_pending_count;
+
+        return implode("\n", $lines);
     }
 
     /**
@@ -7207,5 +7334,40 @@ new WIW_Timesheet_Manager();
 
 /**
  * Run installation routine on plugin activation.
+ * Also schedule the weekly dry-run cron.
  */
-register_activation_hook(__FILE__, 'wiw_timesheet_manager_install');
+function wiwts_activate_plugin(): void
+{
+    // Existing install routine (DB tables, etc.)
+    if (function_exists('wiw_timesheet_manager_install')) {
+        wiw_timesheet_manager_install();
+    }
+
+    // Schedule weekly dry-run cron if not scheduled
+    if (! wp_next_scheduled('wiwts_auto_approve_past_due_dry_run')) {
+        $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+        $now = new DateTimeImmutable('now', $tz);
+
+        $dow             = (int) $now->format('w'); // 0 Sun ... 6 Sat. Tuesday=2
+        $days_until_tues = (2 - $dow + 7) % 7;
+
+        $tues_8am = $now->setTime(8, 0, 0)->modify('+' . $days_until_tues . ' days');
+        if ($now >= $tues_8am) {
+            $tues_8am = $tues_8am->modify('+7 days');
+        }
+
+        wp_schedule_event($tues_8am->getTimestamp(), 'weekly', 'wiwts_auto_approve_past_due_dry_run');
+    }
+}
+
+function wiwts_deactivate_plugin(): void
+{
+    $ts = wp_next_scheduled('wiwts_auto_approve_past_due_dry_run');
+    if ($ts) {
+        wp_unschedule_event($ts, 'wiwts_auto_approve_past_due_dry_run');
+    }
+}
+
+register_activation_hook(__FILE__, 'wiwts_activate_plugin');
+register_deactivation_hook(__FILE__, 'wiwts_deactivate_plugin');
+
