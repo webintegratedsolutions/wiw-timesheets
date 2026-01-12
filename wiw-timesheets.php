@@ -2556,6 +2556,38 @@ function updateViewFromInputs(row){
       });
   }
 
+  // Show spinner overlay immediately when confirming/denying additional hours (Flag 104 form submit)
+  document.addEventListener("submit", function(e){
+    var form = e.target;
+    if (!form || !form.getAttribute) return;
+
+    // Only handle submits inside the front-end UI wrapper
+    if (!form.closest || !form.closest("#wiwts-client-records-view")) return;
+
+    // Only target the Flag 104 confirm/deny form posts
+    var actionInput = form.querySelector('input[name="action"]');
+    if (!actionInput || actionInput.value !== "wiwts_flag104_extra_time") return;
+
+    // Determine which button was used (confirm vs deny)
+    var decisionInput = form.querySelector('input[name="decision"]');
+    var msg = "Confirming additional hours…";
+    if (decisionInput && decisionInput.value === "deny") {
+      msg = "Denying additional hours…";
+    }
+
+    // Use the same spinner overlay system used by Apply Reset / Save
+    ensureOverlayHelpers();
+    try { window.wiwtsShowRefreshingOverlay(msg); } catch(err) {}
+
+    // Prevent double-submit while the post completes
+    try {
+      var btns = form.querySelectorAll('button, input[type="submit"]');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].disabled = true;
+      }
+    } catch(err2) {}
+  }, true);
+
   document.addEventListener("click", function(e){
     var t = e.target;
 
