@@ -1367,7 +1367,7 @@ class WIW_Timesheet_Manager
                             $out .= '<tr style="' . esc_attr($row_style) . '">';
                             $out .= '<td ' . $cell_style . '>' . esc_html($shift_date !== '' ? $shift_date : 'N/A') . '</td>';
                             $out .= '<td ' . $cell_style . '>' . esc_html($flag_record_id) . '</td>';
-                            $out .= '<td ' . $cell_style . '><strong>' . esc_html($type !== '' ? $type : 'N/A') . '</strong></td>';
+                            $out .= '<td ' . $cell_style . '>' . esc_html($type !== '' ? $type : 'N/A') . '</td>';
 
                             $out .= '<td ' . $cell_style . '>' . esc_html($desc !== '' ? $desc : 'N/A') . '</td>';
                             $out .= '<td ' . $cell_style . '>' . esc_html($status !== '' ? $status : 'N/A') . '</td>';
@@ -3268,7 +3268,7 @@ HTML;
                         $out .= '<tr style="' . esc_attr($row_style) . '">';
                         $out .= '<td ' . $cell_style . '>' . esc_html($shift_date !== '' ? $shift_date : 'N/A') . '</td>';
                         $out .= '<td ' . $cell_style . '>' . esc_html($flag_record_id) . '</td>';
-                        $out .= '<td ' . $cell_style . '><strong>' . esc_html($type !== '' ? $type : 'N/A') . '</strong></td>';
+                        $out .= '<td ' . $cell_style . '>' . esc_html($type !== '' ? $type : 'N/A') . '</td>';
                         $out .= '<td ' . $cell_style . '>' . esc_html($desc !== '' ? $desc : 'N/A') . '</td>';
                         $out .= '<td ' . $cell_style . '>' . esc_html($status !== '' ? $status : 'N/A') . '</td>';
                         $out .= '</tr>';
@@ -4089,6 +4089,9 @@ $rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_week_sta
 // Pre-fetch flags for these rows (grouped by wiw_time_id) so we can render a row under each entry.
 $flags_map = $this->wiwts_get_flags_by_wiw_time_id_for_dry_run($rows);
 
+// Pre-fetch edit logs for these rows (grouped by entry_id with wiw_time_id fallback).
+$edit_logs_map = $this->wiwts_get_edit_logs_for_dry_run($rows);
+
 // Build table HTML (match client UI columns).
 $table_html = '';
 
@@ -4147,15 +4150,15 @@ $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
 $table_html .= '<td colspan="10" style="background-color: #fff;">&nbsp;</td>';
 $table_html .= '</tr>';
 $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
-$table_html .= '<th>Shift Date</th>';
-$table_html .= '<th>Employee</th>';
-$table_html .= '<th>Sched. Start/End</th>';
-$table_html .= '<th>Clock In</th>';
-$table_html .= '<th>Clock Out</th>';
-$table_html .= '<th>Break (Min)</th>';
-$table_html .= '<th>Sched. Hrs</th>';
-$table_html .= '<th>Clocked Hrs</th>';
-$table_html .= '<th>Payable Hrs</th>';
+$table_html .= '<th style="text-align:left;">Shift Date</th>';
+$table_html .= '<th style="text-align:left;">Employee</th>';
+$table_html .= '<th style="text-align:left;">Sched. Start/End</th>';
+$table_html .= '<th style="text-align:left;">Clock In</th>';
+$table_html .= '<th style="text-align:left;">Clock Out</th>';
+$table_html .= '<th style="text-align:left;">Break (Min)</th>';
+$table_html .= '<th style="text-align:left;">Sched. Hrs</th>';
+$table_html .= '<th style="text-align:left;">Clocked Hrs</th>';
+$table_html .= '<th style="text-align:left;">Payable Hrs</th>';
 $table_html .= '</tr>';
 
 // Main entry row
@@ -4163,7 +4166,7 @@ $table_html .= '<tr>';
 
 $table_html .= '<td>'
     . esc_html($date_display)
-    . ($shift_record_id !== '' ? '<br><small>(' . esc_html($shift_record_id) . ')</small>' : '')
+    . ($shift_record_id !== '' ? '<br><small>(ID: ' . esc_html($shift_record_id) . ')</small>' : '')
     . '</td>';
 
 $table_html .= '<td>' . esc_html($employee_name) . '</td>';
@@ -4206,7 +4209,7 @@ $status_label = (strtolower($status_raw) === 'resolved') ? 'Resolved' : 'Unresol
 $updated = ($updated_raw !== '') ? $this->wiw_format_datetime_local_pretty($updated_raw) : 'N/A';
 
 $flags_html .= '<tr>';
-$flags_html .= '<td><strong>' . esc_html($type !== '' ? $type : 'N/A') . '</strong></td>';
+$flags_html .= '<td>' . esc_html($type !== '' ? $type : 'N/A') . '</td>';
 $flags_html .= '<td>' . esc_html($desc !== '' ? $desc : 'N/A') . '</td>';
 $flags_html .= '<td>' . esc_html($status_label) . '</td>';
 $flags_html .= '</tr>';
@@ -4218,8 +4221,89 @@ $flags_html .= '</tr>';
 
 $flags_html .= '</div>';
 
+// Flags row
 $table_html .= '<tr>';
 $table_html .= '<td colspan="9" style="padding:0;">' . $flags_html . '</td>';
+$table_html .= '</tr>';
+
+// Edit logs row (read-only)
+$entry_id_int   = isset($dr->id) ? (int) $dr->id : 0;
+$wiw_time_id_str = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+
+$logs_for_entry = array();
+
+// Primary: entry_id
+if ($entry_id_int > 0 && isset($edit_logs_map['by_entry_id'][$entry_id_int]) && is_array($edit_logs_map['by_entry_id'][$entry_id_int])) {
+    $logs_for_entry = $edit_logs_map['by_entry_id'][$entry_id_int];
+}
+// Fallback: wiw_time_id
+elseif ($wiw_time_id_str !== '' && isset($edit_logs_map['by_wiw_time_id'][$wiw_time_id_str]) && is_array($edit_logs_map['by_wiw_time_id'][$wiw_time_id_str])) {
+    $logs_for_entry = $edit_logs_map['by_wiw_time_id'][$wiw_time_id_str];
+}
+
+$logs_html  = '<div style="padding:10px 12px; background:#f6f7f7; border-left:3px solid #2271b1;">';
+
+if (empty($logs_for_entry)) {
+    $logs_html .= '<small><strong>Edit Logs:</strong> None</small>';
+} else {
+    $logs_html .= '<div style="margin-bottom:6px;"><strong>Edit Logs:</strong></div>';
+    $logs_html .= '<table class="wp-list-table widefat fixed striped" style="margin:0; background:#fff; width:100%;">';
+    $logs_html .= '<thead><tr>';
+    $logs_html .= '<th style="width:100px; text-align:left;">Type</th>';
+    $logs_html .= '<th style="text-align:left;">Change</th>';
+    $logs_html .= '<th style="width:160px; text-align:left;">Edited By</th>';
+    $logs_html .= '<th style="width:180px; text-align:left;">Date</th>';
+    $logs_html .= '</tr></thead><tbody>';
+
+    foreach ($logs_for_entry as $lg) {
+        $edit_type  = isset($lg->edit_type) ? (string) $lg->edit_type : '';
+        $old_value  = isset($lg->old_value) ? (string) $lg->old_value : '';
+        $new_value  = isset($lg->new_value) ? (string) $lg->new_value : '';
+
+        $editor = '';
+        if (isset($lg->edited_by_display_name) && (string) $lg->edited_by_display_name !== '') {
+            $editor = (string) $lg->edited_by_display_name;
+        } elseif (isset($lg->edited_by_user_login) && (string) $lg->edited_by_user_login !== '') {
+            $editor = (string) $lg->edited_by_user_login;
+        } else {
+            $editor = 'System';
+        }
+
+        $created_at_raw = isset($lg->created_at) ? (string) $lg->created_at : '';
+        $created_at_disp = ($created_at_raw !== '')
+            ? $this->wiw_format_datetime_local_pretty($created_at_raw)
+            : 'N/A';
+
+// Format old/new values for display (convert datetimes to local 12-hour time)
+$old_disp = 'N/A';
+$new_disp = 'N/A';
+
+if (trim($old_value) !== '') {
+    $old_disp = $this->wiw_format_edit_log_value_for_display($old_value);
+}
+if (trim($new_value) !== '') {
+    $new_disp = $this->wiw_format_edit_log_value_for_display($new_value);
+}
+
+$change = (trim($old_value) !== '' || trim($new_value) !== '')
+    ? '' . $old_disp . ' → ' . $new_disp . ''
+    : '—';
+
+        $logs_html .= '<tr>';
+        $logs_html .= '<td>' . esc_html($edit_type !== '' ? $edit_type : 'N/A') . '</td>';
+        $logs_html .= '<td>' . esc_html($change) . '</td>';
+        $logs_html .= '<td>' . esc_html($editor) . '</td>';
+        $logs_html .= '<td>' . esc_html($created_at_disp) . '</td>';
+        $logs_html .= '</tr>';
+    }
+
+    $logs_html .= '</tbody></table>';
+}
+
+$logs_html .= '</div>';
+
+$table_html .= '<tr>';
+$table_html .= '<td colspan="9" style="padding:0;">' . $logs_html . '</td>';
 $table_html .= '</tr>';
 
         }
@@ -4361,7 +4445,7 @@ return is_array($rows) ? $rows : array();
 }
 
 // Fetch flags grouped by wiw_time_id for the dry run display.
-function wiwts_get_flags_by_wiw_time_id_for_dry_run(array $entry_rows): array
+public function wiwts_get_flags_by_wiw_time_id_for_dry_run(array $entry_rows): array
 {
     global $wpdb;
 
@@ -4412,6 +4496,128 @@ function wiwts_get_flags_by_wiw_time_id_for_dry_run(array $entry_rows): array
     }
 
     return $map;
+}
+
+// Fetch edit logs for the dry run display.
+// Returns two maps:
+//  - by_entry_id[int entry_id] => [logs...]
+//  - by_wiw_time_id[string wiw_time_id] => [logs...]
+public function wiwts_get_edit_logs_for_dry_run(array $entry_rows): array
+{
+    global $wpdb;
+
+    $table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+
+    $entry_ids = array();
+    $wiw_ids   = array();
+
+    foreach ($entry_rows as $r) {
+        if (! is_object($r)) {
+            continue;
+        }
+        if (isset($r->id) && (int) $r->id > 0) {
+            $entry_ids[] = (int) $r->id;
+        }
+        if (isset($r->wiw_time_id) && $r->wiw_time_id !== null && $r->wiw_time_id !== '') {
+            $wiw_ids[] = (int) $r->wiw_time_id;
+        }
+    }
+
+    $entry_ids = array_values(array_unique($entry_ids));
+    $wiw_ids   = array_values(array_unique($wiw_ids));
+
+    if (empty($entry_ids) && empty($wiw_ids)) {
+        return array('by_entry_id' => array(), 'by_wiw_time_id' => array());
+    }
+
+    // Safety caps (admin page output protection)
+    if (count($entry_ids) > 500) {
+        $entry_ids = array_slice($entry_ids, 0, 500);
+    }
+    if (count($wiw_ids) > 500) {
+        $wiw_ids = array_slice($wiw_ids, 0, 500);
+    }
+
+    $where_parts = array();
+    $args        = array();
+
+    if (! empty($entry_ids)) {
+        $ph = implode(',', array_fill(0, count($entry_ids), '%d'));
+        $where_parts[] = "entry_id IN ($ph)";
+        $args = array_merge($args, $entry_ids);
+    }
+
+    if (! empty($wiw_ids)) {
+        $ph = implode(',', array_fill(0, count($wiw_ids), '%d'));
+        $where_parts[] = "wiw_time_id IN ($ph)";
+        $args = array_merge($args, $wiw_ids);
+    }
+
+    $where_sql = implode(' OR ', $where_parts);
+
+    $sql = $wpdb->prepare(
+        "SELECT *
+         FROM {$table_logs}
+         WHERE {$where_sql}
+         ORDER BY created_at DESC, id DESC",
+        $args
+    );
+
+    $logs = $wpdb->get_results($sql);
+    if (! is_array($logs) || empty($logs)) {
+        return array('by_entry_id' => array(), 'by_wiw_time_id' => array());
+    }
+
+    $by_entry_id    = array();
+    $by_wiw_time_id = array();
+
+    foreach ($logs as $lg) {
+        $eid = isset($lg->entry_id) ? (int) $lg->entry_id : 0;
+        $wid = isset($lg->wiw_time_id) ? (string) $lg->wiw_time_id : '';
+
+        if ($eid > 0) {
+            if (! isset($by_entry_id[$eid])) {
+                $by_entry_id[$eid] = array();
+            }
+            $by_entry_id[$eid][] = $lg;
+        }
+
+        if ($wid !== '' && $wid !== '0') {
+            if (! isset($by_wiw_time_id[$wid])) {
+                $by_wiw_time_id[$wid] = array();
+            }
+            $by_wiw_time_id[$wid][] = $lg;
+        }
+    }
+
+    return array(
+        'by_entry_id'    => $by_entry_id,
+        'by_wiw_time_id' => $by_wiw_time_id,
+    );
+}
+
+// Format edit log values for display.
+// If value looks like a datetime, show local 12-hour time (e.g. 6:00 pm).
+// Otherwise, return value unchanged.
+public function wiw_format_edit_log_value_for_display(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return 'N/A';
+    }
+
+    // Match YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS
+    if (preg_match('/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(:\d{2})?$/', $value)) {
+        try {
+            $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+            $dt = new DateTimeImmutable($value, $tz);
+            return strtolower($dt->format('g:i A'));
+        } catch (Exception $e) {
+            // Fall through to raw value
+        }
+    }
+
+    return $value;
 }
 
     /**
