@@ -4083,11 +4083,15 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
     $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
 
-    // Fetch the exact rows that would be auto-approved (read-only listing).
-    $rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_week_start_ymd, 200);
+// Fetch the exact rows that would be auto-approved (read-only listing).
+$rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_week_start_ymd, 200);
 
-    // Build table HTML (match client UI columns).
-    $table_html = '';
+// Pre-fetch flags for these rows (grouped by wiw_time_id) so we can render a row under each entry.
+$flags_map = $this->wiwts_get_flags_by_wiw_time_id_for_dry_run($rows);
+
+// Build table HTML (match client UI columns).
+$table_html = '';
+
     if (empty($rows)) {
         $table_html = '<p><strong>No past-due pending entries found.</strong></p>';
     } else {
@@ -4145,12 +4149,12 @@ if ($shift_id !== '') {
     $id_label = '<br><small>(ID ' . esc_html((string) $entry_id) . ')</small>';
 }
 
+// Main entry row (same as before)
 $table_html .= '<tr>';
 $table_html .= '<td>'
     . esc_html($date_display)
-    . $id_label
+    . ($entry_id > 0 ? '<br><small>(ID ' . esc_html((string) $entry_id) . ')</small>' : '')
     . '</td>';
-
 $table_html .= '<td>' . esc_html($employee_name) . '</td>';
 $table_html .= '<td>' . esc_html($sched_start_end) . '</td>';
 $table_html .= '<td>' . esc_html($clock_in_display !== '' ? $clock_in_display : 'N/A') . '</td>';
@@ -4159,6 +4163,52 @@ $table_html .= '<td>' . esc_html($break_min) . '</td>';
 $table_html .= '<td>' . esc_html($sched_hrs) . '</td>';
 $table_html .= '<td>' . esc_html($clocked_hrs) . '</td>';
 $table_html .= '<td>' . esc_html($payable_hrs) . '</td>';
+$table_html .= '</tr>';
+
+// Under-row flags (read-only)
+$wiw_time_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+$flags_for_entry = ($wiw_time_id !== '' && isset($flags_map[$wiw_time_id]) && is_array($flags_map[$wiw_time_id]))
+    ? $flags_map[$wiw_time_id]
+    : array();
+
+$flags_html  = '<div style="padding:10px 12px; background:#f6f7f7; border-left:3px solid #dcdcde;">';
+
+if (empty($flags_for_entry)) {
+    $flags_html .= '<small><strong>Flags:</strong> None</small>';
+} else {
+    $flags_html .= '<div style="margin-bottom:6px;"><strong>Flags:</strong></div>';
+    $flags_html .= '<table class="wp-list-table widefat fixed striped" style="margin:0; background:#fff; width:100%;">';
+$flags_html .= '<thead><tr>';
+$flags_html .= '<th style="width:80px; text-align: left;">Type</th>';
+$flags_html .= '<th style="text-align: left;">Description</th>';
+$flags_html .= '<th style="width:120px; text-align: left;">Status</th>';
+$flags_html .= '</tr></thead><tbody>';
+
+    foreach ($flags_for_entry as $fg) {
+        $type       = isset($fg->flag_type) ? (string) $fg->flag_type : '';
+        $desc       = isset($fg->description) ? (string) $fg->description : '';
+        $status_raw = isset($fg->flag_status) ? (string) $fg->flag_status : '';
+        $updated_raw = isset($fg->updated_at) ? (string) $fg->updated_at : '';
+
+$status_label = (strtolower($status_raw) === 'resolved') ? 'Resolved' : 'Unresolved';
+
+$updated = ($updated_raw !== '') ? $this->wiw_format_datetime_local_pretty($updated_raw) : 'N/A';
+
+$flags_html .= '<tr>';
+$flags_html .= '<td><strong>' . esc_html($type !== '' ? $type : 'N/A') . '</strong></td>';
+$flags_html .= '<td>' . esc_html($desc !== '' ? $desc : 'N/A') . '</td>';
+$flags_html .= '<td>' . esc_html($status_label) . '</td>';
+$flags_html .= '</tr>';
+
+    }
+
+    $flags_html .= '</tbody></table>';
+}
+
+$flags_html .= '</div>';
+
+$table_html .= '<tr>';
+$table_html .= '<td colspan="9" style="padding:0;">' . $flags_html . '</td>';
 $table_html .= '</tr>';
 
         }
@@ -4296,7 +4346,61 @@ function wiwts_get_past_due_pending_entries_for_dry_run(string $cutoff_ymd, int 
 
     $rows = $wpdb->get_results($sql);
 
-    return is_array($rows) ? $rows : array();
+return is_array($rows) ? $rows : array();
+}
+
+// Fetch flags grouped by wiw_time_id for the dry run display.
+function wiwts_get_flags_by_wiw_time_id_for_dry_run(array $entry_rows): array
+{
+    global $wpdb;
+
+    $table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
+
+    // Collect wiw_time_id values from the entries we are displaying.
+    $wiw_ids = array();
+    foreach ($entry_rows as $r) {
+        if (is_object($r) && isset($r->wiw_time_id) && $r->wiw_time_id !== null && $r->wiw_time_id !== '') {
+            $wiw_ids[] = (string) $r->wiw_time_id;
+        }
+    }
+
+    $wiw_ids = array_values(array_unique($wiw_ids));
+    if (empty($wiw_ids)) {
+        return array();
+    }
+
+    // Build IN (...) safely.
+    $placeholders = implode(',', array_fill(0, count($wiw_ids), '%s'));
+
+    $sql = $wpdb->prepare(
+        "SELECT *
+         FROM {$table_flags}
+         WHERE wiw_time_id IN ($placeholders)
+         ORDER BY
+            CASE WHEN flag_status = 'resolved' THEN 1 ELSE 0 END ASC,
+            updated_at DESC,
+            id DESC",
+        $wiw_ids
+    );
+
+    $flags = $wpdb->get_results($sql);
+    if (! is_array($flags) || empty($flags)) {
+        return array();
+    }
+
+    $map = array();
+    foreach ($flags as $f) {
+        $k = isset($f->wiw_time_id) ? (string) $f->wiw_time_id : '';
+        if ($k === '') {
+            continue;
+        }
+        if (! isset($map[$k])) {
+            $map[$k] = array();
+        }
+        $map[$k][] = $f;
+    }
+
+    return $map;
 }
 
     /**
