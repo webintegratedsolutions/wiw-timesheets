@@ -1640,8 +1640,9 @@ class WIW_Timesheet_Manager
     };
   }
 
-  // === WIWTS setEditing BEGIN (front-end admin view) ===
+// === WIWTS setEditing BEGIN (front-end admin view) ===
 function setEditing(row, isEditing){
+  try {
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
 
@@ -1665,36 +1666,50 @@ function setEditing(row, isEditing){
     if (resetBtn)   resetBtn.style.display   = isEditing ? "" : "none";
     if (cancelBtn)  cancelBtn.style.display  = isEditing ? "" : "none";
 
-    // store originals on entering edit mode
+    // store originals + apply scheduled defaults on entering edit mode
     if (isEditing) {
+
+      // store originals first (so Cancel always restores true original empties)
       for (var k=0;k<inputs.length;k++){
-        if (!inputs[k].dataset.orig) inputs[k].dataset.orig = inputs[k].value || "";
+        if (!inputs[k].dataset.orig) inputs[k].dataset.orig = (inputs[k].value || "");
       }
 
-      // === WIWTS restore scheduled defaults on Edit BEGIN ===
-      // If Clock In/Out is empty, populate from scheduled start/end so inputs show a real time
-      // instead of the "HH:MM" placeholder.
-      var schedStart = (row.getAttribute("data-sched-start") || "").toString().trim();
-      var schedEnd   = (row.getAttribute("data-sched-end") || "").toString().trim();
+      // Restore old behavior: if Clock In/Out is empty, default to scheduled start/end
+      var schedStart = (row.getAttribute("data-sched-start") || "").toString().trim(); // "HH:MM"
+      var schedEnd   = (row.getAttribute("data-sched-end")   || "").toString().trim(); // "HH:MM"
+
+      // helper: find parent TD without relying on Element.closest()
+      function findParentTd(el){
+        var n = el;
+        while (n && n.tagName && n.tagName.toLowerCase() !== "td") {
+          n = n.parentNode;
+        }
+        return (n && n.tagName && n.tagName.toLowerCase() === "td") ? n : null;
+      }
 
       for (var t=0;t<inputs.length;t++){
-        var td = inputs[t].closest ? inputs[t].closest("td") : null;
-        if (!td) continue;
-
         var cur = (inputs[t].value || "").toString().trim();
+        if (cur !== "") continue;
 
-        if (cur === "") {
-          if (td.classList && td.classList.contains("wiw-client-cell-clock-in") && schedStart !== "") {
-            inputs[t].value = schedStart;
-          } else if (td.classList && td.classList.contains("wiw-client-cell-clock-out") && schedEnd !== "") {
-            inputs[t].value = schedEnd;
-          }
+        var td = findParentTd(inputs[t]);
+        if (!td || !td.className) continue;
+
+        // Only fill the intended cells
+        if (td.className.indexOf("wiw-client-cell-clock-in") !== -1) {
+          if (schedStart !== "") inputs[t].value = schedStart;
+        } else if (td.className.indexOf("wiw-client-cell-clock-out") !== -1) {
+          if (schedEnd !== "") inputs[t].value = schedEnd;
         }
       }
-      // === WIWTS restore scheduled defaults on Edit END ===
     }
+
+  } catch (e) {
+    // Never let an edit-mode UI issue break other handlers (Approve/Reset/Save)
+    try { console.error("WIWTS setEditing error:", e); } catch(_e) {}
   }
-  // === WIWTS setEditing END (front-end admin view) ===
+}
+// === WIWTS setEditing END (front-end admin view) ===
+
 
   function restoreOriginals(row){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
@@ -1853,7 +1868,71 @@ function timeTo12h(v){
       });
   }
 
+  function doApprove(row, btn){
+    var wrap = document.getElementById("wiwts-client-ajax");
+    if (!wrap) { alert("Missing approve AJAX settings"); return; }
+
+    var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
+    var nonceA  = wrap.getAttribute("data-nonce-approve") || "";
+    var entryId = btn.getAttribute("data-entry-id") || "";
+
+    if (!ajaxUrl || !nonceA) { alert("Missing approve AJAX settings"); return; }
+    if (!entryId) { alert("Missing Entry ID"); return; }
+
+    ensureOverlayHelpers();
+    window.wiwtsShowRefreshingOverlay("Approving…");
+
+    var fd = new FormData();
+    fd.append("action", "wiw_local_approve_entry");
+    fd.append("entry_id", entryId);
+    fd.append("security", nonceA);
+
+    var done = false;
+    var timeoutId = window.setTimeout(function(){
+      if (done) return;
+      done = true;
+      window.wiwtsHideRefreshingOverlay();
+      alert("Approve timed out. Please reload and try again.");
+    }, 20000);
+
+    fetch(ajaxUrl, { method:"POST", credentials:"same-origin", body: fd })
+      .then(function(r){ return r.text().then(function(txt){ return {status:r.status, text:txt}; }); })
+      .then(function(payload){
+        if (done) return;
+        done = true;
+        window.clearTimeout(timeoutId);
+
+        var resp = null;
+        try { resp = JSON.parse(payload.text); } catch(e) {}
+
+        if (!resp) {
+          window.wiwtsHideRefreshingOverlay();
+          alert("Approve failed: invalid server response");
+          return;
+        }
+
+        if (!resp.success) {
+          var msg = (resp.data && resp.data.message) ? resp.data.message : "Approve failed";
+          window.wiwtsHideRefreshingOverlay();
+          alert(msg);
+          return;
+        }
+
+        // success → refresh so the row reflects approved state
+        window.location.reload();
+      })
+      .catch(function(err){
+        if (done) return;
+        done = true;
+        window.clearTimeout(timeoutId);
+        window.wiwtsHideRefreshingOverlay();
+        alert("AJAX error approving entry");
+        try { console.error(err); } catch(e) {}
+      });
+  }
+
   document.addEventListener("click", function(e){
+
     var t = e.target;
 
     if (t && t.classList && t.classList.contains("wiw-client-edit-btn")) {
@@ -1861,6 +1940,17 @@ function timeTo12h(v){
       var row = closestRow(t);
       if (!row) return;
       setEditing(row, true);
+      return;
+    }
+
+    if (t && t.classList && t.classList.contains("wiw-client-approve-btn")) {
+      // Respect disabled buttons (tooltips still work)
+      if (t.disabled || t.getAttribute("disabled") !== null) return;
+
+      e.preventDefault();
+      var rowA = closestRow(t);
+      if (!rowA) return;
+      doApprove(rowA, t);
       return;
     }
 
