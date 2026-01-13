@@ -4053,24 +4053,132 @@ HTML;
      * Manual admin-only trigger:
      * Add ?wiwts_auto_approve_dry_run=1 while logged in as admin.
      */
-    public function wiwts_maybe_run_auto_approve_dry_run_manual(): void
-    {
-        if (! is_user_logged_in() || ! current_user_can('manage_options')) {
-            return;
-        }
-
-        if (! isset($_GET['wiwts_auto_approve_dry_run'])) {
-            return;
-        }
-
-        $report = $this->wiwts_build_auto_approve_dry_run_report();
-
-        wp_die(
-            '<h2>WIW Timesheets — Auto-Approve Past Due (Dry Run)</h2>'
-                . '<pre style="white-space:pre-wrap;">' . esc_html($report) . '</pre>',
-            'WIW Timesheets Dry Run'
-        );
+function wiwts_maybe_run_auto_approve_dry_run_manual(): void
+{
+    if (! is_user_logged_in() || ! current_user_can('manage_options')) {
+        return;
     }
+
+    if (! isset($_GET['wiwts_auto_approve_dry_run'])) {
+        return;
+    }
+
+    // Existing report (string) - keep as-is.
+    $report = $this->wiwts_build_auto_approve_dry_run_report();
+
+    // Compute the same cutoff date the report uses (so our table matches the report).
+    $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+    $now = new DateTimeImmutable('now', $tz);
+
+    $dow            = (int) $now->format('w'); // 0 Sun ... 6 Sat
+    $days_since_sun = ($dow - 0 + 7) % 7;
+    $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
+
+    $days_until_tues = (2 - $dow + 7) % 7;
+    $tuesday_8am_dt  = $now->setTime(8, 0, 0)->modify('+' . $days_until_tues . ' days');
+
+    $approval_week_start_dt = ($now < $tuesday_8am_dt)
+        ? $week_start_dt->modify('-7 days')
+        : $week_start_dt;
+
+    $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
+
+    // Fetch the exact rows that would be auto-approved (read-only listing).
+    $rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_week_start_ymd, 200);
+
+    // Build table HTML (match client UI columns).
+    $table_html = '';
+    if (empty($rows)) {
+        $table_html = '<p><strong>No past-due pending entries found.</strong></p>';
+    } else {
+        $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
+        $table_html .= '<table class="wp-list-table widefat fixed striped" style="margin-top:8px;width:100%;">';
+        $table_html .= '<thead><tr>';
+$table_html .= '<th style="width:140px;">Shift Date</th>';
+$table_html .= '<th style="width:170px;">Employee</th>';
+$table_html .= '<th style="width:190px;">Sched. Start/End</th>';
+$table_html .= '<th style="width:95px;">Clock In</th>';
+$table_html .= '<th style="width:95px;">Clock Out</th>';
+$table_html .= '<th style="width:95px;">Break (Min)</th>';
+$table_html .= '<th style="width:90px;">Sched. Hrs</th>';
+$table_html .= '<th style="width:95px;">Clocked Hrs</th>';
+$table_html .= '<th style="width:95px;">Payable Hrs</th>';
+
+        $table_html .= '</tr></thead><tbody>';
+
+        foreach ($rows as $dr) {
+            $date_display = isset($dr->date) ? (string) $dr->date : 'N/A';
+
+            $employee_name = isset($dr->_wiw_employee_name) ? (string) $dr->_wiw_employee_name : '';
+            if ($employee_name === '') {
+                $employee_name = '—';
+            }
+
+            $sched_start = isset($dr->scheduled_start) ? (string) $dr->scheduled_start : '';
+            $sched_end   = isset($dr->scheduled_end) ? (string) $dr->scheduled_end : '';
+            $sched_start_end = $this->wiw_format_time_range_local($sched_start, $sched_end);
+
+            $clock_in  = isset($dr->clock_in) ? (string) $dr->clock_in : '';
+            $clock_out = isset($dr->clock_out) ? (string) $dr->clock_out : '';
+
+            $clock_in_display  = $this->wiw_format_time_local($clock_in);
+            $clock_out_display = $this->wiw_format_time_local($clock_out);
+
+            $break_min = isset($dr->break_minutes) ? (string) $dr->break_minutes : '0';
+
+            $sched_hrs   = isset($dr->scheduled_hours) ? (string) $dr->scheduled_hours : '0.00';
+$clocked_hrs = isset($dr->clocked_hours) ? (string) $dr->clocked_hours : '0.00';
+            $payable_hrs = isset($dr->payable_hours) ? (string) $dr->payable_hours : '0.00';
+
+// Prefer the WIW shift record id (matches client UI). Fallback to local entry id if missing.
+$shift_id = '';
+if (isset($dr->wiw_time_id) && $dr->wiw_time_id !== null && $dr->wiw_time_id !== '') {
+    $shift_id = (string) $dr->wiw_time_id;
+}
+
+$entry_id = isset($dr->id) ? (int) $dr->id : 0;
+
+$id_label = '';
+if ($shift_id !== '') {
+    $id_label = '<br><small>(' . esc_html($shift_id) . ')</small>';
+} elseif ($entry_id > 0) {
+    $id_label = '<br><small>(ID ' . esc_html((string) $entry_id) . ')</small>';
+}
+
+$table_html .= '<tr>';
+$table_html .= '<td>'
+    . esc_html($date_display)
+    . $id_label
+    . '</td>';
+
+$table_html .= '<td>' . esc_html($employee_name) . '</td>';
+$table_html .= '<td>' . esc_html($sched_start_end) . '</td>';
+$table_html .= '<td>' . esc_html($clock_in_display !== '' ? $clock_in_display : 'N/A') . '</td>';
+$table_html .= '<td>' . esc_html($clock_out_display !== '' ? $clock_out_display : 'N/A') . '</td>';
+$table_html .= '<td>' . esc_html($break_min) . '</td>';
+$table_html .= '<td>' . esc_html($sched_hrs) . '</td>';
+$table_html .= '<td>' . esc_html($clocked_hrs) . '</td>';
+$table_html .= '<td>' . esc_html($payable_hrs) . '</td>';
+$table_html .= '</tr>';
+
+        }
+
+        $table_html .= '</tbody></table>';
+    }
+
+$wrap_open  = '<div style="max-width:900px;margin:20px auto;padding:0 12px;">';
+$wrap_close = '</div>';
+
+wp_die(
+        $wrap_open
+            . '<h2>WIW Timesheets — Auto-Approve Past Due (Dry Run)</h2>'
+            . '<pre style="white-space:pre-wrap;">' . esc_html($report) . '</pre>'
+            . $table_html
+            . $wrap_close,
+        'WIW Timesheets Dry Run'
+    );
+
+}
 
     /**
      * Cron handler (dry run only)
@@ -4104,42 +4212,92 @@ HTML;
      * Dry-run report:
      * Counts pending records older than the current approval cutoff.
      */
-    private function wiwts_build_auto_approve_dry_run_report(): string
-    {
-        global $wpdb;
+function wiwts_build_auto_approve_dry_run_report(): string
+{
+    global $wpdb;
 
-        $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
-        $now = new DateTimeImmutable('now', $tz);
+    $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+    $now = new DateTimeImmutable('now', $tz);
 
-        // Week starts Sunday 00:00
-        $dow            = (int) $now->format('w'); // 0 Sun ... 6 Sat
-        $days_since_sun = ($dow - 0 + 7) % 7;
-        $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
+    // Week starts Sunday 00:00
+    $dow            = (int) $now->format('w'); // 0 Sun ... 6 Sat
+    $days_since_sun = ($dow - 0 + 7) % 7;
+    $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
 
-        // This week's Tuesday 08:00
-        $days_until_tues = (2 - $dow + 7) % 7;
-        $tuesday_8am_dt  = $now->setTime(8, 0, 0)->modify('+' . $days_until_tues . ' days');
+    // This week's Tuesday 08:00
+    $days_until_tues = (2 - $dow + 7) % 7;
+    $tuesday_8am_dt  = $now->setTime(8, 0, 0)->modify('+' . $days_until_tues . ' days');
 
-        // Before Tue 8am → still "last week approval window", so cutoff is last week's Sunday
-        $approval_week_start_dt  = ($now < $tuesday_8am_dt) ? $week_start_dt->modify('-7 days') : $week_start_dt;
-        $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
+    // Before Tue 8am → still approving the previous week
+    $approval_week_start_dt = ($now < $tuesday_8am_dt)
+        ? $week_start_dt->modify('-7 days')
+        : $week_start_dt;
 
-        $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+    $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
 
-        $past_due_pending_count = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT COUNT(*) FROM {$table_entries} WHERE status = 'pending' AND date < %s",
-                $approval_week_start_ymd
-            )
-        );
+    // Human-readable approval deadline:
+    // Tuesday 8:00 AM following the approval week
+    $approval_deadline_dt = $approval_week_start_dt
+        ->modify('+9 days')   // Sunday → following Tuesday
+        ->setTime(8, 0, 0);
 
-        $lines   = array();
-        $lines[] = 'Now: ' . $now->format('Y-m-d H:i:s T');
-        $lines[] = 'Approval cutoff (approval_week_start): ' . $approval_week_start_ymd;
-        $lines[] = 'Would auto-approve (pending past due entries): ' . $past_due_pending_count;
+    $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
-        return implode("\n", $lines);
+    $past_due_pending_count = (int) $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$table_entries} WHERE status = 'pending' AND date < %s",
+            $approval_week_start_ymd
+        )
+    );
+
+    $lines   = array();
+    $lines[] = 'Now: ' . $now->format('Y-m-d H:i:s T');
+    $lines[] = 'Approval cutoff (All records before this date are past due): ' . $approval_week_start_ymd;
+    $lines[] = 'Next approval deadline: ' . $approval_deadline_dt->format('l, F j, Y \a\t g:i A T');
+    $lines[] = 'Would auto-approve (pending past due entries): ' . $past_due_pending_count;
+
+    return implode("\n", $lines);
+}
+
+// Fetch past-due pending entries for dry run display.
+function wiwts_get_past_due_pending_entries_for_dry_run(string $cutoff_ymd, int $limit = 200): array
+{
+    global $wpdb;
+
+    $cutoff_ymd = trim($cutoff_ymd);
+    if ($cutoff_ymd === '') {
+        return array();
     }
+
+    $limit = absint($limit);
+    if ($limit < 1) {
+        $limit = 200;
+    }
+    if ($limit > 500) {
+        $limit = 500; // safety cap for admin page output
+    }
+
+    $table_entries   = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_timesheet = $wpdb->prefix . 'wiw_timesheets';
+
+    // Join timesheets only to obtain employee_name for display.
+    $sql = $wpdb->prepare(
+        "SELECT 
+            e.*,
+            t.employee_name AS _wiw_employee_name
+         FROM {$table_entries} e
+         LEFT JOIN {$table_timesheet} t ON t.id = e.timesheet_id
+         WHERE e.status = 'pending'
+           AND e.date < %s
+         ORDER BY e.date ASC, e.id ASC
+         LIMIT {$limit}",
+        $cutoff_ymd
+    );
+
+    $rows = $wpdb->get_results($sql);
+
+    return is_array($rows) ? $rows : array();
+}
 
     /**
      * Handles the AJAX request to update a single timesheet record's clock times.
