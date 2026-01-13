@@ -4098,15 +4098,15 @@ $table_html = '';
         $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
         $table_html .= '<table class="wp-list-table widefat fixed striped" style="margin-top:8px;width:100%;">';
         $table_html .= '<thead><tr>';
-$table_html .= '<th style="width:140px;">Shift Date</th>';
-$table_html .= '<th style="width:170px;">Employee</th>';
-$table_html .= '<th style="width:190px;">Sched. Start/End</th>';
-$table_html .= '<th style="width:95px;">Clock In</th>';
-$table_html .= '<th style="width:95px;">Clock Out</th>';
-$table_html .= '<th style="width:95px;">Break (Min)</th>';
-$table_html .= '<th style="width:90px;">Sched. Hrs</th>';
-$table_html .= '<th style="width:95px;">Clocked Hrs</th>';
-$table_html .= '<th style="width:95px;">Payable Hrs</th>';
+$table_html .= '<th style="width:140px;">&nbsp;</th>';
+$table_html .= '<th style="width:170px;">&nbsp;</th>';
+$table_html .= '<th style="width:190px;">&nbsp;</th>';
+$table_html .= '<th style="width:95px;">&nbsp;</th>';
+$table_html .= '<th style="width:95px;">&nbsp;</th>';
+$table_html .= '<th style="width:95px;">&nbsp;</th>';
+$table_html .= '<th style="width:90px;">&nbsp;</th>';
+$table_html .= '<th style="width:95px;">&nbsp;</th>';
+$table_html .= '<th style="width:95px;">&nbsp;</th>';
 
         $table_html .= '</tr></thead><tbody>';
 
@@ -4142,7 +4142,25 @@ if (isset($dr->wiw_time_id) && $dr->wiw_time_id !== null && $dr->wiw_time_id !==
 
 $shift_record_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
 
+// Repeat table headers above each entry (matches client UI layout)
+$table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
+$table_html .= '<td colspan="10" style="background-color: #fff;">&nbsp;</td>';
+$table_html .= '</tr>';
+$table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
+$table_html .= '<th>Shift Date</th>';
+$table_html .= '<th>Employee</th>';
+$table_html .= '<th>Sched. Start/End</th>';
+$table_html .= '<th>Clock In</th>';
+$table_html .= '<th>Clock Out</th>';
+$table_html .= '<th>Break (Min)</th>';
+$table_html .= '<th>Sched. Hrs</th>';
+$table_html .= '<th>Clocked Hrs</th>';
+$table_html .= '<th>Payable Hrs</th>';
+$table_html .= '</tr>';
+
+// Main entry row
 $table_html .= '<tr>';
+
 $table_html .= '<td>'
     . esc_html($date_display)
     . ($shift_record_id !== '' ? '<br><small>(' . esc_html($shift_record_id) . ')</small>' : '')
