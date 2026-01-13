@@ -4146,9 +4146,30 @@ if (isset($dr->wiw_time_id) && $dr->wiw_time_id !== null && $dr->wiw_time_id !==
 $shift_record_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
 
 // Repeat table headers above each entry (matches client UI layout)
+// Row above headers: Timesheet ID + Pay Period range
+$ts_id = isset($dr->timesheet_id) ? (int) $dr->timesheet_id : 0;
+
+$pp_start = isset($dr->_wiw_pay_period_start) ? (string) $dr->_wiw_pay_period_start : '';
+$pp_end   = isset($dr->_wiw_pay_period_end) ? (string) $dr->_wiw_pay_period_end : '';
+
+$pp_label = 'N/A';
+if ($pp_start !== '' && $pp_end !== '') {
+    $pp_label = $pp_start . ' to ' . $pp_end;
+} elseif ($pp_start !== '') {
+    $pp_label = $pp_start;
+} elseif ($pp_end !== '') {
+    $pp_label = $pp_end;
+}
+
+$title_line = 'Shift Record ID #' . esc_html($shift_record_id) . ' in Timesheet ID #' . ($ts_id > 0 ? (string) $ts_id : 'N/A') . ' - For Pay Period: ' . $pp_label . '';
 $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
 $table_html .= '<td colspan="10" style="background-color: #fff;">&nbsp;</td>';
 $table_html .= '</tr>';
+$table_html .= '<tr class="wiwts-timesheet-context">';
+$table_html .= '<th colspan="9" style="text-align:left; background:#fff; padding:8px 0;">' . esc_html($title_line) . '</th>';
+$table_html .= '</tr>';
+
+// Repeat table headers above each entry (matches client UI layout)
 $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
 $table_html .= '<th style="text-align:left;">Shift Date</th>';
 $table_html .= '<th style="text-align:left;">Employee</th>';
@@ -4164,9 +4185,11 @@ $table_html .= '</tr>';
 // Main entry row
 $table_html .= '<tr>';
 
+// Main entry row
+$table_html .= '<tr>';
+
 $table_html .= '<td>'
     . esc_html($date_display)
-    . ($shift_record_id !== '' ? '<br><small>(ID: ' . esc_html($shift_record_id) . ')</small>' : '')
     . '</td>';
 
 $table_html .= '<td>' . esc_html($employee_name) . '</td>';
@@ -4427,9 +4450,11 @@ function wiwts_get_past_due_pending_entries_for_dry_run(string $cutoff_ymd, int 
 
     // Join timesheets only to obtain employee_name for display.
     $sql = $wpdb->prepare(
-        "SELECT 
+"SELECT 
             e.*,
-            t.employee_name AS _wiw_employee_name
+            t.employee_name AS _wiw_employee_name,
+            t.week_start_date AS _wiw_pay_period_start,
+            t.week_end_date AS _wiw_pay_period_end
          FROM {$table_entries} e
          LEFT JOIN {$table_timesheet} t ON t.id = e.timesheet_id
          WHERE e.status = 'pending'
