@@ -11,3 +11,8 @@
 .wiw-actions-cell .wiw-action-group {
     margin-top: 5px;
 }
+
+#error-page {
+    margin-top: 50px;
+    max-width: 940px;
+}

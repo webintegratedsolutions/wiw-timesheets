@@ -4140,21 +4140,14 @@ if (isset($dr->wiw_time_id) && $dr->wiw_time_id !== null && $dr->wiw_time_id !==
     $shift_id = (string) $dr->wiw_time_id;
 }
 
-$entry_id = isset($dr->id) ? (int) $dr->id : 0;
+$shift_record_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
 
-$id_label = '';
-if ($shift_id !== '') {
-    $id_label = '<br><small>(' . esc_html($shift_id) . ')</small>';
-} elseif ($entry_id > 0) {
-    $id_label = '<br><small>(ID ' . esc_html((string) $entry_id) . ')</small>';
-}
-
-// Main entry row (same as before)
 $table_html .= '<tr>';
 $table_html .= '<td>'
     . esc_html($date_display)
-    . ($entry_id > 0 ? '<br><small>(ID ' . esc_html((string) $entry_id) . ')</small>' : '')
+    . ($shift_record_id !== '' ? '<br><small>(' . esc_html($shift_record_id) . ')</small>' : '')
     . '</td>';
+
 $table_html .= '<td>' . esc_html($employee_name) . '</td>';
 $table_html .= '<td>' . esc_html($sched_start_end) . '</td>';
 $table_html .= '<td>' . esc_html($clock_in_display !== '' ? $clock_in_display : 'N/A') . '</td>';
