@@ -1685,9 +1685,14 @@ class WIW_Timesheet_Manager
 
 function updateViewFromInputs(row){
   // keep visible spans in sync after save/cancel
-  function timeTo12h(v){
+function timeTo12h(v){
     var s = (v || "").toString().trim();
-    if (!s || s === "N/A") return "N/A";
+
+    // Match the PHP view: empty time displays as "Missing"
+    if (!s) return "Missing";
+
+    // Preserve explicit "N/A" if it exists as a literal value
+    if (s === "N/A") return "N/A";
 
     // Expect "HH:MM" from <input type="time">
     var parts = s.split(":");
@@ -1729,10 +1734,21 @@ function updateViewFromInputs(row){
       view.textContent = raw ? raw : "0";
       cell.setAttribute("data-orig-view", view.textContent);
     } else {
-      // time cells show 12-hour format
+// time cells show 12-hour format
       var formatted = timeTo12h(raw);
       view.textContent = formatted;
+
+      // Match PHP styling when missing: red + semi-bold
+      if (formatted === "Missing") {
+        view.style.color = "#b32d2e";
+        view.style.fontWeight = "600";
+      } else {
+        view.style.color = "";
+        view.style.fontWeight = "";
+      }
+
       cell.setAttribute("data-orig-view", formatted);
+
     }
 
     // After save, treat current input values as the new "originals" for Cancel
@@ -2428,9 +2444,14 @@ function updateViewFromInputs(row){
 
 function updateViewFromInputs(row){
   // keep visible spans in sync after save/cancel
-  function timeTo12h(v){
+function timeTo12h(v){
     var s = (v || "").toString().trim();
-    if (!s || s === "N/A") return "N/A";
+
+    // Match the PHP view: empty time displays as "Missing"
+    if (!s) return "Missing";
+
+    // Preserve explicit "N/A" if it exists as a literal value
+    if (s === "N/A") return "N/A";
 
     // Expect "HH:MM" from <input type="time">
     var parts = s.split(":");
@@ -2472,10 +2493,21 @@ function updateViewFromInputs(row){
       view.textContent = raw ? raw : "0";
       cell.setAttribute("data-orig-view", view.textContent);
     } else {
-      // time cells show 12-hour format
+// time cells show 12-hour format
       var formatted = timeTo12h(raw);
       view.textContent = formatted;
+
+      // Match PHP styling when missing: red + semi-bold
+      if (formatted === "Missing") {
+        view.style.color = "#b32d2e";
+        view.style.fontWeight = "600";
+      } else {
+        view.style.color = "";
+        view.style.fontWeight = "";
+      }
+
       cell.setAttribute("data-orig-view", formatted);
+
     }
 
     // After save, treat current input values as the new "originals" for Cancel
