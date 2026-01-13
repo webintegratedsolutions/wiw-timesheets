@@ -1641,7 +1641,7 @@ class WIW_Timesheet_Manager
   }
 
   // === WIWTS setEditing BEGIN (front-end admin view) ===
-  function setEditing(row, isEditing){
+function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
 
@@ -1670,6 +1670,28 @@ class WIW_Timesheet_Manager
       for (var k=0;k<inputs.length;k++){
         if (!inputs[k].dataset.orig) inputs[k].dataset.orig = inputs[k].value || "";
       }
+
+      // === WIWTS restore scheduled defaults on Edit BEGIN ===
+      // If Clock In/Out is empty, populate from scheduled start/end so inputs show a real time
+      // instead of the "HH:MM" placeholder.
+      var schedStart = (row.getAttribute("data-sched-start") || "").toString().trim();
+      var schedEnd   = (row.getAttribute("data-sched-end") || "").toString().trim();
+
+      for (var t=0;t<inputs.length;t++){
+        var td = inputs[t].closest ? inputs[t].closest("td") : null;
+        if (!td) continue;
+
+        var cur = (inputs[t].value || "").toString().trim();
+
+        if (cur === "") {
+          if (td.classList && td.classList.contains("wiw-client-cell-clock-in") && schedStart !== "") {
+            inputs[t].value = schedStart;
+          } else if (td.classList && td.classList.contains("wiw-client-cell-clock-out") && schedEnd !== "") {
+            inputs[t].value = schedEnd;
+          }
+        }
+      }
+      // === WIWTS restore scheduled defaults on Edit END ===
     }
   }
   // === WIWTS setEditing END (front-end admin view) ===
@@ -2375,7 +2397,7 @@ function timeTo12h(v){
   }
 
   // === WIWTS setEditing BEGIN (records view) ===
-  function setEditing(row, isEditing){
+function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
     var views  = row.querySelectorAll("span.wiw-client-view");
 
@@ -2404,6 +2426,28 @@ function timeTo12h(v){
       for (var k=0;k<inputs.length;k++){
         if (!inputs[k].dataset.orig) inputs[k].dataset.orig = inputs[k].value || "";
       }
+
+      // === WIWTS restore scheduled defaults on Edit BEGIN ===
+      // If Clock In/Out is empty, populate from scheduled start/end so inputs show a real time
+      // instead of the "HH:MM" placeholder.
+      var schedStart = (row.getAttribute("data-sched-start") || "").toString().trim();
+      var schedEnd   = (row.getAttribute("data-sched-end") || "").toString().trim();
+
+      for (var t=0;t<inputs.length;t++){
+        var td = inputs[t].closest ? inputs[t].closest("td") : null;
+        if (!td) continue;
+
+        var cur = (inputs[t].value || "").toString().trim();
+
+        if (cur === "") {
+          if (td.classList && td.classList.contains("wiw-client-cell-clock-in") && schedStart !== "") {
+            inputs[t].value = schedStart;
+          } else if (td.classList && td.classList.contains("wiw-client-cell-clock-out") && schedEnd !== "") {
+            inputs[t].value = schedEnd;
+          }
+        }
+      }
+      // === WIWTS restore scheduled defaults on Edit END ===
     }
   }
   // === WIWTS setEditing END (records view) ===
