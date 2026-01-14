@@ -4975,6 +4975,69 @@ $flags_for_entry = ($wiw_time_id !== '' && isset($flags_map[$wiw_time_id]) && is
     : array();
 
 
+
+// Auto-fix preview for Flag 104 (Confirm Additional Hours) - read-only (assume confirmed)
+$auto_fix_104_html = '';
+$has_flag_104      = false;
+
+foreach ($flags_for_entry as $fg_check_104) {
+    $ft_check_104 = isset($fg_check_104->flag_type) ? (string) $fg_check_104->flag_type : '';
+    $fs_check_104 = isset($fg_check_104->flag_status) ? strtolower((string) $fg_check_104->flag_status) : '';
+    if ($ft_check_104 === '104' && $fs_check_104 !== 'resolved') {
+        $has_flag_104 = true;
+        break;
+    }
+}
+
+if ($has_flag_104) {
+    $show_flag104_preview = false;
+    $extra_hours_104      = 0.0;
+
+    // Compute "additional hours" as time after scheduled end, only if > 15 minutes (matches UI gating intent)
+    if (!empty($sched_end) && !empty($clock_out)) {
+        try {
+            $tz_104 = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+
+            $scheduled_end_dt_104 = new DateTimeImmutable((string) $sched_end, $tz_104);
+            $clock_out_dt_104     = new DateTimeImmutable((string) $clock_out, $tz_104);
+
+            $diff_seconds_104 = $clock_out_dt_104->getTimestamp() - $scheduled_end_dt_104->getTimestamp();
+
+            if ($diff_seconds_104 > 0) {
+                $diff_minutes_104 = (int) floor($diff_seconds_104 / 60);
+
+                if ($diff_minutes_104 > 15) {
+                    $extra_hours_104      = round($diff_seconds_104 / 3600, 2);
+                    $show_flag104_preview = true;
+                }
+            }
+        } catch (Exception $e) {
+            $show_flag104_preview = false;
+        }
+    }
+
+    if ($show_flag104_preview) {
+        $current_payable_104 = isset($payable_hrs) ? (float) $payable_hrs : 0.0;
+
+        // Assumption: auto-confirm additional time => payable_hours increases by additional hours
+        $new_payable_104 = round($current_payable_104 + (float) $extra_hours_104, 2);
+
+        $auto_fix_104_lines   = array();
+        $auto_fix_104_lines[] = '<div style="font-weight:600; margin-bottom:6px;">Flag 104 Auto-fix Preview</div>';
+        $auto_fix_104_lines[] = '<div style="margin-bottom:6px;">Additional time will be <strong>confirmed</strong> automatically.</div>';
+        $auto_fix_104_lines[] = '<div style="margin-bottom:6px;">Additional Hours: <strong>' . esc_html(number_format((float) $extra_hours_104, 2, '.', '')) . '</strong></div>';
+        $auto_fix_104_lines[] = '<div>Current <strong>Payable Hrs</strong>: ' . esc_html(number_format((float) $current_payable_104, 2, '.', '')) . '</div>';
+        $auto_fix_104_lines[] = '<div>New <strong>Payable Hrs</strong>: ' . esc_html(number_format((float) $new_payable_104, 2, '.', '')) . '</div>';
+
+        $auto_fix_104_html = '<div style="padding:10px 12px; background:#eef2ff; border-left:3px solid #6366f1;">' . implode('', $auto_fix_104_lines) . '</div>';
+
+        $table_html .= '<tr class="wiwts-dryrun-autofix-104">';
+        $table_html .= '<td colspan="9">' . $auto_fix_104_html . '</td>';
+        $table_html .= '</tr>';
+    }
+}
+
+
 // Auto-fix preview for Flag 106 (Missing clock-out time) - read-only
 $auto_fix_html = '';
 $has_flag_106  = false;
@@ -5293,14 +5356,6 @@ function wiwts_build_auto_approve_dry_run_report(): string
     $lines[] = 'Approval cutoff (All records before this date are past due): ' . $approval_week_start_ymd;
     $lines[] = 'Next approval deadline: ' . $approval_deadline_dt->format('l, F j, Y \a\t g:i A T');
     $lines[] = 'Would auto-approve (pending past due entries): ' . $past_due_pending_count;
-
-    // DEBUG — boundary diagnostics (read-only)
-    $lines[] = 'DEBUG:';
-    $lines[] = '- Week start (Sunday 00:00): ' . $week_start_dt->format('Y-m-d H:i:s T');
-    $lines[] = '- Tuesday 8:00 AM boundary: ' . $tuesday_8am_dt->format('Y-m-d H:i:s T');
-    $lines[] = '- Now < Tuesday 8am?: ' . (($now < $tuesday_8am_dt) ? 'YES' : 'NO');
-    $lines[] = '- Approval week start dt: ' . $approval_week_start_dt->format('Y-m-d H:i:s T');
-    $lines[] = '- Approval deadline dt: ' . $approval_deadline_dt->format('Y-m-d H:i:s T');
 
     return implode("\n", $lines);
 
