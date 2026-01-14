@@ -963,7 +963,13 @@ class WIW_Timesheet_Manager
                             $out .= '</tr>';
                         }
 
+                        // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) BEGIN ===
+                        // Used for Approve confirmation flags list in row rendering (frontend admin view).
+                        $wiwts_unresolved_flags_cache_by_timesheet = array();
+                        // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) END ===
+
                         foreach ($daily_rows as $dr) {
+
                             $date_display = isset($dr->date) ? (string) $dr->date : 'N/A';
 
                             // When we hit week 2 for the first time, insert the Week 2 heading row.
@@ -1193,7 +1199,72 @@ class WIW_Timesheet_Manager
 
                                 $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 
-                                $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+// === WIWTS APPROVE BUTTON FLAGS DATA (frontend admin view) BEGIN ===
+                        $wiwts_flags_json_attr = '';
+
+                        $wiwts_row_wiw_time_id  = isset($dr->wiw_time_id) ? trim((string) $dr->wiw_time_id) : '';
+                        $wiwts_row_timesheet_id = isset($dr->_wiw_timesheet_id) ? absint($dr->_wiw_timesheet_id) : (isset($timesheet_id) ? absint($timesheet_id) : 0);
+
+                        // Build unresolved flags list for this row at render time (safe cache per timesheet_id)
+                        $wiwts_unresolved_list_for_row = array();
+
+                        if ($wiwts_row_timesheet_id > 0 && $wiwts_row_wiw_time_id !== '') {
+
+                            if (! isset($wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id])) {
+
+                                $tmp_map = array();
+
+                                // Pull all flags for this timesheet and build unresolved-by-wiw_time_id map
+                                $flags_for_ts = $this->get_scoped_flags_for_timesheet($client_id, $wiwts_row_timesheet_id);
+
+                                if (! empty($flags_for_ts) && is_array($flags_for_ts)) {
+                                    foreach ($flags_for_ts as $fg) {
+
+                                        // Unresolved only
+                                        $st = isset($fg->flag_status) ? strtolower(trim((string) $fg->flag_status)) : '';
+                                        if ($st === 'resolved') {
+                                            continue;
+                                        }
+
+                                        $k = isset($fg->wiw_time_id) ? trim((string) $fg->wiw_time_id) : '';
+                                        if ($k === '') {
+                                            continue;
+                                        }
+
+                                        // Show ONLY the human description (Phase 14 schema uses "description")
+                                        $msg = '';
+                                        if (isset($fg->flag_message)) {
+                                            $msg = trim((string) $fg->flag_message);
+                                        }
+                                        if ($msg === '' && isset($fg->description)) {
+                                            $msg = trim((string) $fg->description);
+                                        }
+
+                                        $label = ($msg !== '') ? $msg : 'Unspecified flag';
+
+                                        if (! isset($tmp_map[$k])) {
+                                            $tmp_map[$k] = array();
+                                        }
+                                        $tmp_map[$k][] = $label;
+                                    }
+                                }
+
+                                $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id] = $tmp_map;
+                            }
+
+                            $tmp_map2 = $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id];
+                            if (isset($tmp_map2[$wiwts_row_wiw_time_id]) && is_array($tmp_map2[$wiwts_row_wiw_time_id])) {
+                                $wiwts_unresolved_list_for_row = $tmp_map2[$wiwts_row_wiw_time_id];
+                            }
+                        }
+
+                        if (! empty($wiwts_unresolved_list_for_row) && is_array($wiwts_unresolved_list_for_row)) {
+                            $wiwts_unresolved_list_for_row = array_values(array_unique(array_map('strval', $wiwts_unresolved_list_for_row)));
+                            $wiwts_flags_json_attr = ' data-unresolved-flags-json="' . esc_attr(wp_json_encode($wiwts_unresolved_list_for_row)) . '"';
+                        }
+
+                        $actions_html .= '<button type="button" class="wiw-btn primary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $wiwts_flags_json_attr . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+// === WIWTS APPROVE BUTTON FLAGS DATA (frontend admin view) END ===
 
                                 if (! $is_approved) {
                                     $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
@@ -1950,7 +2021,25 @@ function timeTo12h(v){
 
       e.preventDefault();
 
-      if (!window.confirm("Are you sure you want to approve this timesheet record?")) {
+      var msg = "Are you sure you want to approve this timesheet record?";
+
+      // If unresolved flags exist for this record, show them in the confirmation text
+      var flagsJson = t.getAttribute("data-unresolved-flags-json") || "";
+      if (flagsJson) {
+        try {
+          var arr = JSON.parse(flagsJson);
+          if (Array.isArray(arr) && arr.length) {
+            msg += "\n\nUnresolved flags:\n";
+            for (var i = 0; i < arr.length; i++) {
+              msg += "- " + String(arr[i]) + "\n";
+            }
+          }
+        } catch(e) {
+          // ignore parse errors, fallback to basic confirm
+        }
+      }
+
+      if (!window.confirm(msg)) {
         return;
       }
 
@@ -3182,7 +3271,25 @@ function timeTo12h(v){
 
       e.preventDefault();
 
-      if (!window.confirm("Are you sure you want to approve this timesheet record?")) {
+      var msg = "Are you sure you want to approve this timesheet record?";
+
+      // If unresolved flags exist for this record, show them in the confirmation text
+      var flagsJson = t.getAttribute("data-unresolved-flags-json") || "";
+      if (flagsJson) {
+        try {
+          var arr = JSON.parse(flagsJson);
+          if (Array.isArray(arr) && arr.length) {
+            msg += "\n\nUnresolved flags:\n";
+            for (var i = 0; i < arr.length; i++) {
+              msg += "- " + String(arr[i]) + "\n";
+            }
+          }
+        } catch(e) {
+          // ignore parse errors, fallback to basic confirm
+        }
+      }
+
+      if (!window.confirm(msg)) {
         return;
       }
 
@@ -3589,6 +3696,11 @@ HTML;
                 $out .= '</tr></thead><tbody>';
 
 
+                // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) BEGIN ===
+                // Used for Approve confirmation flags list in row rendering (client records view).
+                $wiwts_unresolved_flags_cache_by_timesheet = array();
+                // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) END ===
+
                 foreach ($rows as $dr) {
 
                     $timesheet_id = isset($dr->_wiw_timesheet_id) ? absint($dr->_wiw_timesheet_id) : 0;
@@ -3684,7 +3796,80 @@ HTML;
 
                         $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 
-                        $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+// === WIWTS APPROVE BUTTON FLAGS DATA (client records view) BEGIN ===
+                        $wiwts_flags_json_attr = '';
+
+                        $wiwts_row_wiw_time_id  = isset($dr->wiw_time_id) ? trim((string) $dr->wiw_time_id) : '';
+                        $wiwts_row_timesheet_id = isset($dr->_wiw_timesheet_id) ? absint($dr->_wiw_timesheet_id) : 0;
+
+                        // Build unresolved flags list for this row at render time (safe cache per timesheet_id)
+                        $wiwts_unresolved_list_for_row = array();
+
+                        if ($wiwts_row_timesheet_id > 0 && $wiwts_row_wiw_time_id !== '') {
+
+                            if (! isset($wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id])) {
+
+                                $tmp_map    = array();
+                                $is_admin_u = current_user_can('manage_options');
+
+                                // Pull flags for this timesheet and build unresolved-by-wiw_time_id map
+                                $flags_for_ts = $this->get_scoped_flags_for_timesheet($client_id, $wiwts_row_timesheet_id);
+
+                                if (! empty($flags_for_ts) && is_array($flags_for_ts)) {
+                                    foreach ($flags_for_ts as $fg) {
+
+                                        // Unresolved only
+                                        $st = isset($fg->flag_status) ? strtolower(trim((string) $fg->flag_status)) : '';
+                                        if ($st === 'resolved') {
+                                            continue;
+                                        }
+
+                                        // Client visibility rules (hide 109/107 for non-admin)
+                                        $flag_type_raw = isset($fg->flag_type) ? trim((string) $fg->flag_type) : '';
+                                        if (! $is_admin_u && preg_match('/^(109|107)\b/', $flag_type_raw)) {
+                                            continue;
+                                        }
+
+                                        $k = isset($fg->wiw_time_id) ? trim((string) $fg->wiw_time_id) : '';
+                                        if ($k === '') {
+                                            continue;
+                                        }
+
+                                        // Show ONLY the human description (Phase 14 schema uses "description")
+                                        $msg = '';
+                                        if (isset($fg->flag_message)) {
+                                            $msg = trim((string) $fg->flag_message);
+                                        }
+                                        if ($msg === '' && isset($fg->description)) {
+                                            $msg = trim((string) $fg->description);
+                                        }
+
+                                        $label = ($msg !== '') ? $msg : 'Unspecified flag';
+
+                                        if (! isset($tmp_map[$k])) {
+                                            $tmp_map[$k] = array();
+                                        }
+                                        $tmp_map[$k][] = $label;
+                                    }
+                                }
+
+                                $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id] = $tmp_map;
+                            }
+
+                            $tmp_map2 = $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id];
+                            if (isset($tmp_map2[$wiwts_row_wiw_time_id]) && is_array($tmp_map2[$wiwts_row_wiw_time_id])) {
+                                $wiwts_unresolved_list_for_row = $tmp_map2[$wiwts_row_wiw_time_id];
+                            }
+                        }
+
+                        if (! empty($wiwts_unresolved_list_for_row) && is_array($wiwts_unresolved_list_for_row)) {
+                            $wiwts_unresolved_list_for_row = array_values(array_unique(array_map('strval', $wiwts_unresolved_list_for_row)));
+                            $wiwts_flags_json_attr = ' data-unresolved-flags-json="' . esc_attr(wp_json_encode($wiwts_unresolved_list_for_row)) . '"';
+                        }
+
+                        $actions_html .= '<button type="button" class="wiw-btn primary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $wiwts_flags_json_attr . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+// === WIWTS APPROVE BUTTON FLAGS DATA (client records view) END ===
+
 
                         if (! $is_approved) {
                             $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
@@ -3745,6 +3930,7 @@ HTML;
                 }
 
                 // Apply client visibility rules (hide 109/107 for clients)
+                // Apply client visibility rules (hide 109/107 for clients)
                 $week_flags_visible = array();
                 if (! empty($week_flags_all)) {
                     foreach ($week_flags_all as $fg) {
@@ -3755,6 +3941,46 @@ HTML;
                         $week_flags_visible[] = $fg;
                     }
                 }
+
+                // === WIWTS UNRESOLVED FLAGS MAP (by wiw_time_id) BEGIN ===
+                // Used to show unresolved flags in the Approve confirmation prompt for each record row.
+                $wiwts_unresolved_flags_by_wiw_time_id = array();
+                if (! empty($week_flags_visible)) {
+                    foreach ($week_flags_visible as $fg) {
+                        $st = isset($fg->flag_status) ? (string) $fg->flag_status : '';
+                        if (strtolower(trim($st)) === 'resolved') {
+                            continue;
+                        }
+
+                        $wiw_time_id_key = isset($fg->wiw_time_id) ? trim((string) $fg->wiw_time_id) : '';
+                        if ($wiw_time_id_key === '') {
+                            continue;
+                        }
+
+                                        // Flag human description is stored in the flags table as "description"
+                                        // (keep backward compatibility if "flag_message" exists in any older rows/queries)
+                                        $msg = '';
+                                        if (isset($fg->flag_message)) {
+                                            $msg = trim((string) $fg->flag_message);
+                                        }
+                                        if ($msg === '' && isset($fg->description)) {
+                                            $msg = trim((string) $fg->description);
+                                        }
+
+                                        // Only show the human description in the confirm list
+                                        if ($msg !== '') {
+                                            $label = $msg;
+                                        } else {
+                                            $label = 'Unspecified flag';
+                                        }
+
+                        if (! isset($wiwts_unresolved_flags_by_wiw_time_id[$wiw_time_id_key])) {
+                            $wiwts_unresolved_flags_by_wiw_time_id[$wiw_time_id_key] = array();
+                        }
+                        $wiwts_unresolved_flags_by_wiw_time_id[$wiw_time_id_key][] = $label;
+                    }
+                }
+                // === WIWTS UNRESOLVED FLAGS MAP (by wiw_time_id) END ===
 
                 $has_unresolved_week_flags = false;
                 if (! empty($week_flags_visible)) {
