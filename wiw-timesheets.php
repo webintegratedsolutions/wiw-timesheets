@@ -4974,6 +4974,111 @@ $flags_for_entry = ($wiw_time_id !== '' && isset($flags_map[$wiw_time_id]) && is
     ? $flags_map[$wiw_time_id]
     : array();
 
+
+// Auto-fix preview for Flag 106 (Missing clock-out time) - read-only
+$auto_fix_html = '';
+$has_flag_106  = false;
+
+foreach ($flags_for_entry as $fg_check) {
+    $ft_check = isset($fg_check->flag_type) ? (string) $fg_check->flag_type : '';
+    $fs_check = isset($fg_check->flag_status) ? strtolower((string) $fg_check->flag_status) : '';
+    if ($ft_check === '106' && $fs_check !== 'resolved') {
+        $has_flag_106 = true;
+        break;
+    }
+}
+
+if ($has_flag_106) {
+    $auto_fix_lines = array();
+    $auto_fix_lines[] = '<div style="font-weight:600; margin-bottom:6px;">Flag 106 Auto-fix Preview</div>';
+
+    $sched_end_display = $this->wiw_format_time_local($sched_end);
+    $auto_fix_lines[] = '<div style="margin-bottom:6px;">Clock Out would be set to <strong>Scheduled End</strong>: ' . esc_html($sched_end_display) . '</div>';
+
+    $new_clocked = 'N/A';
+    $new_payable = 'N/A';
+
+    try {
+        $tz_fix = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+
+        if ($clock_in !== '' && $sched_end !== '') {
+            $dt_in_fix  = new DateTimeImmutable($clock_in, $tz_fix);
+            $dt_out_fix = new DateTimeImmutable($sched_end, $tz_fix);
+
+            if ($dt_out_fix <= $dt_in_fix) {
+                $new_clocked = '0.00';
+                $new_payable = '0.00';
+            } else {
+                // Clocked hours: diff(clock_in, new_clock_out) - break
+                $int_fix = $dt_in_fix->diff($dt_out_fix);
+                $sec_fix = ($int_fix->days * 86400) + ($int_fix->h * 3600) + ($int_fix->i * 60) + $int_fix->s;
+
+                $sec_fix -= ((int) $break_min * 60);
+                if ($sec_fix < 0) {
+                    $sec_fix = 0;
+                }
+
+                $new_clocked_val = round($sec_fix / 3600, 2);
+                $new_clocked     = number_format($new_clocked_val, 2, '.', '');
+
+                // Payable hours: clamp to scheduled window (when present) then - break
+                $new_payable_val = $new_clocked_val;
+
+                $sched_start_raw_fix = $sched_start;
+                $sched_end_raw_fix   = $sched_end;
+
+                if ($sched_start_raw_fix !== '' || $sched_end_raw_fix !== '') {
+                    $pay_in_fix  = $dt_in_fix;
+                    $pay_out_fix = $dt_out_fix;
+
+                    if ($sched_start_raw_fix !== '') {
+                        $dt_sched_start_fix = new DateTimeImmutable($sched_start_raw_fix, $tz_fix);
+                        if ($pay_in_fix < $dt_sched_start_fix) {
+                            $pay_in_fix = $dt_sched_start_fix;
+                        }
+                    }
+
+                    if ($sched_end_raw_fix !== '') {
+                        $dt_sched_end_fix = new DateTimeImmutable($sched_end_raw_fix, $tz_fix);
+                        if ($pay_out_fix > $dt_sched_end_fix) {
+                            $pay_out_fix = $dt_sched_end_fix;
+                        }
+                    }
+
+                    if ($pay_out_fix <= $pay_in_fix) {
+                        $new_payable_val = 0.0;
+                    } else {
+                        $pint_fix = $pay_in_fix->diff($pay_out_fix);
+                        $psec_fix = ($pint_fix->days * 86400) + ($pint_fix->h * 3600) + ($pint_fix->i * 60) + $pint_fix->s;
+
+                        $psec_fix -= ((int) $break_min * 60);
+                        if ($psec_fix < 0) {
+                            $psec_fix = 0;
+                        }
+
+                        $new_payable_val = round($psec_fix / 3600, 2);
+                    }
+                }
+
+                $new_payable = number_format($new_payable_val, 2, '.', '');
+            }
+        } else {
+            $auto_fix_lines[] = '<div><em>Cannot compute preview: scheduled end time or clock in time is missing.</em></div>';
+        }
+    } catch (Exception $e) {
+        $auto_fix_lines[] = '<div><em>Cannot compute preview due to a date parsing error.</em></div>';
+    }
+
+    $auto_fix_lines[] = '<div>New <strong>Clocked Hrs</strong>: ' . esc_html($new_clocked) . '</div>';
+    $auto_fix_lines[] = '<div>New <strong>Payable Hrs</strong>: ' . esc_html($new_payable) . '</div>';
+
+    $auto_fix_html = '<div style="padding:10px 12px; background:#fff7ed; border-left:3px solid #f59e0b;">' . implode('', $auto_fix_lines) . '</div>';
+
+    $table_html .= '<tr class="wiwts-dryrun-autofix">';
+    $table_html .= '<td colspan="9">' . $auto_fix_html . '</td>';
+    $table_html .= '</tr>';
+}
+
 $flags_html  = '<div style="padding:10px 12px; background:#f6f7f7; border-left:3px solid #dcdcde;">';
 
 if (empty($flags_for_entry)) {
