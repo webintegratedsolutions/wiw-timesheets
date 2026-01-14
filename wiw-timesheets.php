@@ -3008,6 +3008,71 @@ function timeTo12h(v){
       });
   }
 
+  // === WIWTS doApprove BEGIN (records view) ===
+  function doApprove(row, btn){
+    var wrap = document.getElementById("wiwts-client-ajax");
+    if (!wrap) { alert("Missing approve AJAX settings"); return; }
+
+    var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
+    var nonceA  = wrap.getAttribute("data-nonce-approve") || "";
+    var entryId = btn.getAttribute("data-entry-id") || "";
+
+    if (!ajaxUrl || !nonceA) { alert("Missing approve AJAX settings"); return; }
+    if (!entryId) { alert("Missing Entry ID"); return; }
+
+    ensureOverlayHelpers();
+    window.wiwtsShowRefreshingOverlay("Approving…");
+
+    var fd = new FormData();
+    fd.append("action", "wiw_local_approve_entry");
+    fd.append("entry_id", entryId);
+    fd.append("security", nonceA);
+
+    var done = false;
+    var timeoutId = window.setTimeout(function(){
+      if (done) return;
+      done = true;
+      window.wiwtsHideRefreshingOverlay();
+      alert("Approve timed out. Please reload and try again.");
+    }, 20000);
+
+    fetch(ajaxUrl, { method:"POST", credentials:"same-origin", body: fd })
+      .then(function(r){ return r.text().then(function(txt){ return {status:r.status, text:txt}; }); })
+      .then(function(payload){
+        if (done) return;
+        done = true;
+        window.clearTimeout(timeoutId);
+
+        var resp = null;
+        try { resp = JSON.parse(payload.text); } catch(e) {}
+
+        if (!resp) {
+          window.wiwtsHideRefreshingOverlay();
+          alert("Approve failed: invalid server response");
+          return;
+        }
+
+        if (!resp.success) {
+          var msg = (resp.data && resp.data.message) ? resp.data.message : "Approve failed";
+          window.wiwtsHideRefreshingOverlay();
+          alert(msg);
+          return;
+        }
+
+        // success → refresh so the row reflects approved state
+        window.location.reload();
+      })
+      .catch(function(err){
+        if (done) return;
+        done = true;
+        window.clearTimeout(timeoutId);
+        window.wiwtsHideRefreshingOverlay();
+        alert("AJAX error approving entry");
+        try { console.error(err); } catch(e) {}
+      });
+  }
+  // === WIWTS doApprove END (records view) ===
+
   // Show spinner overlay immediately when confirming/denying additional hours (Flag 104 form submit)
   document.addEventListener("submit", function(e){
     var form = e.target;
@@ -3101,6 +3166,18 @@ function timeTo12h(v){
       var row = closestRow(t);
       if (!row) return;
       setEditing(row, true);
+      return;
+    }
+
+    // Approve (records view)
+    if (t && t.classList && t.classList.contains("wiw-client-approve-btn")) {
+      // Respect disabled buttons (tooltips still work)
+      if (t.disabled || t.getAttribute("disabled") !== null) return;
+
+      e.preventDefault();
+      var rowA = closestRow(t);
+      if (!rowA) return;
+      doApprove(rowA, t);
       return;
     }
 
