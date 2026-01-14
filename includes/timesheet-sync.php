@@ -593,16 +593,49 @@ $week_start_date
                     }
                 }
 
-                // Compute scheduled hours (same logic as Sched. Hrs column) for flag comparisons.
+// Compute scheduled hours (same logic as Sched. Hrs column) for flag comparisons.
                 // Compute scheduled hours for this entry (used for DB + flag 109).
-                $scheduled_hours_local_for_entry = (float) ( $time_entry->scheduled_duration ?? 0.0 );
-                if ( $scheduled_hours_local_for_entry <= 0 ) {
-                    $scheduled_hours_local_for_entry = (float) ( $time_entry->calculated_duration ?? 0.0 );
+                // Rule: Scheduled Hrs = (Scheduled End - Scheduled Start) span in hours,
+                // and if span exceeds 5.0 hours, automatically deduct 60 minutes (1.0 hour).
+                $scheduled_hours_local_for_entry = null;
+
+                // Prefer scheduled span derived from scheduled_start/scheduled_end timestamps.
+                if ( ! empty( $scheduled_start_local ) && ! empty( $scheduled_end_local ) ) {
+                    try {
+                        $tz_sched = isset( $tz ) ? $tz : ( function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'America/Toronto' ) );
+
+                        $dt_sched_start = new DateTimeImmutable( (string) $scheduled_start_local, $tz_sched );
+                        $dt_sched_end   = new DateTimeImmutable( (string) $scheduled_end_local, $tz_sched );
+
+                        if ( $dt_sched_end > $dt_sched_start ) {
+                            $diff = $dt_sched_start->diff( $dt_sched_end );
+                            $span_seconds =
+                                ( (int) $diff->days * 86400 )
+                                + ( (int) $diff->h * 3600 )
+                                + ( (int) $diff->i * 60 )
+                                + ( (int) $diff->s );
+
+                            $scheduled_hours_local_for_entry = (float) ( $span_seconds / 3600 );
+                        } else {
+                            $scheduled_hours_local_for_entry = 0.0;
+                        }
+                    } catch ( Exception $e ) {
+                        $scheduled_hours_local_for_entry = null;
+                    }
                 }
-                $scheduled_hours_local_for_entry = max(
-                    0,
-                    $scheduled_hours_local_for_entry - ( (int) $break_minutes_local / 60 )
-                );
+
+                // Fallback to API durations if scheduled span is unavailable.
+                if ( $scheduled_hours_local_for_entry === null ) {
+                    $scheduled_hours_local_for_entry = (float) ( $time_entry->scheduled_duration ?? 0.0 );
+                    if ( $scheduled_hours_local_for_entry <= 0 ) {
+                        $scheduled_hours_local_for_entry = (float) ( $time_entry->calculated_duration ?? 0.0 );
+                    }
+                }
+
+                // Apply auto-break deduction rule to Scheduled Hrs only (independent of break_minutes_local).
+                if ( $scheduled_hours_local_for_entry > 5.0 ) {
+                    $scheduled_hours_local_for_entry = max( 0.0, $scheduled_hours_local_for_entry - 1.0 );
+                }
 
                 $entry_data = [
                     'timesheet_id'    => $header_id,

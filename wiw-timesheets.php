@@ -7685,12 +7685,18 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                 $update_data['payable_hours']    = (float) $payable_hours;
                 $update_data['additional_hours'] = (float) $additional_hours;
 
-                // Match Sync expectation: ensure scheduled_hours is populated from scheduled_start/end span when known.
-                // (Reset previously did not write scheduled_hours at all, leaving old/zero values behind.)
-                if (isset($scheduled_hours) && (float) $scheduled_hours > 0.0) {
-                    $update_data['scheduled_hours'] = (float) round((float) $scheduled_hours, 2);
-                    $update_formats[]              = '%f';
-                }
+// Match Sync expectation: ensure scheduled_hours is populated from scheduled_start/end span when known.
+// Rule: Scheduled Hrs = scheduled span hours, and if span exceeds 5.0 hours deduct 60 mins (1.0 hour).
+// (Reset previously did not write scheduled_hours at all, leaving old/zero values behind.)
+if (isset($scheduled_hours) && (float) $scheduled_hours > 0.0) {
+    $scheduled_hours_for_write = (float) $scheduled_hours;
+
+    if ($scheduled_hours_for_write > 5.0) {
+        $scheduled_hours_for_write = max(0.0, $scheduled_hours_for_write - 1.0);
+    }
+
+    $update_data['scheduled_hours'] = (float) round($scheduled_hours_for_write, 2);
+}
 
                 $update_formats[] = '%f';
                 $update_formats[] = '%f';
