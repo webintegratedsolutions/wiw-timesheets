@@ -1972,12 +1972,298 @@ function timeTo12h(v){
       return;
     }
   });
+ 
+ })();
+ </script>
+ ';
 
+        // === WIWTS RESET PREVIEW MODAL + HANDLER (frontend admin view) BEGIN ===
+        // This matches the working Reset behavior used by the client records view.
+        $out .= '
+<div id="wiwts-reset-preview-modal" style="display:none;position:fixed;inset:0;z-index:99999;">
+  <div id="wiwts-reset-preview-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);"></div>
+
+  <div role="dialog" aria-modal="true" aria-labelledby="wiwts-reset-preview-title"
+       style="position:relative;max-width:720px;margin:6vh auto;background:#fff;border-radius:10px;padding:18px 18px 14px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+      <h3 id="wiwts-reset-preview-title" style="margin:0;font-size:18px;">Reset Preview</h3>
+      <button type="button" id="wiwts-reset-preview-close" class="wiw-btn secondary">Close</button>
+    </div>
+
+    <p style="margin:10px 0 14px;">
+      Review the changes below. Click <strong>Apply Reset</strong> to update the saved values.
+    </p>
+
+    <div id="wiwts-reset-preview-body" style="background:#f6f7f7;border:1px solid #dcdcde;border-radius:8px;padding:12px;white-space:pre-wrap;max-height:320px;overflow:auto;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, &quot;Liberation Mono&quot;, &quot;Courier New&quot;, monospace;font-size:13px;"></div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+      <button type="button" id="wiwts-reset-preview-apply" class="wiw-btn primary">Apply Reset</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  if (window.wiwtsResetPreviewInitAdminView) return;
+  window.wiwtsResetPreviewInitAdminView = true;
+
+  function ensureOverlay(){
+    if (window.wiwtsShowRefreshingOverlay && window.wiwtsHideRefreshingOverlay) return;
+
+    window.wiwtsShowRefreshingOverlay = function(message){
+      try {
+        if (document.getElementById("wiwts-refreshing-overlay")) return;
+
+        var overlay = document.createElement("div");
+        overlay.id = "wiwts-refreshing-overlay";
+        overlay.setAttribute("role","status");
+        overlay.setAttribute("aria-live","polite");
+        overlay.style.position="fixed";
+        overlay.style.left="0";
+        overlay.style.top="0";
+        overlay.style.right="0";
+        overlay.style.bottom="0";
+        overlay.style.zIndex="999999";
+        overlay.style.background="rgba(0,0,0,0.55)";
+        overlay.style.display="flex";
+        overlay.style.alignItems="center";
+        overlay.style.justifyContent="center";
+
+        var box = document.createElement("div");
+        box.style.background="#fff";
+        box.style.borderRadius="10px";
+        box.style.padding="16px 18px";
+        box.style.boxShadow="0 10px 30px rgba(0,0,0,0.25)";
+        box.style.display="flex";
+        box.style.alignItems="center";
+        box.style.gap="12px";
+
+        var spinner = document.createElement("div");
+        spinner.style.width="22px";
+        spinner.style.height="22px";
+        spinner.style.border="3px solid #dcdcde";
+        spinner.style.borderTopColor="#2271b1";
+        spinner.style.borderRadius="50%";
+        spinner.style.animation="wiwtsSpin 0.9s linear infinite";
+
+        var msg = document.createElement("div");
+        msg.textContent = message || "Working…";
+        msg.style.fontSize="14px";
+
+        box.appendChild(spinner);
+        box.appendChild(msg);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        if (!document.getElementById("wiwts-spin-style")) {
+          var st = document.createElement("style");
+          st.id = "wiwts-spin-style";
+          st.textContent = "@keyframes wiwtsSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}";
+          document.head.appendChild(st);
+        }
+      } catch(e) {}
+    };
+
+    window.wiwtsHideRefreshingOverlay = function(){
+      try {
+        var el = document.getElementById("wiwts-refreshing-overlay");
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      } catch(e) {}
+    };
+  }
+
+  function closestRow(el){
+    while (el && el.nodeType === 1) {
+      if (el.matches && el.matches("tr")) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+
+  function openModal(previewText, ajaxUrl, nonceR, entryId){
+    var modal = document.getElementById("wiwts-reset-preview-modal");
+    if (!modal) return;
+
+    var body = document.getElementById("wiwts-reset-preview-body");
+    if (body) body.textContent = previewText || "";
+
+    modal.setAttribute("data-entry-id", entryId || "");
+    modal.setAttribute("data-ajax-url", ajaxUrl || "");
+    modal.setAttribute("data-nonce-reset", nonceR || "");
+
+    modal.style.display = "block";
+  }
+
+  function closeModal(){
+    var modal = document.getElementById("wiwts-reset-preview-modal");
+    if (!modal) return;
+
+    modal.style.display = "none";
+    modal.removeAttribute("data-entry-id");
+    modal.removeAttribute("data-ajax-url");
+    modal.removeAttribute("data-nonce-reset");
+  }
+
+  document.addEventListener("click", function(e){
+    var t = e.target;
+
+    // Modal close
+    if (t && (t.id === "wiwts-reset-preview-close" || t.id === "wiwts-reset-preview-backdrop")) {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
+
+    // Apply reset from modal
+    if (t && t.id === "wiwts-reset-preview-apply") {
+      e.preventDefault();
+
+      var modal = document.getElementById("wiwts-reset-preview-modal");
+      if (!modal) return;
+
+      var entryId = modal.getAttribute("data-entry-id") || "";
+      var ajaxUrl = modal.getAttribute("data-ajax-url") || "";
+      var nonceR  = modal.getAttribute("data-nonce-reset") || "";
+
+      if (!entryId || !ajaxUrl || !nonceR) { alert("Missing reset settings."); return; }
+
+      ensureOverlay();
+      window.wiwtsShowRefreshingOverlay("Applying reset…");
+
+      var fd = new FormData();
+      fd.append("action", "wiw_client_reset_entry_from_api");
+      fd.append("security", nonceR);
+      fd.append("entry_id", entryId);
+      fd.append("apply_reset", "1");
+
+      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+          if (!resp || !resp.success) {
+            window.wiwtsHideRefreshingOverlay();
+            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Reset failed";
+            alert(msg);
+            return;
+          }
+          // Always refresh after successful reset
+          window.location.reload();
+        })
+        .catch(function(){
+          window.wiwtsHideRefreshingOverlay();
+          alert("Reset failed (network error).");
+        });
+
+      return;
+    }
+
+    // Reset preview button on a row
+    if (t && t.classList && t.classList.contains("wiw-client-reset-btn")) {
+      e.preventDefault();
+
+      var row = closestRow(t);
+      if (!row) return;
+
+      var wrap = document.getElementById("wiwts-client-ajax");
+      if (!wrap) { alert("Missing reset AJAX settings"); return; }
+
+      var ajaxUrl = wrap.getAttribute("data-ajax-url") || "";
+      var nonceR  = wrap.getAttribute("data-nonce-reset") || "";
+
+      var saveBtn = row.querySelector(".wiw-client-save-btn");
+      var apprBtn = row.querySelector(".wiw-client-approve-btn");
+      var entryId = "";
+      if (saveBtn && saveBtn.getAttribute("data-entry-id")) entryId = saveBtn.getAttribute("data-entry-id");
+      if (!entryId && apprBtn && apprBtn.getAttribute("data-entry-id")) entryId = apprBtn.getAttribute("data-entry-id");
+
+      if (!entryId) { alert("Missing Entry ID"); return; }
+      if (!ajaxUrl || !nonceR) { alert("Missing reset AJAX settings"); return; }
+
+      ensureOverlay();
+      window.wiwtsShowRefreshingOverlay("Loading reset values…");
+
+      var fd = new FormData();
+      fd.append("action", "wiw_client_reset_entry_from_api");
+      fd.append("security", nonceR);
+      fd.append("entry_id", entryId);
+      fd.append("apply_reset", "0");
+
+      fetch(ajaxUrl, { method: "POST", credentials: "same-origin", body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(resp){
+          window.wiwtsHideRefreshingOverlay();
+
+          if (!resp || !resp.success) {
+            var msg = (resp && resp.data && resp.data.message) ? resp.data.message : "Reset preview failed";
+            alert(msg);
+            return;
+          }
+
+          var previewObj = (resp && resp.data && resp.data.preview) ? resp.data.preview : null;
+
+          function asText(v){
+            if (v === null || v === undefined) return "N/A";
+            var s = String(v);
+            return s.trim() ? s : "N/A";
+          }
+
+          function pick(obj, key){
+            if (!obj || typeof obj !== "object") return "N/A";
+            if (Object.prototype.hasOwnProperty.call(obj, key)) return asText(obj[key]);
+            return "N/A";
+          }
+
+          function formatPreview(preview){
+            // Expected structure:
+            // { current: { clock_in, clock_out, break_minutes }, api: { clock_in, clock_out, break_minutes } }
+            if (!preview || typeof preview !== "object") return asText(preview);
+
+            var cur = preview.current || {};
+            var api = preview.api || preview.reset || {}; // fallback just in case
+
+            var lines = [];
+            lines.push("Current Values");
+            lines.push("Clock In: " + pick(cur, "clock_in"));
+            lines.push("Clock Out: " + pick(cur, "clock_out"));
+            lines.push("Break Minutes: " + pick(cur, "break_minutes"));
+            lines.push("");
+            lines.push("Reset Values (When I Work)");
+            lines.push("Clock In: " + pick(api, "clock_in"));
+            lines.push("Clock Out: " + pick(api, "clock_out"));
+            lines.push("Break Minutes: " + pick(api, "break_minutes"));
+            return lines.join("\n");
+          }
+
+          var txt = "";
+          try {
+            txt = formatPreview(previewObj);
+          } catch(e2) {
+            // Safe fallback (never block the modal)
+            try {
+              txt = (previewObj && typeof previewObj === "object") ? JSON.stringify(previewObj, null, 2) : asText(previewObj);
+            } catch(e3) {
+              txt = "";
+            }
+          }
+
+          openModal(txt, ajaxUrl, nonceR, entryId);
+
+        })
+        .catch(function(){
+          window.wiwtsHideRefreshingOverlay();
+          alert("Reset preview failed (network error).");
+        });
+
+      return;
+    }
+  });
 })();
 </script>
 ';
+        // === WIWTS RESET PREVIEW MODAL + HANDLER (frontend admin view) END ===
 
         return $out;
+
     }
 
 // === WIWTS FLAG 104 EXTRA TIME ACTION HANDLER START ===
