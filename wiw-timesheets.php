@@ -4840,8 +4840,8 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
     $days_since_sun = ($dow - 0 + 7) % 7;
     $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
 
-    $days_until_tues = (2 - $dow + 7) % 7;
-    $tuesday_8am_dt  = $now->setTime(8, 0, 0)->modify('+' . $days_until_tues . ' days');
+    // Next Tuesday 8am
+    $tuesday_8am_dt = $week_start_dt->modify('+2 days')->setTime(8, 0, 0);
 
     $approval_week_start_dt = ($now < $tuesday_8am_dt)
         ? $week_start_dt->modify('-7 days')
@@ -5263,9 +5263,8 @@ function wiwts_build_auto_approve_dry_run_report(): string
     $days_since_sun = ($dow - 0 + 7) % 7;
     $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
 
-    // This week's Tuesday 08:00
-    $days_until_tues = (2 - $dow + 7) % 7;
-    $tuesday_8am_dt  = $now->setTime(8, 0, 0)->modify('+' . $days_until_tues . ' days');
+    // This week's Tuesday 08:00 (Tuesday within the current week starting Sunday)
+    $tuesday_8am_dt = $week_start_dt->modify('+2 days')->setTime(8, 0, 0);
 
     // Before Tue 8am → still approving the previous week
     $approval_week_start_dt = ($now < $tuesday_8am_dt)
@@ -5295,7 +5294,16 @@ function wiwts_build_auto_approve_dry_run_report(): string
     $lines[] = 'Next approval deadline: ' . $approval_deadline_dt->format('l, F j, Y \a\t g:i A T');
     $lines[] = 'Would auto-approve (pending past due entries): ' . $past_due_pending_count;
 
+    // DEBUG — boundary diagnostics (read-only)
+    $lines[] = 'DEBUG:';
+    $lines[] = '- Week start (Sunday 00:00): ' . $week_start_dt->format('Y-m-d H:i:s T');
+    $lines[] = '- Tuesday 8:00 AM boundary: ' . $tuesday_8am_dt->format('Y-m-d H:i:s T');
+    $lines[] = '- Now < Tuesday 8am?: ' . (($now < $tuesday_8am_dt) ? 'YES' : 'NO');
+    $lines[] = '- Approval week start dt: ' . $approval_week_start_dt->format('Y-m-d H:i:s T');
+    $lines[] = '- Approval deadline dt: ' . $approval_deadline_dt->format('Y-m-d H:i:s T');
+
     return implode("\n", $lines);
+
 }
 
 // Fetch past-due pending entries for dry run display.
