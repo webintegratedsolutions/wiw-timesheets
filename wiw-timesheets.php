@@ -1943,11 +1943,17 @@ function timeTo12h(v){
       return;
     }
 
+    // Approve (records view)
     if (t && t.classList && t.classList.contains("wiw-client-approve-btn")) {
       // Respect disabled buttons (tooltips still work)
       if (t.disabled || t.getAttribute("disabled") !== null) return;
 
       e.preventDefault();
+
+      if (!window.confirm("Are you sure you want to approve this timesheet record?")) {
+        return;
+      }
+
       var rowA = closestRow(t);
       if (!rowA) return;
       doApprove(rowA, t);
@@ -3175,6 +3181,11 @@ function timeTo12h(v){
       if (t.disabled || t.getAttribute("disabled") !== null) return;
 
       e.preventDefault();
+
+      if (!window.confirm("Are you sure you want to approve this timesheet record?")) {
+        return;
+      }
+
       var rowA = closestRow(t);
       if (!rowA) return;
       doApprove(rowA, t);
