@@ -269,8 +269,8 @@ function wiwts_export_csv_handle_download() {
         $sql .= " WHERE " . implode( ' AND ', $where );
     }
 
-    // Stable ordering: by date, then employee, then id.
-    $sql .= " ORDER BY e.date ASC, ts.employee_name ASC, e.id ASC";
+    // Stable ordering: group by employee, then date, then entry id.
+    $sql .= " ORDER BY ts.employee_name ASC, e.date ASC, e.id ASC";
 
     $prepared = ! empty( $args ) ? $wpdb->prepare( $sql, $args ) : $sql; // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
     $rows     = $wpdb->get_results( $prepared );
