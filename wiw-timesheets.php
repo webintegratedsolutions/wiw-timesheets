@@ -4968,8 +4968,44 @@ $table_html .= '<td>' . esc_html($clocked_hrs) . '</td>';
 $table_html .= '<td>' . esc_html($payable_hrs) . '</td>';
 $table_html .= '</tr>';
 
+// Preview: Auto-approval edit log row (read-only)
+$auto_log_type = 'Approved Time Record';
+$auto_log_old  = 'pending';
+$auto_log_new  = 'approved';
+
+$auto_log_old_disp = $this->wiw_format_edit_log_value_for_display($auto_log_old);
+$auto_log_new_disp = $this->wiw_format_edit_log_value_for_display($auto_log_new);
+$auto_log_change   = $auto_log_old_disp . ' → ' . $auto_log_new_disp;
+
+// Use the same pretty formatting the Edit Logs table uses.
+$auto_log_created_at_raw  = $now->format('Y-m-d H:i:s');
+$auto_log_created_at_disp = $this->wiw_format_datetime_local_pretty($auto_log_created_at_raw);
+
+$auto_log_html  = '<div style="padding:10px 12px; background:#e6fffa; border-left:3px solid #14b8a6;">';
+$auto_log_html .= '<div style="font-weight:600; margin-bottom:6px;">Auto-Approval Edit Log Preview</div>';
+$auto_log_html .= '<table class="wp-list-table widefat fixed" style="margin:0; background:#fff; width:100%;">';
+$auto_log_html .= '<tbody>';
+
+$auto_log_html .= '<tr>';
+$auto_log_html .= '<td><strong>Edited By:</strong></td>';
+$auto_log_html .= '<td>' . esc_html('Automatic Approval') . '</td>';
+$auto_log_html .= '</tr>';
+
+$auto_log_html .= '<tr>';
+$auto_log_html .= '<td><strong>Date:</strong></td>';
+$auto_log_html .= '<td>' . esc_html($auto_log_created_at_disp) . '</td>';
+$auto_log_html .= '</tr>';
+
+$auto_log_html .= '</tbody></table>';
+$auto_log_html .= '</div>';
+
+$table_html .= '<tr class="wiwts-dryrun-autolog-preview">';
+$table_html .= '<td colspan="9" style="padding:0;">' . $auto_log_html . '</td>';
+$table_html .= '</tr>';
+
 // Under-row flags (read-only)
 $wiw_time_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+
 $flags_for_entry = ($wiw_time_id !== '' && isset($flags_map[$wiw_time_id]) && is_array($flags_map[$wiw_time_id]))
     ? $flags_map[$wiw_time_id]
     : array();
