@@ -3089,9 +3089,63 @@ function timeTo12h(v){
 
         // Update view + exit edit
         updateViewFromInputs(row);
+
+        // Apply server-calculated values (ensures Clocked/Payable update without full refresh)
+        if (resp && resp.data) {
+          var tdClocked = row.querySelector("td.wiw-client-cell-clocked");
+          if (tdClocked) {
+            if (typeof resp.data.clocked_hours_display !== "undefined") {
+              tdClocked.textContent = resp.data.clocked_hours_display;
+            } else if (typeof resp.data.clocked_hours !== "undefined") {
+              tdClocked.textContent = String(resp.data.clocked_hours);
+            }
+          }
+
+          var tdPayable = row.querySelector("td.wiw-client-cell-payable");
+          if (tdPayable) {
+            if (typeof resp.data.payable_hours_display !== "undefined") {
+              tdPayable.textContent = resp.data.payable_hours_display;
+            } else if (typeof resp.data.payable_hours !== "undefined") {
+              tdPayable.textContent = String(resp.data.payable_hours);
+            }
+          }
+        }
+
         setEditing(row, false);
 
+        // Re-evaluate Approve button state (client records view)
+        // Approve should enable once Clock In/Out are no longer missing.
+        try {
+          var approveBtn = row.querySelector(".wiw-client-approve-btn");
+          if (approveBtn) {
+            var inEl  = row.querySelector("td.wiw-client-cell-clock-in input.wiw-client-edit");
+            var outEl = row.querySelector("td.wiw-client-cell-clock-out input.wiw-client-edit");
+
+            var inVal  = inEl ? (inEl.value || "").trim() : "";
+            var outVal = outEl ? (outEl.value || "").trim() : "";
+
+            var missingIn  = !inVal;
+            var missingOut = !outVal;
+
+            if (missingIn || missingOut) {
+              approveBtn.disabled = true;
+
+              if (missingIn && missingOut) {
+                approveBtn.title = "Missing Clock In/Out Times";
+              } else if (missingIn) {
+                approveBtn.title = "Missing Clock In Time";
+              } else {
+                approveBtn.title = "Missing Clock Out Time";
+              }
+            } else {
+              approveBtn.disabled = false;
+              approveBtn.title = "";
+            }
+          }
+        } catch (e) {}
+
         window.wiwtsHideRefreshingOverlay();
+
       })
       .catch(function(err){
         if (done) return;
@@ -3772,9 +3826,9 @@ HTML;
                         . '<input class="wiw-client-edit" type="text" inputmode="numeric" placeholder="0" value="' . esc_attr((string) $break_min) . '" style="display:none; width:70px;" />'
                         . '</td>';
 
-                    $out .= '<td>' . esc_html($sched_hrs) . '</td>';
-                    $out .= '<td>' . esc_html($clocked_hrs) . '</td>';
-                    $out .= '<td>' . esc_html($payable_hrs) . '</td>';
+$out .= '<td>' . esc_html($sched_hrs) . '</td>';
+                    $out .= '<td class="wiw-client-cell-clocked">' . esc_html($clocked_hrs) . '</td>';
+                    $out .= '<td class="wiw-client-cell-payable">' . esc_html($payable_hrs) . '</td>';
 
                     // Approve button gating (same)
                     $is_approved   = ($status === 'approved');
@@ -4194,7 +4248,7 @@ HTML;
         if (! empty($weeks_pending)) {
             $out .= '<h3 class="wiwts-section-heading wiwts-pending-heading" style="margin-bottom:40px;">'
                 . '<span class="dashicons dashicons-clock" aria-hidden="true"></span> '
-                . 'Pending Timesheet Records'
+                . 'Pending Timesheets for Approval'
                 . '</h3>';
             $render_weeks($weeks_pending);
         }
@@ -4206,7 +4260,7 @@ HTML;
         if (! empty($weeks_done)) {
             $out .= '<h3 class="wiwts-section-heading wiwts-approved-heading" style="margin-bottom:40px;">'
                 . '<span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> '
-                . 'Approved Timesheet Records'
+                . 'Approved Timesheets'
                 . '</h3>';
             $render_weeks($weeks_done);
         }
@@ -5277,11 +5331,6 @@ $auto_log_html  = '<div style="padding:10px 12px; background:#e6fffa; border-lef
 $auto_log_html .= '<div style="font-weight:600; margin-bottom:6px;">Auto-Approval Edit Log Preview</div>';
 $auto_log_html .= '<table class="wp-list-table widefat fixed" style="margin:0; background:#fff; width:100%;">';
 $auto_log_html .= '<tbody>';
-
-$auto_log_html .= '<tr>';
-$auto_log_html .= '<td style="width:160px;"><strong>Type</strong></td>';
-$auto_log_html .= '<td>' . esc_html($auto_log_type) . '</td>';
-$auto_log_html .= '</tr>';
 
 $auto_log_html .= '<tr>';
 $auto_log_html .= '<td><strong>Edited By</strong></td>';
@@ -7191,13 +7240,24 @@ public function wiw_format_edit_log_value_for_display(string $value): string
             array('%d')
         );
 
+        $clocked_hours_2  = (float) round($clocked_hours, 2);
+        $payable_hours_2  = (float) round($payable_hours, 2);
+        $total_clocked_2  = (float) round($total_clocked, 2);
+
         wp_send_json_success(
             array(
-                'message'             => 'Saved.',
-                'payable_hours'       => (float) round($payable_hours, 2),
-                'total_clocked_hours' => (float) round($total_clocked, 2),
+                'message'                => 'Saved.',
+                'clocked_hours'          => $clocked_hours_2,
+                'payable_hours'          => $payable_hours_2,
+                'total_clocked_hours'    => $total_clocked_2,
+
+                // Display strings (2 decimals) for immediate UI injection
+                'clocked_hours_display'  => number_format($clocked_hours_2, 2, '.', ''),
+                'payable_hours_display'  => number_format($payable_hours_2, 2, '.', ''),
+                'total_clocked_display'  => number_format($total_clocked_2, 2, '.', ''),
             )
         );
+
     }
 
     /**
