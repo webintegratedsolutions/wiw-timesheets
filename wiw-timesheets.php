@@ -1307,17 +1307,54 @@ class WIW_Timesheet_Manager
                         if (empty($edit_logs)) {
                             $out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
                         } else {
-                            $out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
-                            $out .= '<thead><tr>';
-                            $out .= '<th>When</th>';
-                            $out .= '<th>Modified</th>';
-                            $out .= '<th>Old</th>';
-                            $out .= '<th>New</th>';
-                            $out .= '<th>Edited By</th>';
-                            $out .= '</tr></thead>';
-                            $out .= '<tbody>';
+$out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
+$out .= '<thead><tr>';
+$out .= '<th style="width:120px;">Record ID</th>';
+$out .= '<th>When</th>';
+$out .= '<th>Modified</th>';
+$out .= '<th>Old</th>';
+$out .= '<th>New</th>';
+$out .= '<th>Edited By</th>';
+$out .= '</tr></thead>';
+$out .= '<tbody>';
 
-                            foreach ($edit_logs as $lg) {
+// Map local entry_id -> wiw_shift_id (so Record ID matches the main table brackets)
+$entry_ids_for_logs = array();
+foreach ($edit_logs as $lg_scan) {
+    if (isset($lg_scan->entry_id)) {
+        $eid = absint($lg_scan->entry_id);
+        if ($eid > 0) {
+            $entry_ids_for_logs[] = $eid;
+        }
+    }
+}
+$entry_ids_for_logs = array_values(array_unique($entry_ids_for_logs));
+
+$entry_id_to_wiw_time_id = array();
+if (!empty($entry_ids_for_logs)) {
+    global $wpdb;
+    $entries_table = $wpdb->prefix . 'wiw_timesheet_entries';
+
+    $placeholders = implode(',', array_fill(0, count($entry_ids_for_logs), '%d'));
+    $sql          = $wpdb->prepare(
+        "SELECT id, wiw_time_id FROM {$entries_table} WHERE id IN ({$placeholders})",
+        $entry_ids_for_logs
+    );
+
+    $rows = $wpdb->get_results($sql);
+    if (!empty($rows)) {
+        foreach ($rows as $r) {
+            $rid = isset($r->id) ? absint($r->id) : 0;
+            if ($rid > 0) {
+                $entry_id_to_wiw_time_id[$rid] = isset($r->wiw_time_id) ? (string) $r->wiw_time_id : '';
+            }
+        }
+    }
+
+}
+
+foreach ($edit_logs as $lg) {
+
                                 $when = isset($lg->created_at) ? $this->wiw_format_datetime_local_pretty((string) $lg->created_at) : '';
 
                                 $field = isset($lg->edit_type) ? (string) $lg->edit_type : '';
@@ -1346,13 +1383,23 @@ class WIW_Timesheet_Manager
                                     $who = (string) $lg->edited_by_user_login;
                                 }
 
-                                $out .= '<tr>';
-                                $out .= '<td>' . esc_html($when !== '' ? $when : 'N/A') . '</td>';
-                                $out .= '<td><strong>' . esc_html($field !== '' ? $field : 'N/A') . '</strong></td>';
-                                $out .= '<td>' . esc_html($oldv_disp !== '' ? $oldv_disp : 'N/A') . '</td>';
-                                $out .= '<td>' . esc_html($newv_disp !== '' ? $newv_disp : 'N/A') . '</td>';
-                                $out .= '<td>' . esc_html($who !== '' ? $who : 'N/A') . '</td>';
-                                $out .= '</tr>';
+$log_entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+$wiw_time_id  = '';
+
+if ($log_entry_id > 0 && isset($entry_id_to_wiw_time_id[$log_entry_id])) {
+    $wiw_time_id = (string) $entry_id_to_wiw_time_id[$log_entry_id];
+}
+
+$out .= '<tr>';
+$out .= '<td>' . esc_html($wiw_time_id !== '' ? $wiw_time_id : 'N/A') . '</td>';
+
+$out .= '<td>' . esc_html($when !== '' ? $when : 'N/A') . '</td>';
+$out .= '<td><strong>' . esc_html($field !== '' ? $field : 'N/A') . '</strong></td>';
+$out .= '<td>' . esc_html($oldv_disp !== '' ? $oldv_disp : 'N/A') . '</td>';
+$out .= '<td>' . esc_html($newv_disp !== '' ? $newv_disp : 'N/A') . '</td>';
+$out .= '<td>' . esc_html($who !== '' ? $who : 'N/A') . '</td>';
+$out .= '</tr>';
+
                             }
 
                             $out .= '</tbody></table>';
