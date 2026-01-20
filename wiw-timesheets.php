@@ -3174,6 +3174,16 @@ function timeTo12h(v){
             var missingIn  = !inVal;
             var missingOut = !outVal;
 
+            // ✅ Refresh the unresolved flags cache used by the Approve confirmation prompt
+            // (so resolved flags stop showing immediately without a full page refresh)
+            if (resp && resp.data && Array.isArray(resp.data.unresolved_flags)) {
+              if (resp.data.unresolved_flags.length) {
+                approveBtn.setAttribute("data-unresolved-flags-json", JSON.stringify(resp.data.unresolved_flags));
+              } else {
+                approveBtn.removeAttribute("data-unresolved-flags-json");
+              }
+            }
+
             if (missingIn || missingOut) {
               approveBtn.disabled = true;
 
@@ -3191,7 +3201,8 @@ function timeTo12h(v){
           }
         } catch (e) {}
 
-        window.wiwtsHideRefreshingOverlay();
+        // After save, refresh page so updated flags/status reflect immediately
+        window.location.reload();
 
       })
       .catch(function(err){
@@ -7291,6 +7302,39 @@ public function wiw_format_edit_log_value_for_display(string $value): string
         $payable_hours_2  = (float) round($payable_hours, 2);
         $total_clocked_2  = (float) round($total_clocked, 2);
 
+        // ✅ After recalculating flags, return the current unresolved flag descriptions for this record
+        $unresolved_flags = array();
+        $wiw_time_id      = (int) ($entry->wiw_time_id ?? 0);
+
+        if ($wiw_time_id > 0) {
+            $table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
+
+            $flag_rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT flag_message, description
+                     FROM {$table_flags}
+                     WHERE wiw_time_id = %d
+                       AND (flag_status IS NULL OR flag_status <> 'resolved')
+                     ORDER BY updated_at DESC, id DESC",
+                    $wiw_time_id
+                )
+            );
+
+            if (! empty($flag_rows) && is_array($flag_rows)) {
+                foreach ($flag_rows as $fg) {
+                    $msg = '';
+                    if (isset($fg->flag_message)) {
+                        $msg = trim((string) $fg->flag_message);
+                    }
+                    if ($msg === '' && isset($fg->description)) {
+                        $msg = trim((string) $fg->description);
+                    }
+
+                    $unresolved_flags[] = ($msg !== '') ? $msg : 'Unspecified flag';
+                }
+            }
+        }
+
         wp_send_json_success(
             array(
                 'message'                => 'Saved.',
@@ -7302,6 +7346,10 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                 'clocked_hours_display'  => number_format($clocked_hours_2, 2, '.', ''),
                 'payable_hours_display'  => number_format($payable_hours_2, 2, '.', ''),
                 'total_clocked_display'  => number_format($total_clocked_2, 2, '.', ''),
+
+                // ✅ Used by the Approve confirm prompt without requiring a full page refresh
+                'unresolved_flags'       => $unresolved_flags,
+                'unresolved_flags_count' => count($unresolved_flags),
             )
         );
 
