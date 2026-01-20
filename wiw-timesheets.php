@@ -3487,7 +3487,7 @@ function timeTo12h(v){
               lines.push("Clock Out: " + fmtVal(cur.clock_out));
               lines.push("Break Minutes: " + fmtVal(cur.break_minutes));
               lines.push("");
-              lines.push("Reset Values (When I Work)");
+              lines.push("Reset Values");
               lines.push("Clock In: " + fmtVal(api.clock_in));
               lines.push("Clock Out: " + fmtVal(api.clock_out));
               lines.push("Break Minutes: " + fmtVal(api.break_minutes));
