@@ -955,7 +955,7 @@ class WIW_Timesheet_Manager
                         // Print Week 1 header only for client view (hide for admin front-end UI)
                         if (! current_user_can('manage_options') && $has_week1_rows && $week1_start && $week1_end) {
                             $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-                            $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">🗓️ Week Of: '
+                            $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;">🗓️ Week of: '
                                 . esc_html($format_week_date($week1_start))
                                 . ' to '
                                 . esc_html($format_week_date($week1_end))
@@ -985,7 +985,7 @@ class WIW_Timesheet_Manager
                                         $printed_week2_header = true;
                                     } else {
                                         $out .= '<tr class="wiwts-week-of" style="background:#f6f7f7;">';
-                                        $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">🗓️ Week Of: '
+                                        $out .= '<td colspan="9" style="padding:8px 10px;font-weight:600;border-top:2px solid #e2e4e7;">🗓️ Week of: '
                                             . esc_html($format_week_date($week2_start))
                                             . ' to '
                                             . esc_html($format_week_date($week2_end))
@@ -3790,7 +3790,7 @@ HTML;
                 $label_end   = date_i18n('F d, Y', strtotime($wk_end));
 
                 $out .= '<div class="wiw-week-group" style="margin:18px 0 10px 0;">';
-                $out .= '<h4 style="margin:0 0 8px 0;">Week Of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h4>';
+                $out .= '<h4 style="margin:0 0 8px 0;">Week of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h4>';
 
                 // Table header = same columns as main client view (client layout; no Location column)
                 $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;width:100%;">';
