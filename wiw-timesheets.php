@@ -2510,8 +2510,33 @@ function timeTo12h(v){
             array('%d')
         );
 
+        // If extra_time_status is no longer "unset", treat Flag 104 as resolved immediately.
+        // - unset     => unresolved (active)
+        // - confirmed => resolved
+        // - denied    => resolved
+        $table_flags = $wpdb->prefix . 'wiw_timesheet_flags';
+
+        if ($wiw_time_id > 0) {
+            $desired_flag_status = ($new_status === 'confirmed' || $new_status === 'denied') ? 'resolved' : 'active';
+
+            $wpdb->update(
+                $table_flags,
+                array(
+                    'flag_status' => $desired_flag_status,
+                    'updated_at'  => current_time('mysql'),
+                ),
+                array(
+                    'wiw_time_id' => (int) $wiw_time_id,
+                    'flag_type'   => '104',
+                ),
+                array('%s', '%s'),
+                array('%d', '%s')
+            );
+        }
+
         wp_safe_redirect($redirect);
         exit;
+
     }
 // === WIWTS FLAG 104 EXTRA TIME ACTION HANDLER END ===
 
