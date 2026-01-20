@@ -4028,8 +4028,18 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                 }
 
                 $out .= '</tbody></table>';
-                // === Week-level expandable flags (filtered to this week range) ===
+// === Week-level expandable flags (filtered to this week range) ===
                 $week_flags_all = array();
+
+                // Only show flags for records that are actually displayed in this section/week.
+                // (Otherwise flags from "Pending" rows can appear under the "Approved" section and vice versa.)
+                $week_visible_time_ids = array();
+                foreach ($rows as $r) {
+                    $rid = isset($r->wiw_time_id) ? absint($r->wiw_time_id) : 0;
+                    if ($rid > 0) {
+                        $week_visible_time_ids[$rid] = true;
+                    }
+                }
 
                 // Gather unique timesheet IDs present in this week (rows may span multiple pay periods/employees)
                 $week_timesheet_ids = array();
@@ -4058,9 +4068,17 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                                 }
 
                                 // Only include flags whose shift_date falls within this week bucket
-                                if ($shift_date >= $wk_start && $shift_date <= $wk_end) {
-                                    $week_flags_all[] = $fg;
+                                if ($shift_date < $wk_start || $shift_date > $wk_end) {
+                                    continue;
                                 }
+
+                                // Only include flags whose wiw_time_id is present in the rows we are rendering
+                                $fg_time_id = isset($fg->wiw_time_id) ? absint($fg->wiw_time_id) : 0;
+                                if ($fg_time_id <= 0 || ! isset($week_visible_time_ids[$fg_time_id])) {
+                                    continue;
+                                }
+
+                                $week_flags_all[] = $fg;
                             }
                         }
                     }
