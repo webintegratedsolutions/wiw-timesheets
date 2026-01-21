@@ -72,6 +72,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
         register_setting( 'wiw_timesheets_group', 'wiw_login_email' );
         register_setting( 'wiw_timesheets_group', 'wiw_login_password' );
         register_setting( 'wiw_timesheets_group', 'wiw_session_token' );
+        register_setting( 'wiw_timesheets_group', 'wiw_enable_auto_approvals' );
 
         add_settings_section(
             'wiw_api_credentials_section',
@@ -106,6 +107,18 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             'wiw_api_credentials_section',
             array( 'setting_key' => 'wiw_login_password' )
         );
+
+        add_settings_field(
+            'wiw_enable_auto_approvals_field',
+            'Enable Auto Approvals',
+            array( $this, 'checkbox_input_callback' ),
+            'wiw-timesheets-settings',
+            'wiw_api_credentials_section',
+            array(
+                'setting_key' => 'wiw_enable_auto_approvals',
+                'label'       => 'Enable auto-approvals for past-due timesheets (dry-run only for now).',
+            )
+        );
     }
 
     public function text_input_callback( $args ) {
@@ -119,6 +132,19 @@ trait WIW_Timesheet_Admin_Settings_Trait {
         $value = get_option( $key );
         echo '<input type="password" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '" style="width: 500px;" placeholder="Leave blank to keep current password" />';
         echo '<p class="description">The password is required to obtain a new session token.</p>';
+    }
+
+    public function checkbox_input_callback( $args ) {
+        $key   = $args['setting_key'];
+        $label = isset( $args['label'] ) ? (string) $args['label'] : '';
+        $value = get_option( $key );
+
+        echo '<label for="' . esc_attr( $key ) . '">';
+        echo '<input type="checkbox" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="1" ' . checked( '1', (string) $value, false ) . ' />';
+        if ( $label !== '' ) {
+            echo ' ' . esc_html( $label );
+        }
+        echo '</label>';
     }
 
     public function settings_section_callback() {
@@ -152,6 +178,10 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             if ( $session_token ) {
                 echo '<div class="notice notice-info"><p><strong>Current Session Token:</strong> A valid token is stored and will be used for API requests.</p></div>';
             }
+
+            if ( isset( $_GET['wiwts_report_generated'] ) ) {
+                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report generated.</strong></p></div>';
+            }
             ?>
 
             <form method="post" action="options.php">
@@ -173,6 +203,18 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 <?php wp_nonce_field( 'wiw_login_action', 'wiw_login_nonce' ); ?>
 
                 <?php submit_button( 'Log In & Get Session Token', 'secondary', 'submit_login' ); ?>
+            </form>
+
+            <hr/>
+
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <h2>3. Generate Auto-Approval Dry-Run Report</h2>
+                <p>Generate a read-only dry-run report that mirrors the current preview page. This does not approve any records.</p>
+
+                <input type="hidden" name="action" value="wiwts_generate_auto_approve_report" />
+                <?php wp_nonce_field( 'wiwts_generate_auto_approve_report', 'wiwts_generate_auto_approve_report_nonce' ); ?>
+
+                <?php submit_button( 'Generate Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
             </form>
         </div>
         <?php
