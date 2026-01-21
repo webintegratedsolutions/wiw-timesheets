@@ -216,6 +216,41 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
                 <?php submit_button( 'Generate Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
             </form>
+
+            <hr/>
+
+            <h2>4. Auto-Approval Dry-Run Report Log</h2>
+            <p>This log stores every generated dry-run report for audit purposes.</p>
+            <?php
+            $report_log = get_option( 'wiwts_auto_approve_dry_run_report_log', array() );
+            if ( ! is_array( $report_log ) ) {
+                $report_log = array();
+            }
+            ?>
+            <?php if ( empty( $report_log ) ) : ?>
+                <p><em>No reports have been generated yet.</em></p>
+            <?php else : ?>
+                <div style="max-width:1000px;">
+                    <?php foreach ( array_reverse( $report_log ) as $index => $report_entry ) : ?>
+                        <?php
+                        $generated_at = isset( $report_entry['generated_at'] ) ? $report_entry['generated_at'] : '';
+                        $report_text  = isset( $report_entry['report_text'] ) ? $report_entry['report_text'] : '';
+                        $table_html   = isset( $report_entry['table_html'] ) ? $report_entry['table_html'] : '';
+                        ?>
+                        <details style="margin:0 0 12px; padding:12px; border:1px solid #ccd0d4; border-radius:4px; background:#fff;">
+                            <summary style="cursor:pointer; font-weight:600;">
+                                <?php echo esc_html( $generated_at !== '' ? $generated_at : 'Report #' . ( $index + 1 ) ); ?>
+                            </summary>
+                            <?php if ( $report_text !== '' ) : ?>
+                                <pre style="white-space:pre-wrap; margin-top:12px;"><?php echo esc_html( $report_text ); ?></pre>
+                            <?php endif; ?>
+                            <?php if ( $table_html !== '' ) : ?>
+                                <div style="margin-top:12px;"><?php echo wp_kses_post( $table_html ); ?></div>
+                            <?php endif; ?>
+                        </details>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
         </div>
         <?php
     }
