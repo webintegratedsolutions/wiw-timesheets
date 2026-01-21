@@ -73,6 +73,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
         register_setting( 'wiw_timesheets_group', 'wiw_login_password' );
         register_setting( 'wiw_timesheets_group', 'wiw_session_token' );
         register_setting( 'wiw_timesheets_group', 'wiw_enable_auto_approvals' );
+        register_setting( 'wiw_timesheets_group', 'wiw_auto_approve_report_email' );
 
         add_settings_section(
             'wiw_api_credentials_section',
@@ -119,6 +120,18 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 'label'       => 'Enable auto-approvals for past-due timesheets (dry-run only for now).',
             )
         );
+
+        add_settings_field(
+            'wiw_auto_approve_report_email_field',
+            'Auto-Approval Report Email',
+            array( $this, 'email_input_callback' ),
+            'wiw-timesheets-settings',
+            'wiw_api_credentials_section',
+            array(
+                'setting_key' => 'wiw_auto_approve_report_email',
+                'description' => 'Where to send auto-approval reports once email delivery is enabled.',
+            )
+        );
     }
 
     public function text_input_callback( $args ) {
@@ -132,6 +145,16 @@ trait WIW_Timesheet_Admin_Settings_Trait {
         $value = get_option( $key );
         echo '<input type="password" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '" style="width: 500px;" placeholder="Leave blank to keep current password" />';
         echo '<p class="description">The password is required to obtain a new session token.</p>';
+    }
+
+    public function email_input_callback( $args ) {
+        $key         = $args['setting_key'];
+        $value       = get_option( $key );
+        $description = isset( $args['description'] ) ? (string) $args['description'] : '';
+        echo '<input type="email" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '" style="width: 500px;" />';
+        if ( $description !== '' ) {
+            echo '<p class="description">' . esc_html( $description ) . '</p>';
+        }
     }
 
     public function checkbox_input_callback( $args ) {
