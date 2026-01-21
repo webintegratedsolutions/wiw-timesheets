@@ -42,20 +42,5 @@ if (
 		array(),
 		$css_ver
 	);
-
-	// JS (moved out of wiw-timesheets.php inline script)
-	$js_rel  = 'js/wiw-client-ui.js';
-	$js_path = WIW_PLUGIN_PATH . $js_rel;
-	$js_url  = WIW_PLUGIN_URL . $js_rel;
-
-	$js_ver = file_exists( $js_path ) ? filemtime( $js_path ) : '1.0.0';
-
-	wp_enqueue_script(
-		'wiwts-client-ui',
-		$js_url,
-		array(),
-		$js_ver,
-		true
-	);
 }
 add_action( 'wp_enqueue_scripts', 'wiwts_enqueue_client_ui_assets' );
