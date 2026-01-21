@@ -5112,15 +5112,20 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
 
-        update_option(
-            'wiwts_auto_approve_dry_run_report',
-            array(
-                'generated_at' => current_time('mysql'),
-                'report_text'  => $report_payload['report_text'],
-                'table_html'   => $report_payload['table_html'],
-            ),
-            false
+        $report_entry = array(
+            'generated_at' => current_time('mysql'),
+            'report_text'  => $report_payload['report_text'],
+            'table_html'   => $report_payload['table_html'],
         );
+
+        update_option('wiwts_auto_approve_dry_run_report', $report_entry, false);
+
+        $report_log = get_option('wiwts_auto_approve_dry_run_report_log', array());
+        if (! is_array($report_log)) {
+            $report_log = array();
+        }
+        $report_log[] = $report_entry;
+        update_option('wiwts_auto_approve_dry_run_report_log', $report_log, false);
 
         $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
         wp_safe_redirect(add_query_arg('wiwts_report_generated', '1', $redirect_url));
