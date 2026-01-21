@@ -44,6 +44,9 @@ require_once WIW_PLUGIN_PATH . 'includes/admin-login-handler.php';
 // Include the timesheet sync trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-helpers.php';
 
+// Include the time formatting trait
+require_once WIW_PLUGIN_PATH . 'includes/time-formatting-trait.php';
+
 // Include the timesheet helpers trait
 require_once WIW_PLUGIN_PATH . 'includes/timesheet-sync.php';
 
@@ -65,8 +68,10 @@ class WIW_Timesheet_Manager
     // Include timesheet sync methods
     use WIW_Timesheet_Sync_Trait;
 
-    public function __construct()
-    {
+    // Include time formatting methods
+    use WIWTS_Time_Formatting_Trait;
+
+    public function __construct() {
         // 1. Add Admin Menus and Settings
         add_action('admin_menu', array($this, 'add_admin_menus'));
         add_action('admin_init', array($this, 'register_settings'));
