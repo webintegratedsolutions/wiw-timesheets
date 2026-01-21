@@ -5254,7 +5254,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
         $table_html = '<p><strong>No past-due pending entries found.</strong></p>';
     } else {
         $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
-        $table_html .= '<table class="wp-list-table widefat fixed striped" style="margin-top:8px;width:100%;">';
+        $table_html .= '<table style="margin-top:8px;width:900px;">';
         $table_html .= '<thead><tr>';
         $table_html .= '<th style="width:140px;">&nbsp;</th>';
         $table_html .= '<th style="width:170px;">&nbsp;</th>';
