@@ -73,6 +73,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
         register_setting( 'wiw_timesheets_group', 'wiw_login_password' );
         register_setting( 'wiw_timesheets_group', 'wiw_session_token' );
         register_setting( 'wiw_timesheets_group', 'wiw_enable_auto_approvals' );
+        register_setting( 'wiw_timesheets_group', 'wiw_auto_approve_report_email' );
 
         add_settings_section(
             'wiw_api_credentials_section',
@@ -119,6 +120,18 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 'label'       => 'Enable auto-approvals for past-due timesheets (dry-run only for now).',
             )
         );
+
+        add_settings_field(
+            'wiw_auto_approve_report_email_field',
+            'Auto-Approval Report Email',
+            array( $this, 'email_input_callback' ),
+            'wiw-timesheets-settings',
+            'wiw_api_credentials_section',
+            array(
+                'setting_key' => 'wiw_auto_approve_report_email',
+                'description' => 'Where to send auto-approval reports once email delivery is enabled.',
+            )
+        );
     }
 
     public function text_input_callback( $args ) {
@@ -132,6 +145,16 @@ trait WIW_Timesheet_Admin_Settings_Trait {
         $value = get_option( $key );
         echo '<input type="password" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '" style="width: 500px;" placeholder="Leave blank to keep current password" />';
         echo '<p class="description">The password is required to obtain a new session token.</p>';
+    }
+
+    public function email_input_callback( $args ) {
+        $key         = $args['setting_key'];
+        $value       = get_option( $key );
+        $description = isset( $args['description'] ) ? (string) $args['description'] : '';
+        echo '<input type="email" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '" style="width: 500px;" />';
+        if ( $description !== '' ) {
+            echo '<p class="description">' . esc_html( $description ) . '</p>';
+        }
     }
 
     public function checkbox_input_callback( $args ) {
@@ -216,6 +239,41 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
                 <?php submit_button( 'Generate Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
             </form>
+
+            <hr/>
+
+            <h2>4. Auto-Approval Dry-Run Report Log</h2>
+            <p>This log stores every generated dry-run report for audit purposes.</p>
+            <?php
+            $report_log = get_option( 'wiwts_auto_approve_dry_run_report_log', array() );
+            if ( ! is_array( $report_log ) ) {
+                $report_log = array();
+            }
+            ?>
+            <?php if ( empty( $report_log ) ) : ?>
+                <p><em>No reports have been generated yet.</em></p>
+            <?php else : ?>
+                <div style="max-width:1000px;">
+                    <?php foreach ( array_reverse( $report_log ) as $index => $report_entry ) : ?>
+                        <?php
+                        $generated_at = isset( $report_entry['generated_at'] ) ? $report_entry['generated_at'] : '';
+                        $report_text  = isset( $report_entry['report_text'] ) ? $report_entry['report_text'] : '';
+                        $table_html   = isset( $report_entry['table_html'] ) ? $report_entry['table_html'] : '';
+                        ?>
+                        <details style="margin:0 0 12px; padding:12px; border:1px solid #ccd0d4; border-radius:4px; background:#fff;">
+                            <summary style="cursor:pointer; font-weight:600;">
+                                <?php echo esc_html( $generated_at !== '' ? $generated_at : 'Report #' . ( $index + 1 ) ); ?>
+                            </summary>
+                            <?php if ( $report_text !== '' ) : ?>
+                                <pre style="white-space:pre-wrap; margin-top:12px;"><?php echo esc_html( $report_text ); ?></pre>
+                            <?php endif; ?>
+                            <?php if ( $table_html !== '' ) : ?>
+                                <div style="margin-top:12px;"><?php echo wp_kses_post( $table_html ); ?></div>
+                            <?php endif; ?>
+                        </details>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
         </div>
         <?php
     }
