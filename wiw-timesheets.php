@@ -118,6 +118,9 @@ class WIW_Timesheet_Manager
 
         // Manual trigger should only run in wp-admin context (not during front-end + not during admin-ajax).
         add_action('admin_init', array($this, 'wiwts_maybe_run_auto_approve_dry_run_manual'));
+
+        // Manual report generator (admin-post) - dry run only
+        add_action('admin_post_wiwts_generate_auto_approve_report', array($this, 'wiwts_handle_generate_auto_approve_report'));
     }
 
 
@@ -5069,490 +5072,55 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         return;
     }
 
-    // Existing report (string) - keep as-is.
-    $report = $this->wiwts_build_auto_approve_dry_run_report();
+    $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
 
-    // Compute the same cutoff date the report uses (so our table matches the report).
-    $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
-    $now = new DateTimeImmutable('now', $tz);
+    $wrap_open  = '<div style="max-width:900px;margin:20px auto;padding:0 12px;">';
+    $wrap_close = '</div>';
 
-    $dow            = (int) $now->format('w'); // 0 Sun ... 6 Sat
-    $days_since_sun = ($dow - 0 + 7) % 7;
-    $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
-
-    // Next Tuesday 8am
-    $tuesday_8am_dt = $week_start_dt->modify('+2 days')->setTime(8, 0, 0);
-
-    $approval_week_start_dt = ($now < $tuesday_8am_dt)
-        ? $week_start_dt->modify('-7 days')
-        : $week_start_dt;
-
-    $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
-
-// Fetch the exact rows that would be auto-approved (read-only listing).
-$rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_week_start_ymd, 200);
-
-// Pre-fetch flags for these rows (grouped by wiw_time_id) so we can render a row under each entry.
-$flags_map = $this->wiwts_get_flags_by_wiw_time_id_for_dry_run($rows);
-
-// Pre-fetch edit logs for these rows (grouped by entry_id with wiw_time_id fallback).
-$edit_logs_map = $this->wiwts_get_edit_logs_for_dry_run($rows);
-
-// Build table HTML (match client UI columns).
-$table_html = '';
-
-    if (empty($rows)) {
-        $table_html = '<p><strong>No past-due pending entries found.</strong></p>';
-    } else {
-        $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
-        $table_html .= '<table class="wp-list-table widefat fixed striped" style="margin-top:8px;width:100%;">';
-        $table_html .= '<thead><tr>';
-$table_html .= '<th style="width:140px;">&nbsp;</th>';
-$table_html .= '<th style="width:170px;">&nbsp;</th>';
-$table_html .= '<th style="width:190px;">&nbsp;</th>';
-$table_html .= '<th style="width:95px;">&nbsp;</th>';
-$table_html .= '<th style="width:95px;">&nbsp;</th>';
-$table_html .= '<th style="width:95px;">&nbsp;</th>';
-$table_html .= '<th style="width:90px;">&nbsp;</th>';
-$table_html .= '<th style="width:95px;">&nbsp;</th>';
-$table_html .= '<th style="width:95px;">&nbsp;</th>';
-
-        $table_html .= '</tr></thead><tbody>';
-
-        foreach ($rows as $dr) {
-            $date_display = isset($dr->date) ? (string) $dr->date : 'N/A';
-
-            $employee_name = isset($dr->_wiw_employee_name) ? (string) $dr->_wiw_employee_name : '';
-            if ($employee_name === '') {
-                $employee_name = '—';
-            }
-
-            $sched_start = isset($dr->scheduled_start) ? (string) $dr->scheduled_start : '';
-            $sched_end   = isset($dr->scheduled_end) ? (string) $dr->scheduled_end : '';
-            $sched_start_end = $this->wiw_format_time_range_local($sched_start, $sched_end);
-
-            $clock_in  = isset($dr->clock_in) ? (string) $dr->clock_in : '';
-            $clock_out = isset($dr->clock_out) ? (string) $dr->clock_out : '';
-
-            $clock_in_display  = $this->wiw_format_time_local($clock_in);
-            $clock_out_display = $this->wiw_format_time_local($clock_out);
-
-            $break_min = isset($dr->break_minutes) ? (string) $dr->break_minutes : '0';
-
-            $sched_hrs   = isset($dr->scheduled_hours) ? (string) $dr->scheduled_hours : '0.00';
-$clocked_hrs = isset($dr->clocked_hours) ? (string) $dr->clocked_hours : '0.00';
-            $payable_hrs = isset($dr->payable_hours) ? (string) $dr->payable_hours : '0.00';
-
-// Prefer the WIW shift record id (matches client UI). Fallback to local entry id if missing.
-$shift_id = '';
-if (isset($dr->wiw_time_id) && $dr->wiw_time_id !== null && $dr->wiw_time_id !== '') {
-    $shift_id = (string) $dr->wiw_time_id;
-}
-
-$shift_record_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
-
-// Repeat table headers above each entry (matches client UI layout)
-// Row above headers: Timesheet ID + Pay Period range
-$ts_id = isset($dr->timesheet_id) ? (int) $dr->timesheet_id : 0;
-
-$pp_start = isset($dr->_wiw_pay_period_start) ? (string) $dr->_wiw_pay_period_start : '';
-$pp_end   = isset($dr->_wiw_pay_period_end) ? (string) $dr->_wiw_pay_period_end : '';
-
-$pp_label = 'N/A';
-if ($pp_start !== '' && $pp_end !== '') {
-    $pp_label = $pp_start . ' to ' . $pp_end;
-} elseif ($pp_start !== '') {
-    $pp_label = $pp_start;
-} elseif ($pp_end !== '') {
-    $pp_label = $pp_end;
-}
-
-$title_line = 'Shift Record ID #' . esc_html($shift_record_id) . ' in Timesheet ID #' . ($ts_id > 0 ? (string) $ts_id : 'N/A') . ' - For Pay Period: ' . $pp_label . '';
-$table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
-$table_html .= '<td colspan="10" style="background-color: #fff;">&nbsp;</td>';
-$table_html .= '</tr>';
-$table_html .= '<tr class="wiwts-timesheet-context">';
-$table_html .= '<th colspan="9" style="text-align:left; background:#fff; padding:8px 0;">' . esc_html($title_line) . '</th>';
-$table_html .= '</tr>';
-
-// Repeat table headers above each entry (matches client UI layout)
-$table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
-$table_html .= '<th style="text-align:left;">Shift Date</th>';
-$table_html .= '<th style="text-align:left;">Employee</th>';
-$table_html .= '<th style="text-align:left;">Sched. Start/End</th>';
-$table_html .= '<th style="text-align:left;">Clock In</th>';
-$table_html .= '<th style="text-align:left;">Clock Out</th>';
-$table_html .= '<th style="text-align:left;">Break (Min)</th>';
-$table_html .= '<th style="text-align:left;">Sched. Hrs</th>';
-$table_html .= '<th style="text-align:left;">Clocked Hrs</th>';
-$table_html .= '<th style="text-align:left;">Payable Hrs</th>';
-$table_html .= '</tr>';
-
-// Main entry row
-$table_html .= '<tr>';
-
-// Main entry row
-$table_html .= '<tr>';
-
-$table_html .= '<td>'
-    . esc_html($date_display)
-    . '</td>';
-
-$table_html .= '<td>' . esc_html($employee_name) . '</td>';
-$table_html .= '<td>' . esc_html($sched_start_end) . '</td>';
-$table_html .= '<td>' . esc_html($clock_in_display !== '' ? $clock_in_display : 'N/A') . '</td>';
-$table_html .= '<td>' . esc_html($clock_out_display !== '' ? $clock_out_display : 'N/A') . '</td>';
-$table_html .= '<td>' . esc_html($break_min) . '</td>';
-$table_html .= '<td>' . esc_html($sched_hrs) . '</td>';
-$table_html .= '<td>' . esc_html($clocked_hrs) . '</td>';
-$table_html .= '<td>' . esc_html($payable_hrs) . '</td>';
-$table_html .= '</tr>';
-
-// (Auto-approval edit log preview row moved below the Edit Logs row to preserve expand-row structure.)
-
-// Under-row flags (read-only)
-$wiw_time_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
-
-$flags_for_entry = ($wiw_time_id !== '' && isset($flags_map[$wiw_time_id]) && is_array($flags_map[$wiw_time_id]))
-    ? $flags_map[$wiw_time_id]
-    : array();
-
-
-
-// Auto-fix preview for Flag 104 (Confirm Additional Hours) - read-only (assume confirmed)
-$auto_fix_104_html = '';
-$has_flag_104      = false;
-
-foreach ($flags_for_entry as $fg_check_104) {
-    $ft_check_104 = isset($fg_check_104->flag_type) ? (string) $fg_check_104->flag_type : '';
-    $fs_check_104 = isset($fg_check_104->flag_status) ? strtolower((string) $fg_check_104->flag_status) : '';
-    if ($ft_check_104 === '104' && $fs_check_104 !== 'resolved') {
-        $has_flag_104 = true;
-        break;
-    }
-}
-
-if ($has_flag_104) {
-    $show_flag104_preview = false;
-    $extra_hours_104      = 0.0;
-
-    // Compute "additional hours" as time after scheduled end, only if > 15 minutes (matches UI gating intent)
-    if (!empty($sched_end) && !empty($clock_out)) {
-        try {
-            $tz_104 = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
-
-            $scheduled_end_dt_104 = new DateTimeImmutable((string) $sched_end, $tz_104);
-            $clock_out_dt_104     = new DateTimeImmutable((string) $clock_out, $tz_104);
-
-            $diff_seconds_104 = $clock_out_dt_104->getTimestamp() - $scheduled_end_dt_104->getTimestamp();
-
-            if ($diff_seconds_104 > 0) {
-                $diff_minutes_104 = (int) floor($diff_seconds_104 / 60);
-
-                if ($diff_minutes_104 > 15) {
-                    $extra_hours_104      = round($diff_seconds_104 / 3600, 2);
-                    $show_flag104_preview = true;
-                }
-            }
-        } catch (Exception $e) {
-            $show_flag104_preview = false;
-        }
-    }
-
-    if ($show_flag104_preview) {
-        $current_payable_104 = isset($payable_hrs) ? (float) $payable_hrs : 0.0;
-
-        // Assumption: auto-confirm additional time => payable_hours increases by additional hours
-        $new_payable_104 = round($current_payable_104 + (float) $extra_hours_104, 2);
-
-        $auto_fix_104_lines   = array();
-        $auto_fix_104_lines[] = '<div style="font-weight:600; margin-bottom:6px;">Flag 104 Auto-fix Preview</div>';
-        $auto_fix_104_lines[] = '<div style="margin-bottom:6px;">Additional time will be <strong>confirmed</strong> automatically.</div>';
-        $auto_fix_104_lines[] = '<div style="margin-bottom:6px;">Additional Hours: <strong>' . esc_html(number_format((float) $extra_hours_104, 2, '.', '')) . '</strong></div>';
-        $auto_fix_104_lines[] = '<div>Current <strong>Payable Hrs</strong>: ' . esc_html(number_format((float) $current_payable_104, 2, '.', '')) . '</div>';
-        $auto_fix_104_lines[] = '<div>New <strong>Payable Hrs</strong>: ' . esc_html(number_format((float) $new_payable_104, 2, '.', '')) . '</div>';
-
-        $auto_fix_104_html = '<div style="padding:10px 12px; background:#eef2ff; border-left:3px solid #6366f1;">' . implode('', $auto_fix_104_lines) . '</div>';
-
-        $table_html .= '<tr class="wiwts-dryrun-autofix-104">';
-        $table_html .= '<td colspan="9">' . $auto_fix_104_html . '</td>';
-        $table_html .= '</tr>';
-    }
-}
-
-
-// Auto-fix preview for Flag 106 (Missing clock-out time) - read-only
-$auto_fix_html = '';
-$has_flag_106  = false;
-
-foreach ($flags_for_entry as $fg_check) {
-    $ft_check = isset($fg_check->flag_type) ? (string) $fg_check->flag_type : '';
-    $fs_check = isset($fg_check->flag_status) ? strtolower((string) $fg_check->flag_status) : '';
-    if ($ft_check === '106' && $fs_check !== 'resolved') {
-        $has_flag_106 = true;
-        break;
-    }
-}
-
-if ($has_flag_106) {
-    $auto_fix_lines = array();
-    $auto_fix_lines[] = '<div style="font-weight:600; margin-bottom:6px;">Flag 106 Auto-fix Preview</div>';
-
-    $sched_end_display = $this->wiw_format_time_local($sched_end);
-    $auto_fix_lines[] = '<div style="margin-bottom:6px;">Clock Out would be set to <strong>Scheduled End</strong>: ' . esc_html($sched_end_display) . '</div>';
-
-    $new_clocked = 'N/A';
-    $new_payable = 'N/A';
-
-    try {
-        $tz_fix = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
-
-        if ($clock_in !== '' && $sched_end !== '') {
-            $dt_in_fix  = new DateTimeImmutable($clock_in, $tz_fix);
-            $dt_out_fix = new DateTimeImmutable($sched_end, $tz_fix);
-
-            if ($dt_out_fix <= $dt_in_fix) {
-                $new_clocked = '0.00';
-                $new_payable = '0.00';
-            } else {
-                // Clocked hours: diff(clock_in, new_clock_out) - break
-                $int_fix = $dt_in_fix->diff($dt_out_fix);
-                $sec_fix = ($int_fix->days * 86400) + ($int_fix->h * 3600) + ($int_fix->i * 60) + $int_fix->s;
-
-                $sec_fix -= ((int) $break_min * 60);
-                if ($sec_fix < 0) {
-                    $sec_fix = 0;
-                }
-
-                $new_clocked_val = round($sec_fix / 3600, 2);
-                $new_clocked     = number_format($new_clocked_val, 2, '.', '');
-
-                // Payable hours: clamp to scheduled window (when present) then - break
-                $new_payable_val = $new_clocked_val;
-
-                $sched_start_raw_fix = $sched_start;
-                $sched_end_raw_fix   = $sched_end;
-
-                if ($sched_start_raw_fix !== '' || $sched_end_raw_fix !== '') {
-                    $pay_in_fix  = $dt_in_fix;
-                    $pay_out_fix = $dt_out_fix;
-
-                    if ($sched_start_raw_fix !== '') {
-                        $dt_sched_start_fix = new DateTimeImmutable($sched_start_raw_fix, $tz_fix);
-                        if ($pay_in_fix < $dt_sched_start_fix) {
-                            $pay_in_fix = $dt_sched_start_fix;
-                        }
-                    }
-
-                    if ($sched_end_raw_fix !== '') {
-                        $dt_sched_end_fix = new DateTimeImmutable($sched_end_raw_fix, $tz_fix);
-                        if ($pay_out_fix > $dt_sched_end_fix) {
-                            $pay_out_fix = $dt_sched_end_fix;
-                        }
-                    }
-
-                    if ($pay_out_fix <= $pay_in_fix) {
-                        $new_payable_val = 0.0;
-                    } else {
-                        $pint_fix = $pay_in_fix->diff($pay_out_fix);
-                        $psec_fix = ($pint_fix->days * 86400) + ($pint_fix->h * 3600) + ($pint_fix->i * 60) + $pint_fix->s;
-
-                        $psec_fix -= ((int) $break_min * 60);
-                        if ($psec_fix < 0) {
-                            $psec_fix = 0;
-                        }
-
-                        $new_payable_val = round($psec_fix / 3600, 2);
-                    }
-                }
-
-                $new_payable = number_format($new_payable_val, 2, '.', '');
-            }
-        } else {
-            $auto_fix_lines[] = '<div><em>Cannot compute preview: scheduled end time or clock in time is missing.</em></div>';
-        }
-    } catch (Exception $e) {
-        $auto_fix_lines[] = '<div><em>Cannot compute preview due to a date parsing error.</em></div>';
-    }
-
-    $auto_fix_lines[] = '<div>New <strong>Clocked Hrs</strong>: ' . esc_html($new_clocked) . '</div>';
-    $auto_fix_lines[] = '<div>New <strong>Payable Hrs</strong>: ' . esc_html($new_payable) . '</div>';
-
-    $auto_fix_html = '<div style="padding:10px 12px; background:#fff7ed; border-left:3px solid #f59e0b;">' . implode('', $auto_fix_lines) . '</div>';
-
-    $table_html .= '<tr class="wiwts-dryrun-autofix">';
-    $table_html .= '<td colspan="9">' . $auto_fix_html . '</td>';
-    $table_html .= '</tr>';
-}
-
-$flags_html  = '<div style="padding:10px 12px; background:#f6f7f7; border-left:3px solid #dcdcde;">';
-
-if (empty($flags_for_entry)) {
-    $flags_html .= '<small><strong>Flags:</strong> None</small>';
-} else {
-    $flags_html .= '<div style="margin-bottom:6px;"><strong>Flags:</strong></div>';
-    $flags_html .= '<table class="wp-list-table widefat fixed striped" style="margin:0; background:#fff; width:100%;">';
-$flags_html .= '<thead><tr>';
-$flags_html .= '<th style="width:80px; text-align: left;">Type</th>';
-$flags_html .= '<th style="text-align: left;">Description</th>';
-$flags_html .= '<th style="width:120px; text-align: left;">Status</th>';
-$flags_html .= '</tr></thead><tbody>';
-
-    foreach ($flags_for_entry as $fg) {
-        $type       = isset($fg->flag_type) ? (string) $fg->flag_type : '';
-        $desc       = isset($fg->description) ? (string) $fg->description : '';
-        $status_raw = isset($fg->flag_status) ? (string) $fg->flag_status : '';
-        $updated_raw = isset($fg->updated_at) ? (string) $fg->updated_at : '';
-
-$status_label = (strtolower($status_raw) === 'resolved') ? 'Resolved' : 'Unresolved';
-
-$updated = ($updated_raw !== '') ? $this->wiw_format_datetime_local_pretty($updated_raw) : 'N/A';
-
-$flags_html .= '<tr>';
-$flags_html .= '<td>' . esc_html($type !== '' ? $type : 'N/A') . '</td>';
-$flags_html .= '<td>' . esc_html($desc !== '' ? $desc : 'N/A') . '</td>';
-$flags_html .= '<td>' . esc_html($status_label) . '</td>';
-$flags_html .= '</tr>';
-
-    }
-
-    $flags_html .= '</tbody></table>';
-}
-
-$flags_html .= '</div>';
-
-// Flags row
-$table_html .= '<tr>';
-$table_html .= '<td colspan="9" style="padding:0;">' . $flags_html . '</td>';
-$table_html .= '</tr>';
-
-// Edit logs row (read-only)
-$entry_id_int   = isset($dr->id) ? (int) $dr->id : 0;
-$wiw_time_id_str = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
-
-$logs_for_entry = array();
-
-// Primary: entry_id
-if ($entry_id_int > 0 && isset($edit_logs_map['by_entry_id'][$entry_id_int]) && is_array($edit_logs_map['by_entry_id'][$entry_id_int])) {
-    $logs_for_entry = $edit_logs_map['by_entry_id'][$entry_id_int];
-}
-// Fallback: wiw_time_id
-elseif ($wiw_time_id_str !== '' && isset($edit_logs_map['by_wiw_time_id'][$wiw_time_id_str]) && is_array($edit_logs_map['by_wiw_time_id'][$wiw_time_id_str])) {
-    $logs_for_entry = $edit_logs_map['by_wiw_time_id'][$wiw_time_id_str];
-}
-
-$logs_html  = '<div style="padding:10px 12px; background:#f6f7f7; border-left:3px solid #2271b1;">';
-
-if (empty($logs_for_entry)) {
-    $logs_html .= '<small><strong>Edit Logs:</strong> None</small>';
-} else {
-    $logs_html .= '<div style="margin-bottom:6px;"><strong>Edit Logs:</strong></div>';
-    $logs_html .= '<table class="wp-list-table widefat fixed striped" style="margin:0; background:#fff; width:100%;">';
-    $logs_html .= '<thead><tr>';
-    $logs_html .= '<th style="width:100px; text-align:left;">Type</th>';
-    $logs_html .= '<th style="text-align:left;">Change</th>';
-    $logs_html .= '<th style="width:160px; text-align:left;">Edited By</th>';
-    $logs_html .= '<th style="width:180px; text-align:left;">Date</th>';
-    $logs_html .= '</tr></thead><tbody>';
-
-    foreach ($logs_for_entry as $lg) {
-        $edit_type  = isset($lg->edit_type) ? (string) $lg->edit_type : '';
-        $old_value  = isset($lg->old_value) ? (string) $lg->old_value : '';
-        $new_value  = isset($lg->new_value) ? (string) $lg->new_value : '';
-
-        $editor = '';
-        if (isset($lg->edited_by_display_name) && (string) $lg->edited_by_display_name !== '') {
-            $editor = (string) $lg->edited_by_display_name;
-        } elseif (isset($lg->edited_by_user_login) && (string) $lg->edited_by_user_login !== '') {
-            $editor = (string) $lg->edited_by_user_login;
-        } else {
-            $editor = 'System';
-        }
-
-        $created_at_raw = isset($lg->created_at) ? (string) $lg->created_at : '';
-        $created_at_disp = ($created_at_raw !== '')
-            ? $this->wiw_format_datetime_local_pretty($created_at_raw)
-            : 'N/A';
-
-// Format old/new values for display (convert datetimes to local 12-hour time)
-$old_disp = 'N/A';
-$new_disp = 'N/A';
-
-if (trim($old_value) !== '') {
-    $old_disp = $this->wiw_format_edit_log_value_for_display($old_value);
-}
-if (trim($new_value) !== '') {
-    $new_disp = $this->wiw_format_edit_log_value_for_display($new_value);
-}
-
-$change = (trim($old_value) !== '' || trim($new_value) !== '')
-    ? '' . $old_disp . ' → ' . $new_disp . ''
-    : '—';
-
-        $logs_html .= '<tr>';
-        $logs_html .= '<td>' . esc_html($edit_type !== '' ? $edit_type : 'N/A') . '</td>';
-        $logs_html .= '<td>' . esc_html($change) . '</td>';
-        $logs_html .= '<td>' . esc_html($editor) . '</td>';
-        $logs_html .= '<td>' . esc_html($created_at_disp) . '</td>';
-        $logs_html .= '</tr>';
-    }
-
-    $logs_html .= '</tbody></table>';
-}
-
-$logs_html .= '</div>';
-
-$table_html .= '<tr>';
-$table_html .= '<td colspan="9" style="padding:0;">' . $logs_html . '</td>';
-$table_html .= '</tr>';
-
-// Preview: Auto-approval edit log row (read-only) — placed AFTER logs to avoid breaking expand-row structure
-$auto_log_type = 'Approved Time Record';
-
-// Use the same pretty formatting the Edit Logs table uses.
-$auto_log_created_at_raw  = $now->format('Y-m-d H:i:s');
-$auto_log_created_at_disp = $this->wiw_format_datetime_local_pretty($auto_log_created_at_raw);
-
-$auto_log_html  = '<div style="padding:10px 12px; background:#e6fffa; border-left:3px solid #14b8a6;">';
-$auto_log_html .= '<div style="font-weight:600; margin-bottom:6px;">Auto-Approval Edit Log Preview</div>';
-$auto_log_html .= '<table class="wp-list-table widefat fixed" style="margin:0; background:#fff; width:100%;">';
-$auto_log_html .= '<tbody>';
-
-$auto_log_html .= '<tr>';
-$auto_log_html .= '<td><strong>Edited By</strong></td>';
-$auto_log_html .= '<td>' . esc_html('Automatically Approved') . '</td>';
-$auto_log_html .= '</tr>';
-
-$auto_log_html .= '<tr>';
-$auto_log_html .= '<td><strong>Date</strong></td>';
-$auto_log_html .= '<td>' . esc_html($auto_log_created_at_disp) . '</td>';
-$auto_log_html .= '</tr>';
-
-$auto_log_html .= '</tbody></table>';
-$auto_log_html .= '</div>';
-
-$table_html .= '<tr class="wiwts-dryrun-autolog-preview">';
-$table_html .= '<td colspan="9" style="padding:0;">' . $auto_log_html . '</td>';
-$table_html .= '</tr>';
-
-        }
-
-        $table_html .= '</tbody></table>';
-    }
-
-$wrap_open  = '<div style="max-width:900px;margin:20px auto;padding:0 12px;">';
-$wrap_close = '</div>';
-
-wp_die(
+    wp_die(
         $wrap_open
             . '<h2>WIW Timesheets — Auto-Approve Past Due (Dry Run)</h2>'
-            . '<pre style="white-space:pre-wrap;">' . esc_html($report) . '</pre>'
-            . $table_html
+            . '<pre style="white-space:pre-wrap;">' . esc_html($report_payload['report_text']) . '</pre>'
+            . $report_payload['table_html']
             . $wrap_close,
         'WIW Timesheets Dry Run'
     );
 
 }
+
+    /**
+     * Manual admin-post report generator (dry run only).
+     * Stores the report payload for later use (email/preview).
+     */
+    public function wiwts_handle_generate_auto_approve_report(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        if (
+            ! isset($_POST['wiwts_generate_auto_approve_report_nonce']) ||
+            ! wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wiwts_generate_auto_approve_report_nonce'])), 'wiwts_generate_auto_approve_report')
+        ) {
+            wp_die('Security check failed.');
+        }
+
+        $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
+
+        update_option(
+            'wiwts_auto_approve_dry_run_report',
+            array(
+                'generated_at' => current_time('mysql'),
+                'report_text'  => $report_payload['report_text'],
+                'table_html'   => $report_payload['table_html'],
+            ),
+            false
+        );
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        wp_safe_redirect(add_query_arg('wiwts_report_generated', '1', $redirect_url));
+        exit;
+    }
 
     /**
      * Cron handler (dry run only)
@@ -5631,6 +5199,475 @@ function wiwts_build_auto_approve_dry_run_report(): string
 
     return implode("\n", $lines);
 
+}
+
+/**
+ * Build the dry-run report payload (summary text + table HTML).
+ *
+ * @return array{report_text:string, table_html:string}
+ */
+private function wiwts_build_auto_approve_dry_run_payload(): array
+{
+    // Existing report (string) - keep as-is.
+    $report = $this->wiwts_build_auto_approve_dry_run_report();
+
+    // Compute the same cutoff date the report uses (so our table matches the report).
+    $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+    $now = new DateTimeImmutable('now', $tz);
+
+    $dow            = (int) $now->format('w'); // 0 Sun ... 6 Sat
+    $days_since_sun = ($dow - 0 + 7) % 7;
+    $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
+
+    // Next Tuesday 8am
+    $tuesday_8am_dt = $week_start_dt->modify('+2 days')->setTime(8, 0, 0);
+
+    $approval_week_start_dt = ($now < $tuesday_8am_dt)
+        ? $week_start_dt->modify('-7 days')
+        : $week_start_dt;
+
+    $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
+
+    // Fetch the exact rows that would be auto-approved (read-only listing).
+    $rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_week_start_ymd, 200);
+
+    // Pre-fetch flags for these rows (grouped by wiw_time_id) so we can render a row under each entry.
+    $flags_map = $this->wiwts_get_flags_by_wiw_time_id_for_dry_run($rows);
+
+    // Pre-fetch edit logs for these rows (grouped by entry_id with wiw_time_id fallback).
+    $edit_logs_map = $this->wiwts_get_edit_logs_for_dry_run($rows);
+
+    // Build table HTML (match client UI columns).
+    $table_html = '';
+
+    if (empty($rows)) {
+        $table_html = '<p><strong>No past-due pending entries found.</strong></p>';
+    } else {
+        $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
+        $table_html .= '<table class="wp-list-table widefat fixed striped" style="margin-top:8px;width:100%;">';
+        $table_html .= '<thead><tr>';
+        $table_html .= '<th style="width:140px;">&nbsp;</th>';
+        $table_html .= '<th style="width:170px;">&nbsp;</th>';
+        $table_html .= '<th style="width:190px;">&nbsp;</th>';
+        $table_html .= '<th style="width:95px;">&nbsp;</th>';
+        $table_html .= '<th style="width:95px;">&nbsp;</th>';
+        $table_html .= '<th style="width:95px;">&nbsp;</th>';
+        $table_html .= '<th style="width:90px;">&nbsp;</th>';
+        $table_html .= '<th style="width:95px;">&nbsp;</th>';
+        $table_html .= '<th style="width:95px;">&nbsp;</th>';
+
+        $table_html .= '</tr></thead><tbody>';
+
+        foreach ($rows as $dr) {
+            $date_display = isset($dr->date) ? (string) $dr->date : 'N/A';
+
+            $employee_name = isset($dr->_wiw_employee_name) ? (string) $dr->_wiw_employee_name : '';
+            if ($employee_name === '') {
+                $employee_name = '—';
+            }
+
+            $sched_start = isset($dr->scheduled_start) ? (string) $dr->scheduled_start : '';
+            $sched_end   = isset($dr->scheduled_end) ? (string) $dr->scheduled_end : '';
+            $sched_start_end = $this->wiw_format_time_range_local($sched_start, $sched_end);
+
+            $clock_in  = isset($dr->clock_in) ? (string) $dr->clock_in : '';
+            $clock_out = isset($dr->clock_out) ? (string) $dr->clock_out : '';
+
+            $clock_in_display  = $this->wiw_format_time_local($clock_in);
+            $clock_out_display = $this->wiw_format_time_local($clock_out);
+
+            $break_min = isset($dr->break_minutes) ? (string) $dr->break_minutes : '0';
+
+            $sched_hrs   = isset($dr->scheduled_hours) ? (string) $dr->scheduled_hours : '0.00';
+            $clocked_hrs = isset($dr->clocked_hours) ? (string) $dr->clocked_hours : '0.00';
+            $payable_hrs = isset($dr->payable_hours) ? (string) $dr->payable_hours : '0.00';
+
+            $shift_record_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+
+            // Repeat table headers above each entry (matches client UI layout)
+            // Row above headers: Timesheet ID + Pay Period range
+            $ts_id = isset($dr->timesheet_id) ? (int) $dr->timesheet_id : 0;
+
+            $pp_start = isset($dr->_wiw_pay_period_start) ? (string) $dr->_wiw_pay_period_start : '';
+            $pp_end   = isset($dr->_wiw_pay_period_end) ? (string) $dr->_wiw_pay_period_end : '';
+
+            $pp_label = 'N/A';
+            if ($pp_start !== '' && $pp_end !== '') {
+                $pp_label = $pp_start . ' to ' . $pp_end;
+            } elseif ($pp_start !== '') {
+                $pp_label = $pp_start;
+            } elseif ($pp_end !== '') {
+                $pp_label = $pp_end;
+            }
+
+            $title_line = 'Shift Record ID #' . esc_html($shift_record_id) . ' in Timesheet ID #' . ($ts_id > 0 ? (string) $ts_id : 'N/A') . ' - For Pay Period: ' . $pp_label . '';
+            $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
+            $table_html .= '<td colspan="10" style="background-color: #fff;">&nbsp;</td>';
+            $table_html .= '</tr>';
+            $table_html .= '<tr class="wiwts-timesheet-context">';
+            $table_html .= '<th colspan="9" style="text-align:left; background:#fff; padding:8px 0;">' . esc_html($title_line) . '</th>';
+            $table_html .= '</tr>';
+
+            // Repeat table headers above each entry (matches client UI layout)
+            $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
+            $table_html .= '<th style="text-align:left;">Shift Date</th>';
+            $table_html .= '<th style="text-align:left;">Employee</th>';
+            $table_html .= '<th style="text-align:left;">Sched. Start/End</th>';
+            $table_html .= '<th style="text-align:left;">Clock In</th>';
+            $table_html .= '<th style="text-align:left;">Clock Out</th>';
+            $table_html .= '<th style="text-align:left;">Break (Min)</th>';
+            $table_html .= '<th style="text-align:left;">Sched. Hrs</th>';
+            $table_html .= '<th style="text-align:left;">Clocked Hrs</th>';
+            $table_html .= '<th style="text-align:left;">Payable Hrs</th>';
+            $table_html .= '</tr>';
+
+            // Main entry row
+            $table_html .= '<tr>';
+
+            // Main entry row
+            $table_html .= '<tr>';
+
+            $table_html .= '<td>'
+                . esc_html($date_display)
+                . '</td>';
+
+            $table_html .= '<td>' . esc_html($employee_name) . '</td>';
+            $table_html .= '<td>' . esc_html($sched_start_end) . '</td>';
+            $table_html .= '<td>' . esc_html($clock_in_display !== '' ? $clock_in_display : 'N/A') . '</td>';
+            $table_html .= '<td>' . esc_html($clock_out_display !== '' ? $clock_out_display : 'N/A') . '</td>';
+            $table_html .= '<td>' . esc_html($break_min) . '</td>';
+            $table_html .= '<td>' . esc_html($sched_hrs) . '</td>';
+            $table_html .= '<td>' . esc_html($clocked_hrs) . '</td>';
+            $table_html .= '<td>' . esc_html($payable_hrs) . '</td>';
+            $table_html .= '</tr>';
+
+            // (Auto-approval edit log preview row moved below the Edit Logs row to preserve expand-row structure.)
+
+            // Under-row flags (read-only)
+            $wiw_time_id = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+
+            $flags_for_entry = ($wiw_time_id !== '' && isset($flags_map[$wiw_time_id]) && is_array($flags_map[$wiw_time_id]))
+                ? $flags_map[$wiw_time_id]
+                : array();
+
+            // Auto-fix preview for Flag 104 (Confirm Additional Hours) - read-only (assume confirmed)
+            $auto_fix_104_html = '';
+            $has_flag_104      = false;
+
+            foreach ($flags_for_entry as $fg_check_104) {
+                $ft_check_104 = isset($fg_check_104->flag_type) ? (string) $fg_check_104->flag_type : '';
+                $fs_check_104 = isset($fg_check_104->flag_status) ? strtolower((string) $fg_check_104->flag_status) : '';
+                if ($ft_check_104 === '104' && $fs_check_104 !== 'resolved') {
+                    $has_flag_104 = true;
+                    break;
+                }
+            }
+
+            if ($has_flag_104) {
+                $show_flag104_preview = false;
+                $extra_hours_104      = 0.0;
+
+                // Compute "additional hours" as time after scheduled end, only if > 15 minutes (matches UI gating intent)
+                if (!empty($sched_end) && !empty($clock_out)) {
+                    try {
+                        $tz_104 = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+
+                        $scheduled_end_dt_104 = new DateTimeImmutable((string) $sched_end, $tz_104);
+                        $clock_out_dt_104     = new DateTimeImmutable((string) $clock_out, $tz_104);
+
+                        $diff_seconds_104 = $clock_out_dt_104->getTimestamp() - $scheduled_end_dt_104->getTimestamp();
+
+                        if ($diff_seconds_104 > 0) {
+                            $diff_minutes_104 = (int) floor($diff_seconds_104 / 60);
+
+                            if ($diff_minutes_104 > 15) {
+                                $extra_hours_104      = round($diff_seconds_104 / 3600, 2);
+                                $show_flag104_preview = true;
+                            }
+                        }
+                    } catch (Exception $e) {
+                        $show_flag104_preview = false;
+                    }
+                }
+
+                if ($show_flag104_preview) {
+                    $current_payable_104 = isset($payable_hrs) ? (float) $payable_hrs : 0.0;
+
+                    // Assumption: auto-confirm additional time => payable_hours increases by additional hours
+                    $new_payable_104 = round($current_payable_104 + (float) $extra_hours_104, 2);
+
+                    $auto_fix_104_lines   = array();
+                    $auto_fix_104_lines[] = '<div style="font-weight:600; margin-bottom:6px;">Flag 104 Auto-fix Preview</div>';
+                    $auto_fix_104_lines[] = '<div style="margin-bottom:6px;">Additional time will be <strong>confirmed</strong> automatically.</div>';
+                    $auto_fix_104_lines[] = '<div style="margin-bottom:6px;">Additional Hours: <strong>' . esc_html(number_format((float) $extra_hours_104, 2, '.', '')) . '</strong></div>';
+                    $auto_fix_104_lines[] = '<div>Current <strong>Payable Hrs</strong>: ' . esc_html(number_format((float) $current_payable_104, 2, '.', '')) . '</div>';
+                    $auto_fix_104_lines[] = '<div>New <strong>Payable Hrs</strong>: ' . esc_html(number_format((float) $new_payable_104, 2, '.', '')) . '</div>';
+
+                    $auto_fix_104_html = '<div style="padding:10px 12px; background:#eef2ff; border-left:3px solid #6366f1;">' . implode('', $auto_fix_104_lines) . '</div>';
+
+                    $table_html .= '<tr class="wiwts-dryrun-autofix-104">';
+                    $table_html .= '<td colspan="9">' . $auto_fix_104_html . '</td>';
+                    $table_html .= '</tr>';
+                }
+            }
+
+            // Auto-fix preview for Flag 106 (Missing clock-out time) - read-only
+            $auto_fix_html = '';
+            $has_flag_106  = false;
+
+            foreach ($flags_for_entry as $fg_check) {
+                $ft_check = isset($fg_check->flag_type) ? (string) $fg_check->flag_type : '';
+                $fs_check = isset($fg_check->flag_status) ? strtolower((string) $fg_check->flag_status) : '';
+                if ($ft_check === '106' && $fs_check !== 'resolved') {
+                    $has_flag_106 = true;
+                    break;
+                }
+            }
+
+            if ($has_flag_106) {
+                $auto_fix_lines = array();
+                $auto_fix_lines[] = '<div style="font-weight:600; margin-bottom:6px;">Flag 106 Auto-fix Preview</div>';
+
+                $sched_end_display = $this->wiw_format_time_local($sched_end);
+                $auto_fix_lines[] = '<div style="margin-bottom:6px;">Clock Out would be set to <strong>Scheduled End</strong>: ' . esc_html($sched_end_display) . '</div>';
+
+                $new_clocked = 'N/A';
+                $new_payable = 'N/A';
+
+                try {
+                    $tz_fix = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+
+                    if ($clock_in !== '' && $sched_end !== '') {
+                        $dt_in_fix  = new DateTimeImmutable($clock_in, $tz_fix);
+                        $dt_out_fix = new DateTimeImmutable($sched_end, $tz_fix);
+
+                        if ($dt_out_fix <= $dt_in_fix) {
+                            $new_clocked = '0.00';
+                            $new_payable = '0.00';
+                        } else {
+                            // Clocked hours: diff(clock_in, new_clock_out) - break
+                            $int_fix = $dt_in_fix->diff($dt_out_fix);
+                            $sec_fix = ($int_fix->days * 86400) + ($int_fix->h * 3600) + ($int_fix->i * 60) + $int_fix->s;
+
+                            $sec_fix -= ((int) $break_min * 60);
+                            if ($sec_fix < 0) {
+                                $sec_fix = 0;
+                            }
+
+                            $new_clocked_val = round($sec_fix / 3600, 2);
+                            $new_clocked     = number_format($new_clocked_val, 2, '.', '');
+
+                            // Payable hours: clamp to scheduled window (when present) then - break
+                            $new_payable_val = $new_clocked_val;
+
+                            $sched_start_raw_fix = $sched_start;
+                            $sched_end_raw_fix   = $sched_end;
+
+                            if ($sched_start_raw_fix !== '' || $sched_end_raw_fix !== '') {
+                                $pay_in_fix  = $dt_in_fix;
+                                $pay_out_fix = $dt_out_fix;
+
+                                if ($sched_start_raw_fix !== '') {
+                                    $dt_sched_start_fix = new DateTimeImmutable($sched_start_raw_fix, $tz_fix);
+                                    if ($pay_in_fix < $dt_sched_start_fix) {
+                                        $pay_in_fix = $dt_sched_start_fix;
+                                    }
+                                }
+
+                                if ($sched_end_raw_fix !== '') {
+                                    $dt_sched_end_fix = new DateTimeImmutable($sched_end_raw_fix, $tz_fix);
+                                    if ($pay_out_fix > $dt_sched_end_fix) {
+                                        $pay_out_fix = $dt_sched_end_fix;
+                                    }
+                                }
+
+                                if ($pay_out_fix <= $pay_in_fix) {
+                                    $new_payable_val = 0.0;
+                                } else {
+                                    $pint_fix = $pay_in_fix->diff($pay_out_fix);
+                                    $psec_fix = ($pint_fix->days * 86400) + ($pint_fix->h * 3600) + ($pint_fix->i * 60) + $pint_fix->s;
+
+                                    $psec_fix -= ((int) $break_min * 60);
+                                    if ($psec_fix < 0) {
+                                        $psec_fix = 0;
+                                    }
+
+                                    $new_payable_val = round($psec_fix / 3600, 2);
+                                }
+                            }
+
+                            $new_payable = number_format($new_payable_val, 2, '.', '');
+                        }
+                    } else {
+                        $auto_fix_lines[] = '<div><em>Cannot compute preview: scheduled end time or clock in time is missing.</em></div>';
+                    }
+                } catch (Exception $e) {
+                    $auto_fix_lines[] = '<div><em>Cannot compute preview due to a date parsing error.</em></div>';
+                }
+
+                $auto_fix_lines[] = '<div>New <strong>Clocked Hrs</strong>: ' . esc_html($new_clocked) . '</div>';
+                $auto_fix_lines[] = '<div>New <strong>Payable Hrs</strong>: ' . esc_html($new_payable) . '</div>';
+
+                $auto_fix_html = '<div style="padding:10px 12px; background:#fff7ed; border-left:3px solid #f59e0b;">' . implode('', $auto_fix_lines) . '</div>';
+
+                $table_html .= '<tr class="wiwts-dryrun-autofix">';
+                $table_html .= '<td colspan="9">' . $auto_fix_html . '</td>';
+                $table_html .= '</tr>';
+            }
+
+            $flags_html  = '<div style="padding:10px 12px; background:#f6f7f7; border-left:3px solid #dcdcde;">';
+
+            if (empty($flags_for_entry)) {
+                $flags_html .= '<small><strong>Flags:</strong> None</small>';
+            } else {
+                $flags_html .= '<div style="margin-bottom:6px;"><strong>Flags:</strong></div>';
+                $flags_html .= '<table class="wp-list-table widefat fixed striped" style="margin:0; background:#fff; width:100%;">';
+                $flags_html .= '<thead><tr>';
+                $flags_html .= '<th style="width:80px; text-align: left;">Type</th>';
+                $flags_html .= '<th style="text-align: left;">Description</th>';
+                $flags_html .= '<th style="width:120px; text-align: left;">Status</th>';
+                $flags_html .= '</tr></thead><tbody>';
+
+                foreach ($flags_for_entry as $fg) {
+                    $type       = isset($fg->flag_type) ? (string) $fg->flag_type : '';
+                    $desc       = isset($fg->description) ? (string) $fg->description : '';
+                    $status_raw = isset($fg->flag_status) ? (string) $fg->flag_status : '';
+                    $updated_raw = isset($fg->updated_at) ? (string) $fg->updated_at : '';
+
+                    $status_label = (strtolower($status_raw) === 'resolved') ? 'Resolved' : 'Unresolved';
+
+                    $flags_html .= '<tr>';
+                    $flags_html .= '<td>' . esc_html($type !== '' ? $type : 'N/A') . '</td>';
+                    $flags_html .= '<td>' . esc_html($desc !== '' ? $desc : 'N/A') . '</td>';
+                    $flags_html .= '<td>' . esc_html($status_label) . '</td>';
+                    $flags_html .= '</tr>';
+                }
+
+                $flags_html .= '</tbody></table>';
+            }
+
+            $flags_html .= '</div>';
+
+            // Flags row
+            $table_html .= '<tr>';
+            $table_html .= '<td colspan="9" style="padding:0;">' . $flags_html . '</td>';
+            $table_html .= '</tr>';
+
+            // Edit logs row (read-only)
+            $entry_id_int   = isset($dr->id) ? (int) $dr->id : 0;
+            $wiw_time_id_str = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+
+            $logs_for_entry = array();
+
+            // Primary: entry_id
+            if ($entry_id_int > 0 && isset($edit_logs_map['by_entry_id'][$entry_id_int]) && is_array($edit_logs_map['by_entry_id'][$entry_id_int])) {
+                $logs_for_entry = $edit_logs_map['by_entry_id'][$entry_id_int];
+            }
+            // Fallback: wiw_time_id
+            elseif ($wiw_time_id_str !== '' && isset($edit_logs_map['by_wiw_time_id'][$wiw_time_id_str]) && is_array($edit_logs_map['by_wiw_time_id'][$wiw_time_id_str])) {
+                $logs_for_entry = $edit_logs_map['by_wiw_time_id'][$wiw_time_id_str];
+            }
+
+            $logs_html  = '<div style="padding:10px 12px; background:#f6f7f7; border-left:3px solid #2271b1;">';
+
+            if (empty($logs_for_entry)) {
+                $logs_html .= '<small><strong>Edit Logs:</strong> None</small>';
+            } else {
+                $logs_html .= '<div style="margin-bottom:6px;"><strong>Edit Logs:</strong></div>';
+                $logs_html .= '<table class="wp-list-table widefat fixed striped" style="margin:0; background:#fff; width:100%;">';
+                $logs_html .= '<thead><tr>';
+                $logs_html .= '<th style="width:100px; text-align:left;">Type</th>';
+                $logs_html .= '<th style="text-align:left;">Change</th>';
+                $logs_html .= '<th style="width:160px; text-align:left;">Edited By</th>';
+                $logs_html .= '<th style="width:180px; text-align:left;">Date</th>';
+                $logs_html .= '</tr></thead><tbody>';
+
+                foreach ($logs_for_entry as $lg) {
+                    $edit_type  = isset($lg->edit_type) ? (string) $lg->edit_type : '';
+                    $old_value  = isset($lg->old_value) ? (string) $lg->old_value : '';
+                    $new_value  = isset($lg->new_value) ? (string) $lg->new_value : '';
+
+                    $editor = '';
+                    if (isset($lg->edited_by_display_name) && (string) $lg->edited_by_display_name !== '') {
+                        $editor = (string) $lg->edited_by_display_name;
+                    } elseif (isset($lg->edited_by_user_login) && (string) $lg->edited_by_user_login !== '') {
+                        $editor = (string) $lg->edited_by_user_login;
+                    } else {
+                        $editor = 'System';
+                    }
+
+                    $created_at_raw = isset($lg->created_at) ? (string) $lg->created_at : '';
+                    $created_at_disp = ($created_at_raw !== '')
+                        ? $this->wiw_format_datetime_local_pretty($created_at_raw)
+                        : 'N/A';
+
+                    // Format old/new values for display (convert datetimes to local 12-hour time)
+                    $old_disp = 'N/A';
+                    $new_disp = 'N/A';
+
+                    if (trim($old_value) !== '') {
+                        $old_disp = $this->wiw_format_edit_log_value_for_display($old_value);
+                    }
+                    if (trim($new_value) !== '') {
+                        $new_disp = $this->wiw_format_edit_log_value_for_display($new_value);
+                    }
+
+                    $change = (trim($old_value) !== '' || trim($new_value) !== '')
+                        ? '' . $old_disp . ' → ' . $new_disp . ''
+                        : '—';
+
+                    $logs_html .= '<tr>';
+                    $logs_html .= '<td>' . esc_html($edit_type !== '' ? $edit_type : 'N/A') . '</td>';
+                    $logs_html .= '<td>' . esc_html($change) . '</td>';
+                    $logs_html .= '<td>' . esc_html($editor) . '</td>';
+                    $logs_html .= '<td>' . esc_html($created_at_disp) . '</td>';
+                    $logs_html .= '</tr>';
+                }
+
+                $logs_html .= '</tbody></table>';
+            }
+
+            $logs_html .= '</div>';
+
+            $table_html .= '<tr>';
+            $table_html .= '<td colspan="9" style="padding:0;">' . $logs_html . '</td>';
+            $table_html .= '</tr>';
+
+            // Preview: Auto-approval edit log row (read-only) — placed AFTER logs to avoid breaking expand-row structure
+            // Use the same pretty formatting the Edit Logs table uses.
+            $auto_log_created_at_raw  = $now->format('Y-m-d H:i:s');
+            $auto_log_created_at_disp = $this->wiw_format_datetime_local_pretty($auto_log_created_at_raw);
+
+            $auto_log_html  = '<div style="padding:10px 12px; background:#e6fffa; border-left:3px solid #14b8a6;">';
+            $auto_log_html .= '<div style="font-weight:600; margin-bottom:6px;">Auto-Approval Edit Log Preview</div>';
+            $auto_log_html .= '<table class="wp-list-table widefat fixed" style="margin:0; background:#fff; width:100%;">';
+            $auto_log_html .= '<tbody>';
+
+            $auto_log_html .= '<tr>';
+            $auto_log_html .= '<td><strong>Edited By</strong></td>';
+            $auto_log_html .= '<td>' . esc_html('Automatically Approved') . '</td>';
+            $auto_log_html .= '</tr>';
+
+            $auto_log_html .= '<tr>';
+            $auto_log_html .= '<td><strong>Date</strong></td>';
+            $auto_log_html .= '<td>' . esc_html($auto_log_created_at_disp) . '</td>';
+            $auto_log_html .= '</tr>';
+
+            $auto_log_html .= '</tbody></table>';
+            $auto_log_html .= '</div>';
+
+            $table_html .= '<tr class="wiwts-dryrun-autolog-preview">';
+            $table_html .= '<td colspan="9" style="padding:0;">' . $auto_log_html . '</td>';
+            $table_html .= '</tr>';
+        }
+
+        $table_html .= '</tbody></table>';
+    }
+
+    return array(
+        'report_text' => $report,
+        'table_html'  => $table_html,
+    );
 }
 
 // Fetch past-due pending entries for dry run display.

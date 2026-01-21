@@ -178,6 +178,10 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             if ( $session_token ) {
                 echo '<div class="notice notice-info"><p><strong>Current Session Token:</strong> A valid token is stored and will be used for API requests.</p></div>';
             }
+
+            if ( isset( $_GET['wiwts_report_generated'] ) ) {
+                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report generated.</strong></p></div>';
+            }
             ?>
 
             <form method="post" action="options.php">
@@ -199,6 +203,18 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 <?php wp_nonce_field( 'wiw_login_action', 'wiw_login_nonce' ); ?>
 
                 <?php submit_button( 'Log In & Get Session Token', 'secondary', 'submit_login' ); ?>
+            </form>
+
+            <hr/>
+
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <h2>3. Generate Auto-Approval Dry-Run Report</h2>
+                <p>Generate a read-only dry-run report that mirrors the current preview page. This does not approve any records.</p>
+
+                <input type="hidden" name="action" value="wiwts_generate_auto_approve_report" />
+                <?php wp_nonce_field( 'wiwts_generate_auto_approve_report', 'wiwts_generate_auto_approve_report_nonce' ); ?>
+
+                <?php submit_button( 'Generate Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
             </form>
         </div>
         <?php
