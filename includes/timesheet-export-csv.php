@@ -269,8 +269,8 @@ function wiwts_export_csv_handle_download() {
         $sql .= " WHERE " . implode( ' AND ', $where );
     }
 
-    // Stable ordering: by date, then employee, then id.
-    $sql .= " ORDER BY e.date ASC, ts.employee_name ASC, e.id ASC";
+    // Stable ordering: group by employee, then date, then entry id.
+    $sql .= " ORDER BY ts.employee_name ASC, e.date ASC, e.id ASC";
 
     $prepared = ! empty( $args ) ? $wpdb->prepare( $sql, $args ) : $sql; // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
     $rows     = $wpdb->get_results( $prepared );
@@ -290,20 +290,20 @@ function wiwts_export_csv_handle_download() {
 
     $out = fopen( 'php://output', 'w' );
 
-    // Template headers (must mirror the provided spreadsheet exactly).
-    fputcsv( $out, array(
-        'Child Care',
-        'ECA/RECE',
-        'Hours',
-        'Date',
-        'Total no. of hours',
-        'employee',
-        'Time sheet',
-        'Pay',
-        'Invoiced',
-        'ECA hours',
-        'RECE hours',
-    ) );
+// Template headers (must mirror the provided spreadsheet exactly).
+fputcsv( $out, array(
+    'Child Care',
+    'ECA/RECE',
+    'Hours',
+    'Date',
+    'Total no. of hours',
+    'employee',
+    'Time sheet',
+    'Pay',
+    'Invoiced',
+    'ECA hours',
+    'RECE hours',
+) );
 
     if ( ! empty( $rows ) ) {
         $tz = wp_timezone();
@@ -323,16 +323,20 @@ function wiwts_export_csv_handle_download() {
                 isset( $r->scheduled_end ) ? $r->scheduled_end : ''
             );
 
-            // Column D: Date (single day; if shift spans midnight, we still use the start date = stored e.date)
-            $date_ymd = isset( $r->date ) ? (string) $r->date : '';
-            $date_out = '';
-            if ( $date_ymd !== '' ) {
-                $ts = strtotime( $date_ymd . ' 00:00:00' );
-                if ( $ts ) {
-                    // Matches the template style like "Jan 2"
-                    $date_out = wp_date( 'M j', $ts, $tz );
-                }
-            }
+$date_ymd = isset( $r->date ) ? (string) $r->date : '';
+$date_out = '';
+if ( $date_ymd !== '' ) {
+    try {
+        // IMPORTANT: avoid strtotime() + wp_date() timezone rollover (UTC midnight -> prior day in local TZ).
+        // Build the date in the intended timezone directly.
+        $dt_local = new DateTimeImmutable( $date_ymd . ' 00:00:00', $tz );
+
+        // Matches the template style like "Jan 2" (Excel often renders as "2-Jan" / "21-Dec")
+        $date_out = $dt_local->format( 'M j' );
+    } catch ( Exception $e ) {
+        $date_out = '';
+    }
+}
 
             // Column E: Total no. of hours (scheduled_hours)
             $sched_hours = wiwts_export_format_hours_decimal( isset( $r->scheduled_hours ) ? $r->scheduled_hours : '' );
@@ -359,19 +363,20 @@ function wiwts_export_csv_handle_download() {
                 // No Position => both blank
             }
 
-            fputcsv( $out, array(
-                $location_name,   // A
-                $pos,             // B
-                $hours_range,     // C
-                $date_out,        // D
-                $sched_hours,     // E
-                $emp_name,        // F
-                $timesheet_yes,   // G
-                $pay_blank,       // H
-                $invoiced_blank,  // I
-                $eca_hours,       // J
-                $rece_hours,      // K
-            ) );
+fputcsv( $out, array(
+    $location_name,   // A
+    $pos,             // B
+    $hours_range,     // C
+    $date_out,        // D
+    $sched_hours,     // E
+    $emp_name,        // F
+    $timesheet_yes,   // G
+    $pay_blank,       // H
+    $invoiced_blank,  // I
+    $eca_hours,       // J
+    $rece_hours,      // K
+) );
+
         }
     }
 

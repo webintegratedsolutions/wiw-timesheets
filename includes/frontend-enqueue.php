@@ -21,9 +21,13 @@ function wiwts_enqueue_client_ui_assets() {
 		return;
 	}
 
-	if ( ! has_shortcode( $post->post_content, 'wiw_timesheets_client' ) ) {
-		return;
-	}
+if (
+    ! has_shortcode( $post->post_content, 'wiw_timesheets_client' )
+    && ! has_shortcode( $post->post_content, 'wiw_timesheets_client_filter' )
+    && ! has_shortcode( $post->post_content, 'wiw_timesheets_client_records' )
+) {
+    return;
+}
 
 	// CSS
 	$css_rel  = 'css/wiw-client-ui.css';
