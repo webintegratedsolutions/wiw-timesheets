@@ -254,6 +254,8 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 <?php submit_button( 'Generate Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
             </form>
 
+            <hr/>
+
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                 <h2>4. Email Latest Dry-Run Report</h2>
                 <p>Send the most recent dry-run report to the configured report email address.</p>
@@ -274,7 +276,15 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 }
                 ?>
 
-                <?php submit_button( 'Send Latest Report Email', 'secondary', 'submit_send_report_email', false, array( 'disabled' => ! ( $email_ready && $report_ready ) ) ); ?>
+                <?php
+                $send_disabled = ! ( $email_ready && $report_ready );
+                $send_attrs    = $send_disabled ? ' disabled="disabled" aria-disabled="true"' : '';
+                ?>
+                <p>
+                    <button type="submit" class="button button-secondary" name="submit_send_report_email"<?php echo $send_attrs; ?>>
+                        Send Latest Report Email
+                    </button>
+                </p>
             </form>
 
             <hr/>
