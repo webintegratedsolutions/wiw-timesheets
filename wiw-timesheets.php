@@ -3345,6 +3345,37 @@ function timeTo12h(v){
       return;
     }
 
+    // Print (approved section week header)
+    if (t && t.classList && t.classList.contains("wiw-week-print-btn")) {
+      e.preventDefault();
+
+      try {
+        var wk = t.closest(".wiw-week-group");
+        if (!wk) return;
+
+        // Clear any previous print target
+        var prev = document.querySelector("#wiwts-client-records-view .wiw-week-group.wiw-print-target");
+        if (prev && prev !== wk) {
+          prev.classList.remove("wiw-print-target");
+        }
+
+        wk.classList.add("wiw-print-target");
+
+        var cleanup = function(){
+          try { wk.classList.remove("wiw-print-target"); } catch(e2) {}
+          window.removeEventListener("afterprint", cleanup);
+        };
+
+        window.addEventListener("afterprint", cleanup);
+
+        window.print();
+      } catch(err) {
+        // Fallback: just open print dialog for whole page
+        try { window.print(); } catch(e3) {}
+      }
+      return;
+    }
+
     // Reset Preview modal close (X / backdrop)
     if (t && (t.id === "wiwts-reset-preview-close" || t.id === "wiwts-reset-preview-backdrop")) {
       e.preventDefault();
@@ -3771,6 +3802,28 @@ HTML;
 #wiwts-client-records-view table.wp-list-table th { white-space: nowrap; }
 #wiwts-client-records-view .wiw-client-actions { gap: 4px !important; }
 #wiwts-client-records-view .wiw-client-actions .wiw-btn { padding: 6px 10px; }
+@media print {
+  /* Print only the selected week table */
+  body * { visibility: hidden !important; }
+  #wiwts-client-records-view .wiw-print-target,
+  #wiwts-client-records-view .wiw-print-target * { visibility: visible !important; }
+
+  #wiwts-client-records-view .wiw-print-target { position: absolute; left: 0; top: 0; width: 100%; }
+
+  /* Hide interactive UI + Actions column for print */
+  #wiwts-client-records-view .wiw-print-target .wiw-col-actions { display: none !important; }
+  #wiwts-client-records-view .wiw-print-target button,
+  #wiwts-client-records-view .wiw-print-target input,
+  #wiwts-client-records-view .wiw-print-target select,
+  #wiwts-client-records-view .wiw-print-target textarea { display: none !important; }
+
+  /* Hide the Print button itself in print output */
+  #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
+
+  /* Avoid breaking rows across pages where possible */
+  #wiwts-client-records-view .wiw-print-target table { page-break-inside: auto; }
+  #wiwts-client-records-view .wiw-print-target tr { page-break-inside: avoid; page-break-after: auto; }
+}
 </style>';
 
 
@@ -3814,11 +3867,11 @@ HTML;
                 $label_start = date_i18n('F d, Y', strtotime($wk_start));
                 $label_end   = date_i18n('F d, Y', strtotime($wk_end));
 
-                $out .= '<div class="wiw-week-group" style="margin:18px 0 10px 0;">';
+                $out .= '<div class="wiw-week-group" data-week-start="' . esc_attr($wk_start) . '" data-week-end="' . esc_attr($wk_end) . '" style="margin:18px 0 10px 0;">';
                 $out .= '<div class="wiw-week-header" style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px 0;">';
                 $out .= '<h4 style="margin:0;">Week of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h4>';
                 if ($is_done_section) {
-                    $out .= '<button type="button" class="button wiw-week-print-btn" disabled="disabled" title="Print coming soon">Print Timesheet</button>';
+                    $out .= '<button type="button" class="button wiw-week-print-btn" title="Print coming soon">Print Timesheet</button>';
                 }
                 $out .= '</div>';
 
@@ -3834,9 +3887,8 @@ HTML;
                 $out .= '<th style="width:90px;">Sched. Hrs</th>';
                 $out .= '<th style="width:95px;">Clocked Hrs</th>';
                 $out .= '<th style="width:95px;">Payable Hrs</th>';
-                $out .= '<th style="width:140px;">Actions</th>';
+                $out .= '<th class="wiw-col-actions" style="width:140px;">Actions</th>';
                 $out .= '</tr></thead><tbody>';
-
 
                 // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) BEGIN ===
                 // Used for Approve confirmation flags list in row rendering (client records view).
@@ -3933,7 +3985,8 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
 
                     if ($is_archived_row) {
 
-                        $out .= '<td><span class="wiw-muted">Archived</span></td>';
+                        $out .= '<td class="wiw-col-actions"><span class="wiw-muted">Archived</span></td>';
+
                     } else {
 
                         $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
@@ -4026,7 +4079,8 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
 
                         $actions_html .= '</div>';
 
-                        $out .= '<td>' . $actions_html . '</td>';
+                        $out .= '<td class="wiw-col-actions">' . $actions_html . '</td>';
+
                     }
 
                     $out .= '</tr>';
