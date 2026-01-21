@@ -3361,8 +3361,29 @@ function timeTo12h(v){
 
         wk.classList.add("wiw-print-target");
 
+        // ✅ Expand the Flags + Additional Time + Edit Logs <details> blocks for print output
+        var detailsToOpen = wk.querySelectorAll("details.wiw-flags, details.wiw-edit-logs");
+        var prevOpenStates = [];
+        try {
+          for (var i = 0; i < detailsToOpen.length; i++) {
+            prevOpenStates[i] = detailsToOpen[i].hasAttribute("open");
+            detailsToOpen[i].setAttribute("open", "open");
+          }
+        } catch(e1) {}
+
         var cleanup = function(){
-          try { wk.classList.remove("wiw-print-target"); } catch(e2) {}
+          // Restore the user's previous expanded/collapsed states after printing
+          try {
+            for (var i = 0; i < detailsToOpen.length; i++) {
+              if (prevOpenStates[i]) {
+                detailsToOpen[i].setAttribute("open", "open");
+              } else {
+                detailsToOpen[i].removeAttribute("open");
+              }
+            }
+          } catch(e2) {}
+
+          try { wk.classList.remove("wiw-print-target"); } catch(e3) {}
           window.removeEventListener("afterprint", cleanup);
         };
 
@@ -3371,7 +3392,7 @@ function timeTo12h(v){
         window.print();
       } catch(err) {
         // Fallback: just open print dialog for whole page
-        try { window.print(); } catch(e3) {}
+        try { window.print(); } catch(e4) {}
       }
       return;
     }
@@ -3811,7 +3832,12 @@ HTML;
   #wiwts-client-records-view .wiw-print-target { position: absolute; left: 0; top: 0; width: 100%; }
 
   /* Hide interactive UI + Actions column for print */
-  #wiwts-client-records-view .wiw-print-target .wiw-col-actions { display: none !important; }
+  /* Expandable flags: hide summary label and show expanded content in print */
+  #wiwts-client-records-view .wiw-print-target details.wiw-flags > summary { display: none !important; }
+  #wiwts-client-records-view .wiw-print-target details.wiw-flags > div { display: block !important; }
+  /* Expandable edit logs: hide summary label and show expanded content in print */
+  #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > summary { display: none !important; }
+  #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
   #wiwts-client-records-view .wiw-print-target button,
   #wiwts-client-records-view .wiw-print-target input,
   #wiwts-client-records-view .wiw-print-target select,
