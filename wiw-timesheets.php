@@ -126,6 +126,9 @@ class WIW_Timesheet_Manager
 
         // Manual report generator (admin-post) - dry run only
         add_action('admin_post_wiwts_generate_auto_approve_report', array($this, 'wiwts_handle_generate_auto_approve_report'));
+
+        // Manual report email sender (admin-post) - dry run only
+        add_action('admin_post_wiwts_send_auto_approve_report_email', array($this, 'wiwts_handle_send_auto_approve_report_email'));
     }
 
 
@@ -5129,6 +5132,66 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
         wp_safe_redirect(add_query_arg('wiwts_report_generated', '1', $redirect_url));
+        exit;
+    }
+
+    /**
+     * Manual admin-post email sender (dry run only).
+     */
+    public function wiwts_handle_send_auto_approve_report_email(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        if (
+            ! isset($_POST['wiwts_send_auto_approve_report_email_nonce']) ||
+            ! wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wiwts_send_auto_approve_report_email_nonce'])), 'wiwts_send_auto_approve_report_email')
+        ) {
+            wp_die('Security check failed.');
+        }
+
+        $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
+        if ($recipient === '' || ! is_email($recipient)) {
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+            wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_email', $redirect_url));
+            exit;
+        }
+
+        $report_entry = get_option('wiwts_auto_approve_dry_run_report', array());
+        if (! is_array($report_entry) || empty($report_entry)) {
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+            wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_report', $redirect_url));
+            exit;
+        }
+
+        $generated_at = isset($report_entry['generated_at']) ? (string) $report_entry['generated_at'] : '';
+        $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+        $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+
+        $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
+        $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+        if ($generated_at !== '') {
+            $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
+        }
+        if ($report_text !== '') {
+            $message .= '<pre style="white-space:pre-wrap;">' . esc_html($report_text) . '</pre>';
+        }
+        if ($table_html !== '') {
+            $message .= '<div style="margin-top:12px;">' . wp_kses_post($table_html) . '</div>';
+        }
+
+        $sent = wp_mail(
+            $recipient,
+            $subject,
+            $message,
+            array('Content-Type: text/html; charset=UTF-8')
+        );
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_arg = $sent ? 'wiwts_report_emailed' : 'wiwts_report_email_error';
+        $redirect_val = $sent ? '1' : 'send_failed';
+        wp_safe_redirect(add_query_arg($redirect_arg, $redirect_val, $redirect_url));
         exit;
     }
 

@@ -205,6 +205,20 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             if ( isset( $_GET['wiwts_report_generated'] ) ) {
                 echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report generated.</strong></p></div>';
             }
+            if ( isset( $_GET['wiwts_report_emailed'] ) ) {
+                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report emailed successfully.</strong></p></div>';
+            }
+            if ( isset( $_GET['wiwts_report_email_error'] ) ) {
+                $error_code = sanitize_text_field( wp_unslash( $_GET['wiwts_report_email_error'] ) );
+                if ( $error_code === 'missing_email' ) {
+                    $error_message = 'Please set a valid report email address before sending.';
+                } elseif ( $error_code === 'missing_report' ) {
+                    $error_message = 'Please generate a dry-run report before sending.';
+                } else {
+                    $error_message = 'Report email could not be sent. Please check your mail configuration.';
+                }
+                echo '<div class="notice notice-error is-dismissible"><p><strong>❌ Auto-approval report email failed:</strong> ' . esc_html( $error_message ) . '</p></div>';
+            }
             ?>
 
             <form method="post" action="options.php">
@@ -242,7 +256,40 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <hr/>
 
-            <h2>4. Auto-Approval Dry-Run Report Log</h2>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <h2>4. Email Latest Dry-Run Report</h2>
+                <p>Send the most recent dry-run report to the configured report email address.</p>
+
+                <input type="hidden" name="action" value="wiwts_send_auto_approve_report_email" />
+                <?php wp_nonce_field( 'wiwts_send_auto_approve_report_email', 'wiwts_send_auto_approve_report_email_nonce' ); ?>
+
+                <?php
+                $report_email = get_option( 'wiw_auto_approve_report_email' );
+                $report_entry = get_option( 'wiwts_auto_approve_dry_run_report', array() );
+                $email_ready  = is_string( $report_email ) && is_email( $report_email );
+                $report_ready = is_array( $report_entry ) && ! empty( $report_entry );
+                if ( ! $email_ready ) {
+                    echo '<p class="description">Set a valid report email above before sending.</p>';
+                }
+                if ( ! $report_ready ) {
+                    echo '<p class="description">Generate a dry-run report first to enable sending.</p>';
+                }
+                ?>
+
+                <?php
+                $send_disabled = ! ( $email_ready && $report_ready );
+                $send_attrs    = $send_disabled ? ' disabled="disabled" aria-disabled="true"' : '';
+                ?>
+                <p>
+                    <button type="submit" class="button button-secondary" name="submit_send_report_email"<?php echo $send_attrs; ?>>
+                        Send Latest Report Email
+                    </button>
+                </p>
+            </form>
+
+            <hr/>
+
+            <h2>5. Auto-Approval Dry-Run Report Log</h2>
             <p>This log stores every generated dry-run report for audit purposes.</p>
             <?php
             $report_log = get_option( 'wiwts_auto_approve_dry_run_report_log', array() );
