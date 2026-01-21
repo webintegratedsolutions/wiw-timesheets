@@ -3774,7 +3774,7 @@ HTML;
 </style>';
 
 
-        $render_weeks = function (array $weeks) use (&$out, $client_id, $tz) {
+        $render_weeks = function (array $weeks, $is_done_section = false) use (&$out, $client_id, $tz) {
 
             foreach ($weeks as $wk) {
 
@@ -3815,7 +3815,12 @@ HTML;
                 $label_end   = date_i18n('F d, Y', strtotime($wk_end));
 
                 $out .= '<div class="wiw-week-group" style="margin:18px 0 10px 0;">';
-                $out .= '<h4 style="margin:0 0 8px 0;">Week of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h4>';
+                $out .= '<div class="wiw-week-header" style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px 0;">';
+                $out .= '<h4 style="margin:0;">Week of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h4>';
+                if ($is_done_section) {
+                    $out .= '<button type="button" class="button wiw-week-print-btn" disabled="disabled" title="Print coming soon">Print Timesheet</button>';
+                }
+                $out .= '</div>';
 
                 // Table header = same columns as main client view (client layout; no Location column)
                 $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;width:100%;">';
@@ -4351,7 +4356,7 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                 . '<span class="dashicons dashicons-clock" aria-hidden="true"></span> '
                 . 'Pending Timesheets for Approval'
                 . '</h3>';
-            $render_weeks($weeks_pending);
+            $render_weeks($weeks_pending, false);
         }
 
         if (! empty($weeks_pending) && ! empty($weeks_done)) {
@@ -4363,7 +4368,7 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                 . '<span class="dashicons dashicons-yes-alt" aria-hidden="true"></span> '
                 . 'Approved Timesheets'
                 . '</h3>';
-            $render_weeks($weeks_done);
+            $render_weeks($weeks_done, true);
         }
 
         // Include the same Reset Preview Modal + inline JS used by the main client view.
