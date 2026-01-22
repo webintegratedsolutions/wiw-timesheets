@@ -65,6 +65,15 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             'wiw-timesheets-settings',
             array( $this, 'admin_settings_page' )
         );
+
+        add_submenu_page(
+            'wiw-timesheets',
+            'WIW Approvals',
+            'Approvals',
+            'manage_options',
+            'wiw-timesheets-approvals',
+            array( $this, 'admin_approvals_page' )
+        );
     }
 
     public function register_settings() {
@@ -202,6 +211,39 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 echo '<div class="notice notice-info"><p><strong>Current Session Token:</strong> A valid token is stored and will be used for API requests.</p></div>';
             }
 
+            ?>
+
+            <form method="post" action="options.php">
+                <h2>1. Save API Credentials</h2>
+                <?php
+                settings_fields( 'wiw_timesheets_group' );
+                do_settings_sections( 'wiw-timesheets-settings' );
+                submit_button( 'Save Credentials', 'primary', 'submit_settings' );
+                ?>
+            </form>
+
+            <hr/>
+
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <h2>2. Get Session Token</h2>
+                <p>Once credentials are saved above, click the button below to log into the When I Work API and retrieve the required session token.</p>
+
+                <input type="hidden" name="action" value="wiw_login_handler" />
+                <?php wp_nonce_field( 'wiw_login_action', 'wiw_login_nonce' ); ?>
+
+                <?php submit_button( 'Log In & Get Session Token', 'secondary', 'submit_login' ); ?>
+            </form>
+
+        </div>
+        <?php
+    }
+
+    public function admin_approvals_page() {
+        ?>
+        <div class="wrap">
+            <h1>WIW Timesheets Approvals</h1>
+
+            <?php
             if ( isset( $_GET['wiwts_report_generated'] ) ) {
                 echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report generated.</strong></p></div>';
             }
@@ -232,31 +274,8 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             }
             ?>
 
-            <form method="post" action="options.php">
-                <h2>1. Save API Credentials</h2>
-                <?php
-                settings_fields( 'wiw_timesheets_group' );
-                do_settings_sections( 'wiw-timesheets-settings' );
-                submit_button( 'Save Credentials', 'primary', 'submit_settings' );
-                ?>
-            </form>
-
-            <hr/>
-
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>2. Get Session Token</h2>
-                <p>Once credentials are saved above, click the button below to log into the When I Work API and retrieve the required session token.</p>
-
-                <input type="hidden" name="action" value="wiw_login_handler" />
-                <?php wp_nonce_field( 'wiw_login_action', 'wiw_login_nonce' ); ?>
-
-                <?php submit_button( 'Log In & Get Session Token', 'secondary', 'submit_login' ); ?>
-            </form>
-
-            <hr/>
-
-            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>3. Generate Auto-Approval Dry-Run Report</h2>
+                <h2>1. Generate Auto-Approval Dry-Run Report</h2>
                 <p>Generate a read-only dry-run report that mirrors the current preview page. This does not approve any records.</p>
 
                 <input type="hidden" name="action" value="wiwts_generate_auto_approve_report" />
@@ -268,7 +287,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             <hr/>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>4. Email Latest Dry-Run Report</h2>
+                <h2>2. Email Latest Dry-Run Report</h2>
                 <p>Send the most recent dry-run report to the configured report email address.</p>
 
                 <input type="hidden" name="action" value="wiwts_send_auto_approve_report_email" />
@@ -280,7 +299,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 $email_ready  = is_string( $report_email ) && is_email( $report_email );
                 $report_ready = is_array( $report_entry ) && ! empty( $report_entry );
                 if ( ! $email_ready ) {
-                    echo '<p class="description">Set a valid report email above before sending.</p>';
+                    echo '<p class="description">Set a valid report email in the Settings page before sending.</p>';
                 }
                 if ( ! $report_ready ) {
                     echo '<p class="description">Generate a dry-run report first to enable sending.</p>';
@@ -301,7 +320,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             <hr/>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>5. Manual Run Auto-Approvals</h2>
+                <h2>3. Manual Run Auto-Approvals</h2>
                 <p>Run Step 5 auto-approvals once (includes Flag 104/106 auto-fixes). Requires auto-approvals to be enabled.</p>
 
                 <input type="hidden" name="action" value="wiwts_manual_run_auto_approve" />
@@ -310,7 +329,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 <?php
                 $auto_approve_enabled = (string) get_option( 'wiw_enable_auto_approvals', '' ) === '1';
                 if ( ! $auto_approve_enabled ) {
-                    echo '<p class="description">Enable auto-approvals above to run this action.</p>';
+                    echo '<p class="description">Enable auto-approvals in Settings to run this action.</p>';
                 }
                 $manual_run_disabled = ! $auto_approve_enabled;
                 $manual_run_attrs    = $manual_run_disabled ? ' disabled="disabled" aria-disabled="true"' : '';
@@ -324,7 +343,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <hr/>
 
-            <h2>6. Auto-Approval Dry-Run Report Log</h2>
+            <h2>4. Auto-Approval Dry-Run Report Log</h2>
             <p>This log stores every generated dry-run report for audit purposes.</p>
             <?php
             $report_log = get_option( 'wiwts_auto_approve_dry_run_report_log', array() );
