@@ -130,6 +130,11 @@ class WIW_Timesheet_Manager
         // Manual report email sender (admin-post) - dry run only
         add_action('admin_post_wiwts_send_auto_approve_report_email', array($this, 'wiwts_handle_send_auto_approve_report_email'));
 
+        // === WIWTS PURGE REPORT LOG ACTION HOOK BEGIN ===
+        // Manual report log purge (admin-post)
+        add_action('admin_post_wiwts_purge_auto_approve_report_log', array($this, 'wiwts_handle_purge_auto_approve_report_log'));
+        // === WIWTS PURGE REPORT LOG ACTION HOOK END ===
+
         // Manual auto-approval runner (admin-post) - Step 5 only
         add_action('admin_post_wiwts_manual_run_auto_approve', array($this, 'wiwts_handle_manual_run_auto_approve'));
     }
@@ -5197,6 +5202,34 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         wp_safe_redirect(add_query_arg($redirect_arg, $redirect_val, $redirect_url));
         exit;
     }
+
+    // === WIWTS PURGE REPORT LOG HANDLER BEGIN ===
+    /**
+     * Manual admin-post report log purge (dry run only).
+     */
+    public function wiwts_handle_purge_auto_approve_report_log(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        if (
+            ! isset($_POST['wiwts_purge_auto_approve_report_log_nonce']) ||
+            ! wp_verify_nonce(
+                sanitize_text_field(wp_unslash($_POST['wiwts_purge_auto_approve_report_log_nonce'])),
+                'wiwts_purge_auto_approve_report_log'
+            )
+        ) {
+            wp_die('Security check failed.');
+        }
+
+        delete_option('wiwts_auto_approve_dry_run_report_log');
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        wp_safe_redirect(add_query_arg('wiwts_report_log_purged', '1', $redirect_url));
+        exit;
+    }
+    // === WIWTS PURGE REPORT LOG HANDLER END ===
 
     /**
      * Manual admin-post runner for Step 5 auto-approvals (with auto-fixes).
