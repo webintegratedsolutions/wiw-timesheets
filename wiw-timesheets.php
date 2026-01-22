@@ -129,6 +129,9 @@ class WIW_Timesheet_Manager
 
         // Manual report email sender (admin-post) - dry run only
         add_action('admin_post_wiwts_send_auto_approve_report_email', array($this, 'wiwts_handle_send_auto_approve_report_email'));
+
+        // Manual auto-approval runner (admin-post) - Step 5 only
+        add_action('admin_post_wiwts_manual_run_auto_approve', array($this, 'wiwts_handle_manual_run_auto_approve'));
     }
 
 
@@ -5192,6 +5195,45 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         $redirect_arg = $sent ? 'wiwts_report_emailed' : 'wiwts_report_email_error';
         $redirect_val = $sent ? '1' : 'send_failed';
         wp_safe_redirect(add_query_arg($redirect_arg, $redirect_val, $redirect_url));
+        exit;
+    }
+
+    /**
+     * Manual admin-post runner for Step 5 auto-approvals (with auto-fixes).
+     */
+    public function wiwts_handle_manual_run_auto_approve(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        if (
+            ! isset($_POST['wiwts_manual_run_auto_approve_nonce']) ||
+            ! wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wiwts_manual_run_auto_approve_nonce'])), 'wiwts_manual_run_auto_approve')
+        ) {
+            wp_die('Security check failed.');
+        }
+
+        $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+
+        if (empty($result['enabled'])) {
+            wp_safe_redirect(add_query_arg('wiwts_auto_approve_run', 'disabled', $redirect_url));
+            exit;
+        }
+
+        $redirect_url = add_query_arg(
+            array(
+                'wiwts_auto_approve_run' => '1',
+                'approved'              => (int) ($result['approved'] ?? 0),
+                'skipped'               => (int) ($result['skipped'] ?? 0),
+                'updated'               => (int) ($result['updated'] ?? 0),
+            ),
+            $redirect_url
+        );
+
+        wp_safe_redirect($redirect_url);
         exit;
     }
 

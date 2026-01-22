@@ -219,6 +219,17 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 }
                 echo '<div class="notice notice-error is-dismissible"><p><strong>❌ Auto-approval report email failed:</strong> ' . esc_html( $error_message ) . '</p></div>';
             }
+            if ( isset( $_GET['wiwts_auto_approve_run'] ) ) {
+                $run_status = sanitize_text_field( wp_unslash( $_GET['wiwts_auto_approve_run'] ) );
+                if ( $run_status === 'disabled' ) {
+                    echo '<div class="notice notice-error is-dismissible"><p><strong>❌ Auto-approval run blocked:</strong> Enable auto-approvals before running.</p></div>';
+                } else {
+                    $approved = isset( $_GET['approved'] ) ? absint( $_GET['approved'] ) : 0;
+                    $skipped  = isset( $_GET['skipped'] ) ? absint( $_GET['skipped'] ) : 0;
+                    $updated  = isset( $_GET['updated'] ) ? absint( $_GET['updated'] ) : 0;
+                    echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval run completed.</strong> Approved: ' . esc_html( (string) $approved ) . ', Updated: ' . esc_html( (string) $updated ) . ', Skipped: ' . esc_html( (string) $skipped ) . '.</p></div>';
+                }
+            }
             ?>
 
             <form method="post" action="options.php">
@@ -289,7 +300,31 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <hr/>
 
-            <h2>5. Auto-Approval Dry-Run Report Log</h2>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <h2>5. Manual Run Auto-Approvals</h2>
+                <p>Run Step 5 auto-approvals once (includes Flag 104/106 auto-fixes). Requires auto-approvals to be enabled.</p>
+
+                <input type="hidden" name="action" value="wiwts_manual_run_auto_approve" />
+                <?php wp_nonce_field( 'wiwts_manual_run_auto_approve', 'wiwts_manual_run_auto_approve_nonce' ); ?>
+
+                <?php
+                $auto_approve_enabled = (string) get_option( 'wiw_enable_auto_approvals', '' ) === '1';
+                if ( ! $auto_approve_enabled ) {
+                    echo '<p class="description">Enable auto-approvals above to run this action.</p>';
+                }
+                $manual_run_disabled = ! $auto_approve_enabled;
+                $manual_run_attrs    = $manual_run_disabled ? ' disabled="disabled" aria-disabled="true"' : '';
+                ?>
+                <p>
+                    <button type="submit" class="button button-secondary" name="submit_manual_auto_approve"<?php echo $manual_run_attrs; ?>>
+                        Manual Run Auto-Approvals
+                    </button>
+                </p>
+            </form>
+
+            <hr/>
+
+            <h2>6. Auto-Approval Dry-Run Report Log</h2>
             <p>This log stores every generated dry-run report for audit purposes.</p>
             <?php
             $report_log = get_option( 'wiwts_auto_approve_dry_run_report_log', array() );
