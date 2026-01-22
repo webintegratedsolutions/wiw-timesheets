@@ -126,6 +126,12 @@ class WIW_Timesheet_Manager
 
         // Manual report generator (admin-post) - dry run only
         add_action('admin_post_wiwts_generate_auto_approve_report', array($this, 'wiwts_handle_generate_auto_approve_report'));
+
+        // Manual report email sender (admin-post) - dry run only
+        add_action('admin_post_wiwts_send_auto_approve_report_email', array($this, 'wiwts_handle_send_auto_approve_report_email'));
+
+        // Manual auto-approval runner (admin-post) - Step 5 only
+        add_action('admin_post_wiwts_manual_run_auto_approve', array($this, 'wiwts_handle_manual_run_auto_approve'));
     }
 
 
@@ -5112,18 +5118,221 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
 
-        update_option(
-            'wiwts_auto_approve_dry_run_report',
+        $report_entry = array(
+            'generated_at' => current_time('mysql'),
+            'report_text'  => $report_payload['report_text'],
+            'table_html'   => $report_payload['table_html'],
+        );
+
+        update_option('wiwts_auto_approve_dry_run_report', $report_entry, false);
+
+        $report_log = get_option('wiwts_auto_approve_dry_run_report_log', array());
+        if (! is_array($report_log)) {
+            $report_log = array();
+        }
+        $report_log[] = $report_entry;
+        update_option('wiwts_auto_approve_dry_run_report_log', $report_log, false);
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-approvals');
+        wp_safe_redirect(add_query_arg('wiwts_report_generated', '1', $redirect_url));
+        exit;
+    }
+
+    /**
+     * Manual admin-post email sender (dry run only).
+     */
+    public function wiwts_handle_send_auto_approve_report_email(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        if (
+            ! isset($_POST['wiwts_send_auto_approve_report_email_nonce']) ||
+            ! wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wiwts_send_auto_approve_report_email_nonce'])), 'wiwts_send_auto_approve_report_email')
+        ) {
+            wp_die('Security check failed.');
+        }
+
+        $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
+        if ($recipient === '' || ! is_email($recipient)) {
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-approvals');
+            wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_email', $redirect_url));
+            exit;
+        }
+
+        $report_entry = get_option('wiwts_auto_approve_dry_run_report', array());
+        if (! is_array($report_entry) || empty($report_entry)) {
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-approvals');
+            wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_report', $redirect_url));
+            exit;
+        }
+
+        $generated_at = isset($report_entry['generated_at']) ? (string) $report_entry['generated_at'] : '';
+        $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+        $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+
+        $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
+        $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+        if ($generated_at !== '') {
+            $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
+        }
+        if ($report_text !== '') {
+            $message .= '<pre style="white-space:pre-wrap;">' . esc_html($report_text) . '</pre>';
+        }
+        if ($table_html !== '') {
+            $message .= '<div style="margin-top:12px;">' . wp_kses_post($table_html) . '</div>';
+        }
+
+        $sent = wp_mail(
+            $recipient,
+            $subject,
+            $message,
+            array('Content-Type: text/html; charset=UTF-8')
+        );
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-approvals');
+        $redirect_arg = $sent ? 'wiwts_report_emailed' : 'wiwts_report_email_error';
+        $redirect_val = $sent ? '1' : 'send_failed';
+        wp_safe_redirect(add_query_arg($redirect_arg, $redirect_val, $redirect_url));
+        exit;
+    }
+
+    /**
+     * Manual admin-post runner for Step 5 auto-approvals (with auto-fixes).
+     */
+    public function wiwts_handle_manual_run_auto_approve(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        if (
+            ! isset($_POST['wiwts_manual_run_auto_approve_nonce']) ||
+            ! wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wiwts_manual_run_auto_approve_nonce'])), 'wiwts_manual_run_auto_approve')
+        ) {
+            wp_die('Security check failed.');
+        }
+
+        $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-approvals');
+
+        if (empty($result['enabled'])) {
+            wp_safe_redirect(add_query_arg('wiwts_auto_approve_run', 'disabled', $redirect_url));
+            exit;
+        }
+
+        $redirect_url = add_query_arg(
             array(
-                'generated_at' => current_time('mysql'),
-                'report_text'  => $report_payload['report_text'],
-                'table_html'   => $report_payload['table_html'],
+                'wiwts_auto_approve_run' => '1',
+                'approved'              => (int) ($result['approved'] ?? 0),
+                'skipped'               => (int) ($result['skipped'] ?? 0),
+                'updated'               => (int) ($result['updated'] ?? 0),
             ),
-            false
+            $redirect_url
+        );
+
+        wp_safe_redirect($redirect_url);
+        exit;
+    }
+
+    /**
+     * Manual admin-post email sender (dry run only).
+     */
+    public function wiwts_handle_send_auto_approve_report_email(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        if (
+            ! isset($_POST['wiwts_send_auto_approve_report_email_nonce']) ||
+            ! wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wiwts_send_auto_approve_report_email_nonce'])), 'wiwts_send_auto_approve_report_email')
+        ) {
+            wp_die('Security check failed.');
+        }
+
+        $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
+        if ($recipient === '' || ! is_email($recipient)) {
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+            wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_email', $redirect_url));
+            exit;
+        }
+
+        $report_entry = get_option('wiwts_auto_approve_dry_run_report', array());
+        if (! is_array($report_entry) || empty($report_entry)) {
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+            wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_report', $redirect_url));
+            exit;
+        }
+
+        $generated_at = isset($report_entry['generated_at']) ? (string) $report_entry['generated_at'] : '';
+        $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+        $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+
+        $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
+        $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+        if ($generated_at !== '') {
+            $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
+        }
+        if ($report_text !== '') {
+            $message .= '<pre style="white-space:pre-wrap;">' . esc_html($report_text) . '</pre>';
+        }
+        if ($table_html !== '') {
+            $message .= '<div style="margin-top:12px;">' . wp_kses_post($table_html) . '</div>';
+        }
+
+        $sent = wp_mail(
+            $recipient,
+            $subject,
+            $message,
+            array('Content-Type: text/html; charset=UTF-8')
         );
 
         $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
-        wp_safe_redirect(add_query_arg('wiwts_report_generated', '1', $redirect_url));
+        $redirect_arg = $sent ? 'wiwts_report_emailed' : 'wiwts_report_email_error';
+        $redirect_val = $sent ? '1' : 'send_failed';
+        wp_safe_redirect(add_query_arg($redirect_arg, $redirect_val, $redirect_url));
+        exit;
+    }
+
+    /**
+     * Manual admin-post runner for Step 5 auto-approvals (with auto-fixes).
+     */
+    public function wiwts_handle_manual_run_auto_approve(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Permission denied.');
+        }
+
+        if (
+            ! isset($_POST['wiwts_manual_run_auto_approve_nonce']) ||
+            ! wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wiwts_manual_run_auto_approve_nonce'])), 'wiwts_manual_run_auto_approve')
+        ) {
+            wp_die('Security check failed.');
+        }
+
+        $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+
+        if (empty($result['enabled'])) {
+            wp_safe_redirect(add_query_arg('wiwts_auto_approve_run', 'disabled', $redirect_url));
+            exit;
+        }
+
+        $redirect_url = add_query_arg(
+            array(
+                'wiwts_auto_approve_run' => '1',
+                'approved'              => (int) ($result['approved'] ?? 0),
+                'skipped'               => (int) ($result['skipped'] ?? 0),
+                'updated'               => (int) ($result['updated'] ?? 0),
+            ),
+            $redirect_url
+        );
+
+        wp_safe_redirect($redirect_url);
         exit;
     }
 
@@ -5249,7 +5458,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
         $table_html = '<p><strong>No past-due pending entries found.</strong></p>';
     } else {
         $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
-        $table_html .= '<table class="wp-list-table widefat fixed striped" style="margin-top:8px;width:100%;">';
+        $table_html .= '<table style="margin-top:8px;width:900px;">';
         $table_html .= '<thead><tr>';
         $table_html .= '<th style="width:140px;">&nbsp;</th>';
         $table_html .= '<th style="width:170px;">&nbsp;</th>';
@@ -5672,6 +5881,362 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
     return array(
         'report_text' => $report,
         'table_html'  => $table_html,
+    );
+}
+
+/**
+ * Step 5: Auto-approve past-due entries (with Flag 104/106 auto-fixes).
+ * NOTE: This function is intentionally not wired to cron/manual yet.
+ *
+ * @return array{enabled:bool, approved:int, skipped:int, updated:int}
+ */
+public function wiwts_run_auto_approve_past_due_with_autofix(): array
+{
+    $enabled = (string) get_option('wiw_enable_auto_approvals', '') === '1';
+    if (! $enabled) {
+        return array(
+            'enabled'  => false,
+            'approved' => 0,
+            'skipped'  => 0,
+            'updated'  => 0,
+        );
+    }
+
+    global $wpdb;
+
+    $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+    $now = new DateTimeImmutable('now', $tz);
+    $now_mysql = current_time('mysql');
+
+    // Compute the same cutoff date the dry-run uses.
+    $dow            = (int) $now->format('w'); // 0 Sun ... 6 Sat
+    $days_since_sun = ($dow - 0 + 7) % 7;
+    $week_start_dt  = $now->setTime(0, 0, 0)->modify('-' . $days_since_sun . ' days');
+
+    // This week's Tuesday 08:00 (Tuesday within the current week starting Sunday)
+    $tuesday_8am_dt = $week_start_dt->modify('+2 days')->setTime(8, 0, 0);
+
+    $approval_week_start_dt = ($now < $tuesday_8am_dt)
+        ? $week_start_dt->modify('-7 days')
+        : $week_start_dt;
+
+    $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
+
+    $table_entries   = $wpdb->prefix . 'wiw_timesheet_entries';
+    $table_timesheet = $wpdb->prefix . 'wiw_timesheets';
+    $table_flags     = $wpdb->prefix . 'wiw_timesheet_flags';
+
+    $rows = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT e.*,
+                    t.employee_name AS _wiw_employee_name,
+                    t.employee_id AS _wiw_employee_id,
+                    t.location_id AS _wiw_location_id,
+                    t.location_name AS _wiw_location_name,
+                    t.week_start_date AS _wiw_week_start_date,
+                    t.status AS _wiw_timesheet_status
+             FROM {$table_entries} e
+             LEFT JOIN {$table_timesheet} t ON t.id = e.timesheet_id
+             WHERE e.status = 'pending'
+               AND e.date < %s
+               AND (t.status IS NULL OR LOWER(t.status) NOT IN ('approved', 'finalized'))
+             ORDER BY e.date ASC, e.id ASC",
+            $approval_week_start_ymd
+        )
+    );
+
+    if (! is_array($rows) || empty($rows)) {
+        return array(
+            'enabled'  => true,
+            'approved' => 0,
+            'skipped'  => 0,
+            'updated'  => 0,
+        );
+    }
+
+    $flags_map = $this->wiwts_get_flags_by_wiw_time_id_for_dry_run($rows);
+
+    $approved = 0;
+    $skipped  = 0;
+    $updated  = 0;
+
+    foreach ($rows as $entry) {
+        if (! is_object($entry) || ! isset($entry->id)) {
+            $skipped++;
+            continue;
+        }
+
+        $entry_id = (int) $entry->id;
+        $wiw_time_id = isset($entry->wiw_time_id) ? (int) $entry->wiw_time_id : 0;
+
+        $flags_for_entry = array();
+        if ($wiw_time_id > 0 && isset($flags_map[(string) $wiw_time_id]) && is_array($flags_map[(string) $wiw_time_id])) {
+            $flags_for_entry = $flags_map[(string) $wiw_time_id];
+        }
+
+        $has_flag_106 = false;
+        $has_flag_104 = false;
+        foreach ($flags_for_entry as $flag) {
+            $flag_type = isset($flag->flag_type) ? (string) $flag->flag_type : '';
+            $flag_status = isset($flag->flag_status) ? strtolower((string) $flag->flag_status) : '';
+
+            if ($flag_type === '106' && $flag_status !== 'resolved') {
+                $has_flag_106 = true;
+            }
+            if ($flag_type === '104' && $flag_status !== 'resolved') {
+                $has_flag_104 = true;
+            }
+        }
+
+        $clock_in_raw  = isset($entry->clock_in) ? (string) $entry->clock_in : '';
+        $clock_out_raw = isset($entry->clock_out) ? (string) $entry->clock_out : '';
+        $sched_start   = isset($entry->scheduled_start) ? (string) $entry->scheduled_start : '';
+        $sched_end     = isset($entry->scheduled_end) ? (string) $entry->scheduled_end : '';
+        $break_min     = isset($entry->break_minutes) ? (int) $entry->break_minutes : 0;
+
+        $update_data = array(
+            'status'     => 'approved',
+            'updated_at' => $now_mysql,
+        );
+        $format_map = array(
+            'status'           => '%s',
+            'updated_at'       => '%s',
+            'clock_out'        => '%s',
+            'clocked_hours'    => '%f',
+            'payable_hours'    => '%f',
+            'additional_hours' => '%f',
+            'extra_time_status' => '%s',
+        );
+
+        $log_entries = array();
+
+        $existing_payable = isset($entry->payable_hours) ? (float) $entry->payable_hours : 0.0;
+        $existing_clocked = isset($entry->clocked_hours) ? (float) $entry->clocked_hours : 0.0;
+        $existing_additional = isset($entry->additional_hours) ? (float) $entry->additional_hours : 0.0;
+        $existing_extra_status = isset($entry->extra_time_status) ? (string) $entry->extra_time_status : 'unset';
+
+        // === Flag 106 auto-fix: set clock_out to scheduled_end and recompute hours ===
+        $clock_out_missing = ($clock_out_raw === '' || $clock_out_raw === '0000-00-00 00:00:00');
+        $did_fix_106 = false;
+        if ($has_flag_106 && $clock_out_missing && $clock_in_raw !== '' && $sched_end !== '') {
+            $new_clock_out = $sched_end;
+
+            $new_clocked_val = $existing_clocked;
+            $new_payable_val = $existing_payable;
+            $new_additional  = 0.0;
+
+            try {
+                $dt_in_fix  = new DateTimeImmutable($clock_in_raw, $tz);
+                $dt_out_fix = new DateTimeImmutable($new_clock_out, $tz);
+
+                if ($dt_out_fix <= $dt_in_fix) {
+                    $new_clocked_val = 0.0;
+                    $new_payable_val = 0.0;
+                } else {
+                    $int_fix = $dt_in_fix->diff($dt_out_fix);
+                    $sec_fix = ($int_fix->days * 86400) + ($int_fix->h * 3600) + ($int_fix->i * 60) + $int_fix->s;
+
+                    $sec_fix -= ($break_min * 60);
+                    if ($sec_fix < 0) {
+                        $sec_fix = 0;
+                    }
+
+                    $new_clocked_val = round($sec_fix / 3600, 2);
+
+                    $pay_in_fix  = $dt_in_fix;
+                    $pay_out_fix = $dt_out_fix;
+
+                    if ($sched_start !== '') {
+                        $dt_sched_start_fix = new DateTimeImmutable($sched_start, $tz);
+                        if ($pay_in_fix < $dt_sched_start_fix) {
+                            $pay_in_fix = $dt_sched_start_fix;
+                        }
+                    }
+
+                    if ($sched_end !== '') {
+                        $dt_sched_end_fix = new DateTimeImmutable($sched_end, $tz);
+                        if ($pay_out_fix > $dt_sched_end_fix) {
+                            $pay_out_fix = $dt_sched_end_fix;
+                        }
+                    }
+
+                    if ($pay_out_fix <= $pay_in_fix) {
+                        $new_payable_val = 0.0;
+                    } else {
+                        $pint_fix = $pay_in_fix->diff($pay_out_fix);
+                        $psec_fix = ($pint_fix->days * 86400) + ($pint_fix->h * 3600) + ($pint_fix->i * 60) + $pint_fix->s;
+
+                        $psec_fix -= ($break_min * 60);
+                        if ($psec_fix < 0) {
+                            $psec_fix = 0;
+                        }
+
+                        $new_payable_val = round($psec_fix / 3600, 2);
+                    }
+                }
+            } catch (Exception $e) {
+                $new_clocked_val = $existing_clocked;
+                $new_payable_val = $existing_payable;
+            }
+
+            $update_data['clock_out'] = $new_clock_out;
+            $update_data['clocked_hours'] = (float) $new_clocked_val;
+            $update_data['payable_hours'] = (float) $new_payable_val;
+            $update_data['additional_hours'] = (float) $new_additional;
+            $did_fix_106 = true;
+
+            $log_entries[] = array(
+                'edit_type' => 'Clock Out (Auto-Fix 106)',
+                'old_value' => $this->normalize_datetime_to_minute($clock_out_raw),
+                'new_value' => $this->normalize_datetime_to_minute($new_clock_out),
+            );
+
+            $log_entries[] = array(
+                'edit_type' => 'Clocked Hrs (Auto-Fix 106)',
+                'old_value' => number_format((float) $existing_clocked, 2, '.', ''),
+                'new_value' => number_format((float) $new_clocked_val, 2, '.', ''),
+            );
+
+            $log_entries[] = array(
+                'edit_type' => 'Payable Hrs (Auto-Fix 106)',
+                'old_value' => number_format((float) $existing_payable, 2, '.', ''),
+                'new_value' => number_format((float) $new_payable_val, 2, '.', ''),
+            );
+        }
+
+        // === Flag 104 auto-fix: confirm extra time and adjust payable hours ===
+        $payable_for_104 = isset($update_data['payable_hours']) ? (float) $update_data['payable_hours'] : $existing_payable;
+        $clock_out_for_104 = isset($update_data['clock_out']) ? (string) $update_data['clock_out'] : $clock_out_raw;
+
+        $did_fix_104 = false;
+        if ($has_flag_104 && strtolower($existing_extra_status) !== 'confirmed' && $sched_end !== '' && $clock_out_for_104 !== '') {
+            $extra_hours_104 = $existing_additional;
+
+            if ($extra_hours_104 <= 0.0) {
+                try {
+                    $scheduled_end_dt_104 = new DateTimeImmutable($sched_end, $tz);
+                    $clock_out_dt_104     = new DateTimeImmutable($clock_out_for_104, $tz);
+                    $diff_seconds_104 = $clock_out_dt_104->getTimestamp() - $scheduled_end_dt_104->getTimestamp();
+
+                    if ($diff_seconds_104 > 0) {
+                        $diff_minutes_104 = (int) floor($diff_seconds_104 / 60);
+                        if ($diff_minutes_104 > 15) {
+                            $extra_hours_104 = round($diff_seconds_104 / 3600, 2);
+                        }
+                    }
+                } catch (Exception $e) {
+                    $extra_hours_104 = 0.0;
+                }
+            }
+
+            if ($extra_hours_104 > 0.0) {
+                $new_payable_104 = round($payable_for_104 + $extra_hours_104, 2);
+
+                $update_data['extra_time_status'] = 'confirmed';
+                $update_data['payable_hours'] = (float) $new_payable_104;
+
+                if ($existing_additional <= 0.0) {
+                    $update_data['additional_hours'] = (float) $extra_hours_104;
+                }
+                $did_fix_104 = true;
+
+                $log_entries[] = array(
+                    'edit_type' => 'Extra Time Status (Auto-Fix 104)',
+                    'old_value' => $existing_extra_status !== '' ? $existing_extra_status : 'unset',
+                    'new_value' => 'confirmed',
+                );
+
+                $log_entries[] = array(
+                    'edit_type' => 'Payable Hrs (Auto-Fix 104)',
+                    'old_value' => number_format((float) $payable_for_104, 2, '.', ''),
+                    'new_value' => number_format((float) $new_payable_104, 2, '.', ''),
+                );
+            }
+        }
+
+        $update_formats = array();
+        foreach (array_keys($update_data) as $key) {
+            $update_formats[] = $format_map[$key] ?? '%s';
+        }
+
+        $updated_rows = $wpdb->update(
+            $table_entries,
+            $update_data,
+            array('id' => $entry_id),
+            $update_formats,
+            array('%d')
+        );
+
+        if ($updated_rows === false) {
+            $skipped++;
+            continue;
+        }
+
+        if ((int) $updated_rows === 0) {
+            $skipped++;
+            continue;
+        }
+
+        $updated += (int) $updated_rows;
+        $approved++;
+
+        $log_entries[] = array(
+            'edit_type' => 'Auto-Approved Time Record',
+            'old_value' => (string) ($entry->status ?? 'pending'),
+            'new_value' => 'approved',
+        );
+
+        $log_context = array(
+            'timesheet_id'           => (int) ($entry->timesheet_id ?? 0),
+            'entry_id'               => $entry_id,
+            'wiw_time_id'            => $wiw_time_id,
+            'edited_by_user_id'      => 0,
+            'edited_by_user_login'   => '',
+            'edited_by_display_name' => 'Automatically Approved',
+            'employee_id'            => (int) ($entry->_wiw_employee_id ?? $entry->employee_id ?? 0),
+            'employee_name'          => (string) ($entry->_wiw_employee_name ?? $entry->employee_name ?? ''),
+            'location_id'            => (int) ($entry->_wiw_location_id ?? $entry->location_id ?? 0),
+            'location_name'          => (string) ($entry->_wiw_location_name ?? $entry->location_name ?? ''),
+            'week_start_date'        => (string) ($entry->_wiw_week_start_date ?? $entry->week_start_date ?? ''),
+            'created_at'             => $now_mysql,
+        );
+
+        foreach ($log_entries as $log_entry) {
+            $this->insert_local_edit_log(array_merge($log_context, $log_entry));
+        }
+
+        if ($wiw_time_id > 0 && $did_fix_106) {
+            $wpdb->update(
+                $table_flags,
+                array('flag_status' => 'resolved', 'updated_at' => $now_mysql),
+                array(
+                    'wiw_time_id' => $wiw_time_id,
+                    'flag_type'   => 106,
+                ),
+                array('%s', '%s'),
+                array('%d', '%d')
+            );
+        }
+
+        if ($wiw_time_id > 0 && $did_fix_104) {
+            $wpdb->update(
+                $table_flags,
+                array('flag_status' => 'resolved', 'updated_at' => $now_mysql),
+                array(
+                    'wiw_time_id' => $wiw_time_id,
+                    'flag_type'   => 104,
+                ),
+                array('%s', '%s'),
+                array('%d', '%d')
+            );
+        }
+    }
+
+    return array(
+        'enabled'  => true,
+        'approved' => $approved,
+        'skipped'  => $skipped,
+        'updated'  => $updated,
     );
 }
 
