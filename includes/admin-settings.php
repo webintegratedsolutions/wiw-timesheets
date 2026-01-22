@@ -65,6 +65,15 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             'wiw-timesheets-settings',
             array( $this, 'admin_settings_page' )
         );
+
+        add_submenu_page(
+            'wiw-timesheets',
+            'WIW Approvals',
+            'Approvals',
+            'manage_options',
+            'wiw-timesheets-approvals',
+            array( $this, 'admin_approvals_page' )
+        );
     }
 
     public function register_settings() {
@@ -73,6 +82,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
         register_setting( 'wiw_timesheets_group', 'wiw_login_password' );
         register_setting( 'wiw_timesheets_group', 'wiw_session_token' );
         register_setting( 'wiw_timesheets_group', 'wiw_enable_auto_approvals' );
+        register_setting( 'wiw_timesheets_group', 'wiw_auto_approve_report_email' );
 
         add_settings_section(
             'wiw_api_credentials_section',
@@ -119,6 +129,18 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 'label'       => 'Enable auto-approvals for past-due timesheets (dry-run only for now).',
             )
         );
+
+        add_settings_field(
+            'wiw_auto_approve_report_email_field',
+            'Auto-Approval Report Email',
+            array( $this, 'email_input_callback' ),
+            'wiw-timesheets-settings',
+            'wiw_api_credentials_section',
+            array(
+                'setting_key' => 'wiw_auto_approve_report_email',
+                'description' => 'Where to send auto-approval reports once email delivery is enabled.',
+            )
+        );
     }
 
     public function text_input_callback( $args ) {
@@ -132,6 +154,16 @@ trait WIW_Timesheet_Admin_Settings_Trait {
         $value = get_option( $key );
         echo '<input type="password" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '" style="width: 500px;" placeholder="Leave blank to keep current password" />';
         echo '<p class="description">The password is required to obtain a new session token.</p>';
+    }
+
+    public function email_input_callback( $args ) {
+        $key         = $args['setting_key'];
+        $value       = get_option( $key );
+        $description = isset( $args['description'] ) ? (string) $args['description'] : '';
+        echo '<input type="email" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '" style="width: 500px;" />';
+        if ( $description !== '' ) {
+            echo '<p class="description">' . esc_html( $description ) . '</p>';
+        }
     }
 
     public function checkbox_input_callback( $args ) {
@@ -179,9 +211,6 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 echo '<div class="notice notice-info"><p><strong>Current Session Token:</strong> A valid token is stored and will be used for API requests.</p></div>';
             }
 
-            if ( isset( $_GET['wiwts_report_generated'] ) ) {
-                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report generated.</strong></p></div>';
-            }
             ?>
 
             <form method="post" action="options.php">
@@ -205,10 +234,48 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 <?php submit_button( 'Log In & Get Session Token', 'secondary', 'submit_login' ); ?>
             </form>
 
-            <hr/>
+        </div>
+        <?php
+    }
+
+    public function admin_approvals_page() {
+        ?>
+        <div class="wrap">
+            <h1>WIW Timesheets Approvals</h1>
+
+            <?php
+            if ( isset( $_GET['wiwts_report_generated'] ) ) {
+                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report generated.</strong></p></div>';
+            }
+            if ( isset( $_GET['wiwts_report_emailed'] ) ) {
+                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report emailed successfully.</strong></p></div>';
+            }
+            if ( isset( $_GET['wiwts_report_email_error'] ) ) {
+                $error_code = sanitize_text_field( wp_unslash( $_GET['wiwts_report_email_error'] ) );
+                if ( $error_code === 'missing_email' ) {
+                    $error_message = 'Please set a valid report email address before sending.';
+                } elseif ( $error_code === 'missing_report' ) {
+                    $error_message = 'Please generate a dry-run report before sending.';
+                } else {
+                    $error_message = 'Report email could not be sent. Please check your mail configuration.';
+                }
+                echo '<div class="notice notice-error is-dismissible"><p><strong>❌ Auto-approval report email failed:</strong> ' . esc_html( $error_message ) . '</p></div>';
+            }
+            if ( isset( $_GET['wiwts_auto_approve_run'] ) ) {
+                $run_status = sanitize_text_field( wp_unslash( $_GET['wiwts_auto_approve_run'] ) );
+                if ( $run_status === 'disabled' ) {
+                    echo '<div class="notice notice-error is-dismissible"><p><strong>❌ Auto-approval run blocked:</strong> Enable auto-approvals before running.</p></div>';
+                } else {
+                    $approved = isset( $_GET['approved'] ) ? absint( $_GET['approved'] ) : 0;
+                    $skipped  = isset( $_GET['skipped'] ) ? absint( $_GET['skipped'] ) : 0;
+                    $updated  = isset( $_GET['updated'] ) ? absint( $_GET['updated'] ) : 0;
+                    echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval run completed.</strong> Approved: ' . esc_html( (string) $approved ) . ', Updated: ' . esc_html( (string) $updated ) . ', Skipped: ' . esc_html( (string) $skipped ) . '.</p></div>';
+                }
+            }
+            ?>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>3. Generate Auto-Approval Dry-Run Report</h2>
+                <h2>1. Generate Auto-Approval Dry-Run Report</h2>
                 <p>Generate a read-only dry-run report that mirrors the current preview page. This does not approve any records.</p>
 
                 <input type="hidden" name="action" value="wiwts_generate_auto_approve_report" />
@@ -216,6 +283,98 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
                 <?php submit_button( 'Generate Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
             </form>
+
+            <hr/>
+
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <h2>2. Email Latest Dry-Run Report</h2>
+                <p>Send the most recent dry-run report to the configured report email address.</p>
+
+                <input type="hidden" name="action" value="wiwts_send_auto_approve_report_email" />
+                <?php wp_nonce_field( 'wiwts_send_auto_approve_report_email', 'wiwts_send_auto_approve_report_email_nonce' ); ?>
+
+                <?php
+                $report_email = get_option( 'wiw_auto_approve_report_email' );
+                $report_entry = get_option( 'wiwts_auto_approve_dry_run_report', array() );
+                $email_ready  = is_string( $report_email ) && is_email( $report_email );
+                $report_ready = is_array( $report_entry ) && ! empty( $report_entry );
+                if ( ! $email_ready ) {
+                    echo '<p class="description">Set a valid report email in the Settings page before sending.</p>';
+                }
+                if ( ! $report_ready ) {
+                    echo '<p class="description">Generate a dry-run report first to enable sending.</p>';
+                }
+                ?>
+
+                <?php
+                $send_disabled = ! ( $email_ready && $report_ready );
+                $send_attrs    = $send_disabled ? ' disabled="disabled" aria-disabled="true"' : '';
+                ?>
+                <p>
+                    <button type="submit" class="button button-secondary" name="submit_send_report_email"<?php echo $send_attrs; ?>>
+                        Send Latest Report Email
+                    </button>
+                </p>
+            </form>
+
+            <hr/>
+
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <h2>3. Manual Run Auto-Approvals</h2>
+                <p>Run Step 5 auto-approvals once (includes Flag 104/106 auto-fixes). Requires auto-approvals to be enabled.</p>
+
+                <input type="hidden" name="action" value="wiwts_manual_run_auto_approve" />
+                <?php wp_nonce_field( 'wiwts_manual_run_auto_approve', 'wiwts_manual_run_auto_approve_nonce' ); ?>
+
+                <?php
+                $auto_approve_enabled = (string) get_option( 'wiw_enable_auto_approvals', '' ) === '1';
+                if ( ! $auto_approve_enabled ) {
+                    echo '<p class="description">Enable auto-approvals in Settings to run this action.</p>';
+                }
+                $manual_run_disabled = ! $auto_approve_enabled;
+                $manual_run_attrs    = $manual_run_disabled ? ' disabled="disabled" aria-disabled="true"' : '';
+                ?>
+                <p>
+                    <button type="submit" class="button button-secondary" name="submit_manual_auto_approve"<?php echo $manual_run_attrs; ?>>
+                        Manual Run Auto-Approvals
+                    </button>
+                </p>
+            </form>
+
+            <hr/>
+
+            <h2>4. Auto-Approval Dry-Run Report Log</h2>
+            <p>This log stores every generated dry-run report for audit purposes.</p>
+            <?php
+            $report_log = get_option( 'wiwts_auto_approve_dry_run_report_log', array() );
+            if ( ! is_array( $report_log ) ) {
+                $report_log = array();
+            }
+            ?>
+            <?php if ( empty( $report_log ) ) : ?>
+                <p><em>No reports have been generated yet.</em></p>
+            <?php else : ?>
+                <div style="max-width:1000px;">
+                    <?php foreach ( array_reverse( $report_log ) as $index => $report_entry ) : ?>
+                        <?php
+                        $generated_at = isset( $report_entry['generated_at'] ) ? $report_entry['generated_at'] : '';
+                        $report_text  = isset( $report_entry['report_text'] ) ? $report_entry['report_text'] : '';
+                        $table_html   = isset( $report_entry['table_html'] ) ? $report_entry['table_html'] : '';
+                        ?>
+                        <details style="margin:0 0 12px; padding:12px; border:1px solid #ccd0d4; border-radius:4px; background:#fff;">
+                            <summary style="cursor:pointer; font-weight:600;">
+                                <?php echo esc_html( $generated_at !== '' ? $generated_at : 'Report #' . ( $index + 1 ) ); ?>
+                            </summary>
+                            <?php if ( $report_text !== '' ) : ?>
+                                <pre style="white-space:pre-wrap; margin-top:12px;"><?php echo esc_html( $report_text ); ?></pre>
+                            <?php endif; ?>
+                            <?php if ( $table_html !== '' ) : ?>
+                                <div style="margin-top:12px;"><?php echo wp_kses_post( $table_html ); ?></div>
+                            <?php endif; ?>
+                        </details>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
         </div>
         <?php
     }
