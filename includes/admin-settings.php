@@ -208,6 +208,9 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             if ( isset( $_GET['wiwts_report_emailed'] ) ) {
                 echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report emailed successfully.</strong></p></div>';
             }
+            if ( isset( $_GET['wiwts_report_log_purged'] ) ) {
+                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report log purged.</strong></p></div>';
+            }
             if ( isset( $_GET['wiwts_report_email_error'] ) ) {
                 $error_code = sanitize_text_field( wp_unslash( $_GET['wiwts_report_email_error'] ) );
                 if ( $error_code === 'missing_email' ) {
@@ -326,6 +329,17 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <h2>6. Auto-Approval Dry-Run Report Log</h2>
             <p>This log stores every generated dry-run report for audit purposes.</p>
+            <!-- === WIWTS PURGE REPORT LOG FORM BEGIN === -->
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <input type="hidden" name="action" value="wiwts_purge_auto_approve_report_log" />
+                <?php wp_nonce_field( 'wiwts_purge_auto_approve_report_log', 'wiwts_purge_auto_approve_report_log_nonce' ); ?>
+                <p>
+                    <button type="submit" class="button button-secondary" name="submit_purge_auto_approve_report_log" onclick="return confirm('Permanently delete all dry-run report log entries?');">
+                        Purge Report Log
+                    </button>
+                </p>
+            </form>
+            <!-- === WIWTS PURGE REPORT LOG FORM END === -->
             <?php
             $report_log = get_option( 'wiwts_auto_approve_dry_run_report_log', array() );
             if ( ! is_array( $report_log ) ) {
