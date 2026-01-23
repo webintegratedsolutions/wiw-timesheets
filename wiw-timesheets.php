@@ -5135,7 +5135,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $this->wiwts_store_auto_approve_report_entry($report_entry);
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
 
         $email_result = $this->wiwts_send_auto_approve_report_email($report_entry, 'dry-run');
         $email_sent   = $email_result['sent'];
@@ -5235,14 +5235,14 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
         if ($recipient === '' || ! is_email($recipient)) {
-            $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
             wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_email', $redirect_url));
             exit;
         }
 
         $report_entry = get_option('wiwts_auto_approve_dry_run_report', array());
         if (! is_array($report_entry) || empty($report_entry)) {
-            $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
             wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_report', $redirect_url));
             exit;
         }
@@ -5270,7 +5270,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             array('Content-Type: text/html; charset=UTF-8')
         );
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
         $redirect_arg = $sent ? 'wiwts_report_emailed' : 'wiwts_report_email_error';
         $redirect_val = $sent ? '1' : 'send_failed';
         wp_safe_redirect(add_query_arg($redirect_arg, $redirect_val, $redirect_url));
@@ -5299,7 +5299,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         delete_option('wiwts_auto_approve_dry_run_report_log');
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
         wp_safe_redirect(add_query_arg('wiwts_report_log_purged', '1', $redirect_url));
         exit;
     }
@@ -5331,7 +5331,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
 
         if (empty($result['enabled'])) {
             wp_safe_redirect(add_query_arg('wiwts_auto_approve_run', 'disabled', $redirect_url));
