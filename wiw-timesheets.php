@@ -3665,6 +3665,9 @@ HTML;
         if ($custom_logo_id > 0) {
             $logo_url = wp_get_attachment_image_url($custom_logo_id, 'full');
         }
+        if (! $logo_url) {
+            $logo_url = home_url('/images/ecs-logo.png');
+        }
 
         $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets">';
 
@@ -3860,7 +3863,7 @@ HTML;
   #wiwts-client-records-view .wiw-print-target,
   #wiwts-client-records-view .wiw-print-target * { visibility: visible !important; }
 
-  #wiwts-client-records-view .wiw-print-target { position: absolute; left: 0; top: 0; width: 100%; }
+  #wiwts-client-records-view .wiw-print-target { position: static; width: 100%; }
 
   /* Hide interactive UI + Actions column for print */
   /* Expandable flags: hide summary label and show expanded content in print */
