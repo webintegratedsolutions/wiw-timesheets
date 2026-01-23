@@ -4173,21 +4173,7 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                     }
                 }
 
-                $week_edit_logs = array();
-                if (! empty($week_timesheet_ids)) {
-                    foreach (array_keys($week_timesheet_ids) as $tid) {
-                        $logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $tid);
-                        if (empty($logs_for_ts)) {
-                            continue;
-                        }
-                        foreach ($logs_for_ts as $lg) {
-                            $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
-                            if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
-                                $week_edit_logs[] = $lg;
-                            }
-                        }
-                    }
-                }
+                $week_edit_logs = $this->get_scoped_edit_logs_for_entries($client_id, array_keys($week_entry_ids));
 
                 $is_admin_view = current_user_can('manage_options');
                 $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
@@ -4952,6 +4938,52 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
 	";
 
         return $wpdb->get_results($wpdb->prepare($sql, $timesheet_id, $client_id));
+    }
+
+    /**
+     * Fetch edit logs for a set of entry IDs.
+     * Scoped by location_id to ensure client isolation.
+     */
+    private function get_scoped_edit_logs_for_entries($client_id, array $entry_ids): array
+    {
+        global $wpdb;
+
+        $table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+        $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+
+        $entry_ids = array_values(array_filter(array_map('absint', $entry_ids)));
+        if (empty($entry_ids)) {
+            return array();
+        }
+
+        $placeholders = implode(',', array_fill(0, count($entry_ids), '%d'));
+
+        if (current_user_can('manage_options')) {
+            $sql = "
+                SELECT l.*
+                FROM {$table_logs} l
+                WHERE l.entry_id IN ({$placeholders})
+                ORDER BY l.created_at DESC, l.id DESC
+            ";
+            return $wpdb->get_results($wpdb->prepare($sql, $entry_ids));
+        }
+
+        $client_id = absint($client_id);
+        if ($client_id <= 0) {
+            return array();
+        }
+
+        $sql = "
+            SELECT l.*
+            FROM {$table_logs} l
+            INNER JOIN {$table_entries} e ON e.id = l.entry_id
+            WHERE l.entry_id IN ({$placeholders})
+              AND e.location_id = %d
+            ORDER BY l.created_at DESC, l.id DESC
+        ";
+
+        $params = array_merge($entry_ids, array($client_id));
+        return $wpdb->get_results($wpdb->prepare($sql, $params));
     }
 
     /**
