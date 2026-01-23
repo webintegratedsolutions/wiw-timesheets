@@ -68,8 +68,8 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
         add_submenu_page(
             'wiw-timesheets',
-            'Run Auto-Approve Now',
-            'Run Auto-Approve Now',
+            'Approvals',
+            'Approvals',
             'manage_options',
             'wiw-timesheets-auto-approve-run',
             array( $this, 'admin_auto_approve_run_page' )
@@ -211,37 +211,6 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 echo '<div class="notice notice-info"><p><strong>Current Session Token:</strong> A valid token is stored and will be used for API requests.</p></div>';
             }
 
-            if ( isset( $_GET['wiwts_report_generated'] ) ) {
-                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report generated.</strong></p></div>';
-            }
-            if ( isset( $_GET['wiwts_report_emailed'] ) ) {
-                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report emailed successfully.</strong></p></div>';
-            }
-            if ( isset( $_GET['wiwts_report_log_purged'] ) ) {
-                echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval dry-run report log purged.</strong></p></div>';
-            }
-            if ( isset( $_GET['wiwts_report_email_error'] ) ) {
-                $error_code = sanitize_text_field( wp_unslash( $_GET['wiwts_report_email_error'] ) );
-                if ( $error_code === 'missing_email' ) {
-                    $error_message = 'Please set a valid report email address before sending.';
-                } elseif ( $error_code === 'missing_report' ) {
-                    $error_message = 'Please generate a dry-run report before sending.';
-                } else {
-                    $error_message = 'Report email could not be sent. Please check your mail configuration.';
-                }
-                echo '<div class="notice notice-error is-dismissible"><p><strong>❌ Auto-approval report email failed:</strong> ' . esc_html( $error_message ) . '</p></div>';
-            }
-            if ( isset( $_GET['wiwts_auto_approve_run'] ) ) {
-                $run_status = sanitize_text_field( wp_unslash( $_GET['wiwts_auto_approve_run'] ) );
-                if ( $run_status === 'disabled' ) {
-                    echo '<div class="notice notice-error is-dismissible"><p><strong>❌ Auto-approval run blocked:</strong> Enable auto-approvals before running.</p></div>';
-                } else {
-                    $approved = isset( $_GET['approved'] ) ? absint( $_GET['approved'] ) : 0;
-                    $skipped  = isset( $_GET['skipped'] ) ? absint( $_GET['skipped'] ) : 0;
-                    $updated  = isset( $_GET['updated'] ) ? absint( $_GET['updated'] ) : 0;
-                    echo '<div class="notice notice-success is-dismissible"><p><strong>✅ Auto-approval run completed.</strong> Approved: ' . esc_html( (string) $approved ) . ', Updated: ' . esc_html( (string) $updated ) . ', Skipped: ' . esc_html( (string) $skipped ) . '.</p></div>';
-                }
-            }
             ?>
 
             <form method="post" action="options.php">
@@ -264,11 +233,89 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
                 <?php submit_button( 'Log In & Get Session Token', 'secondary', 'submit_login' ); ?>
             </form>
+        </div>
+        <?php
+    }
+
+    public function admin_auto_approve_run_page() {
+        $ran_status = isset( $_GET['wiwts_auto_approve_cron_ran'] )
+            ? sanitize_text_field( wp_unslash( $_GET['wiwts_auto_approve_cron_ran'] ) )
+            : '';
+        ?>
+        <div class="wrap">
+            <h1>Approvals</h1>
+            <?php if ( $ran_status === '1' ) : ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><strong>✅ Auto-approve cron triggered.</strong> Check the report email/logs for details.</p>
+                </div>
+            <?php elseif ( $ran_status === 'disabled' ) : ?>
+                <div class="notice notice-error is-dismissible">
+                    <p><strong>❌ Auto-approve run blocked:</strong> Enable auto-approvals in Settings first.</p>
+                </div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['wiwts_report_generated'] ) ) : ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><strong>✅ Auto-approval report generated.</strong></p>
+                </div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['wiwts_report_emailed'] ) ) : ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><strong>✅ Auto-approval report emailed successfully.</strong></p>
+                </div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['wiwts_report_log_purged'] ) ) : ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><strong>✅ Auto-approval report log purged.</strong></p>
+                </div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['wiwts_report_email_error'] ) ) : ?>
+                <?php
+                $error_code = sanitize_text_field( wp_unslash( $_GET['wiwts_report_email_error'] ) );
+                if ( $error_code === 'missing_email' ) {
+                    $error_message = 'Please set a valid report email address before sending.';
+                } elseif ( $error_code === 'missing_report' ) {
+                    $error_message = 'Please generate an auto-approval report before sending.';
+                } else {
+                    $error_message = 'Report email could not be sent. Please check your mail configuration.';
+                }
+                ?>
+                <div class="notice notice-error is-dismissible">
+                    <p><strong>❌ Auto-approval report email failed:</strong> <?php echo esc_html( $error_message ); ?></p>
+                </div>
+            <?php endif; ?>
+            <?php if ( isset( $_GET['wiwts_auto_approve_run'] ) ) : ?>
+                <?php
+                $run_status = sanitize_text_field( wp_unslash( $_GET['wiwts_auto_approve_run'] ) );
+                if ( $run_status === 'disabled' ) {
+                    $run_message = 'Enable auto-approvals before running.';
+                    $run_notice  = 'notice-error';
+                    $run_prefix  = '❌ Auto-approval run blocked:';
+                } else {
+                    $approved   = isset( $_GET['approved'] ) ? absint( $_GET['approved'] ) : 0;
+                    $skipped    = isset( $_GET['skipped'] ) ? absint( $_GET['skipped'] ) : 0;
+                    $updated    = isset( $_GET['updated'] ) ? absint( $_GET['updated'] ) : 0;
+                    $run_message = 'Approved: ' . (string) $approved . ', Updated: ' . (string) $updated . ', Skipped: ' . (string) $skipped . '.';
+                    $run_notice  = 'notice-success';
+                    $run_prefix  = '✅ Auto-approval run completed.';
+                }
+                ?>
+                <div class="notice <?php echo esc_attr( $run_notice ); ?> is-dismissible">
+                    <p><strong><?php echo esc_html( $run_prefix ); ?></strong> <?php echo esc_html( $run_message ); ?></p>
+                </div>
+            <?php endif; ?>
+
+            <h2>1. Run Auto-Approve Now</h2>
+            <p>This page triggers the auto-approve cron hook immediately (same flow as the scheduled run).</p>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <input type="hidden" name="action" value="wiwts_run_auto_approve_cron_now" />
+                <?php wp_nonce_field( 'wiwts_run_auto_approve_cron_now', 'wiwts_run_auto_approve_cron_now_nonce' ); ?>
+                <?php submit_button( 'Run Auto-Approve Now', 'primary' ); ?>
+            </form>
 
             <hr/>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>3. Generate Auto-Approval Dry-Run Report</h2>
+                <h2>2. Generate Auto-Approval Dry-Run Report</h2>
                 <p>Generate a read-only dry-run report that mirrors the current preview page and email it to the configured report email address.</p>
 
                 <input type="hidden" name="action" value="wiwts_generate_auto_approve_report" />
@@ -280,8 +327,8 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             <hr/>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>4. Email Latest Dry-Run Report</h2>
-                <p>Send the most recent dry-run report to the configured report email address.</p>
+                <h2>3. Email Latest Auto-Approval Report</h2>
+                <p>Send the most recent auto-approval report to the configured report email address.</p>
 
                 <input type="hidden" name="action" value="wiwts_send_auto_approve_report_email" />
                 <?php wp_nonce_field( 'wiwts_send_auto_approve_report_email', 'wiwts_send_auto_approve_report_email_nonce' ); ?>
@@ -295,7 +342,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                     echo '<p class="description">Set a valid report email above before sending.</p>';
                 }
                 if ( ! $report_ready ) {
-                    echo '<p class="description">Generate a dry-run report first to enable sending.</p>';
+                    echo '<p class="description">Generate an auto-approval report first to enable sending.</p>';
                 }
                 ?>
 
@@ -313,7 +360,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             <hr/>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>5. Manual Run Auto-Approvals</h2>
+                <h2>4. Manual Run Auto-Approvals</h2>
                 <p>Run Step 5 auto-approvals once (includes Flag 104/106 auto-fixes). Requires auto-approvals to be enabled.</p>
 
                 <input type="hidden" name="action" value="wiwts_manual_run_auto_approve" />
@@ -336,14 +383,14 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <hr/>
 
-            <h2>6. Auto-Approval Dry-Run Report Log</h2>
-            <p>This log stores every generated dry-run report for audit purposes.</p>
+            <h2>5. Auto-Approval Report Logs</h2>
+            <p>This log stores every generated auto-approval report for audit purposes.</p>
             <!-- === WIWTS PURGE REPORT LOG FORM BEGIN === -->
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                 <input type="hidden" name="action" value="wiwts_purge_auto_approve_report_log" />
                 <?php wp_nonce_field( 'wiwts_purge_auto_approve_report_log', 'wiwts_purge_auto_approve_report_log_nonce' ); ?>
                 <p>
-                    <button type="submit" class="button button-secondary" name="submit_purge_auto_approve_report_log" onclick="return confirm('Permanently delete all dry-run report log entries?');">
+                    <button type="submit" class="button button-secondary" name="submit_purge_auto_approve_report_log" onclick="return confirm('Permanently delete all auto-approval report log entries?');">
                         Purge Report Log
                     </button>
                 </p>
@@ -379,33 +426,6 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                     <?php endforeach; ?>
                 </div>
             <?php endif; ?>
-        </div>
-        <?php
-    }
-
-    public function admin_auto_approve_run_page() {
-        $ran_status = isset( $_GET['wiwts_auto_approve_cron_ran'] )
-            ? sanitize_text_field( wp_unslash( $_GET['wiwts_auto_approve_cron_ran'] ) )
-            : '';
-        ?>
-        <div class="wrap">
-            <h1>Run Auto-Approve Cron</h1>
-            <?php if ( $ran_status === '1' ) : ?>
-                <div class="notice notice-success is-dismissible">
-                    <p><strong>✅ Auto-approve cron triggered.</strong> Check the report email/logs for details.</p>
-                </div>
-            <?php elseif ( $ran_status === 'disabled' ) : ?>
-                <div class="notice notice-error is-dismissible">
-                    <p><strong>❌ Auto-approve run blocked:</strong> Enable auto-approvals in Settings first.</p>
-                </div>
-            <?php endif; ?>
-
-            <p>This page triggers the auto-approve cron hook immediately (same flow as the scheduled run).</p>
-            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <input type="hidden" name="action" value="wiwts_run_auto_approve_cron_now" />
-                <?php wp_nonce_field( 'wiwts_run_auto_approve_cron_now', 'wiwts_run_auto_approve_cron_now_nonce' ); ?>
-                <?php submit_button( 'Run Auto-Approve Now', 'primary' ); ?>
-            </form>
         </div>
         <?php
     }
