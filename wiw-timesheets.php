@@ -3866,6 +3866,9 @@ HTML;
   #wiwts-client-records-view .wiw-print-target select,
   #wiwts-client-records-view .wiw-print-target textarea { display: none !important; }
 
+  /* Hide the Actions column entirely for print */
+  #wiwts-client-records-view .wiw-print-target .wiw-col-actions { display: none !important; }
+
   /* Hide the Print button itself in print output */
   #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
 
