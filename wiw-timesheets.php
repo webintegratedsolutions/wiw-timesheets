@@ -1321,11 +1321,12 @@ class WIW_Timesheet_Manager
                 // Expandable edit logs (per-timesheet, shown under each daily table when that timesheet is open).
                 if (isset($timesheet_id_for_period) && $timesheet_id_for_period !== '') {
                     $edit_logs = $this->get_scoped_edit_logs_for_timesheet($client_id, absint($timesheet_id_for_period));
+                    $is_admin_view = current_user_can('manage_options');
+                    $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
 
-                    if (current_user_can('manage_options')) {
-                        $out .= '<details class="wiw-edit-logs" style="margin:12px 0 22px;">';
-                        $out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
-                        $out .= '<div style="padding-top:8px;">';
+                    $out .= '<details class="' . esc_attr($edit_logs_class) . '" style="margin:12px 0 22px;">';
+                    $out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
+                    $out .= '<div style="padding-top:8px;">';
 
                         if (empty($edit_logs)) {
                             $out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
@@ -1428,9 +1429,8 @@ $out .= '</tr>';
                             $out .= '</tbody></table>';
                         }
 
-                        $out .= '</div>';
-                        $out .= '</details>';
-                    }
+                    $out .= '</div>';
+                    $out .= '</details>';
 
                     // Expandable flags (per-timesheet, shown under each daily table when that timesheet is open).
                     $flags = $this->get_scoped_flags_for_timesheet($client_id, absint($timesheet_id_for_period));
@@ -3846,6 +3846,7 @@ HTML;
 #wiwts-client-records-view table.wp-list-table th { white-space: nowrap; }
 #wiwts-client-records-view .wiw-client-actions { gap: 4px !important; }
 #wiwts-client-records-view .wiw-client-actions .wiw-btn { padding: 6px 10px; }
+#wiwts-client-records-view .wiw-edit-logs-print-only { display: none; }
 @media print {
   /* Print only the selected week table */
   body * { visibility: hidden !important; }
@@ -3861,6 +3862,7 @@ HTML;
   /* Expandable edit logs: hide summary label and show expanded content in print */
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
+  #wiwts-client-records-view .wiw-print-target .wiw-edit-logs-print-only { display: block !important; }
   #wiwts-client-records-view .wiw-print-target button,
   #wiwts-client-records-view .wiw-print-target input,
   #wiwts-client-records-view .wiw-print-target select,
