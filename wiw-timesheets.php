@@ -5534,7 +5534,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
 
             $title_line = 'Shift Record ID #' . esc_html($shift_record_id) . ' in Timesheet ID #' . ($ts_id > 0 ? (string) $ts_id : 'N/A') . ' - For Pay Period: ' . $pp_label . '';
             $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
-            $table_html .= '<td colspan="10" style="background-color: #fff;">&nbsp;</td>';
+            $table_html .= '<td colspan="9" style="background-color: #fff;">&nbsp;</td>';
             $table_html .= '</tr>';
             $table_html .= '<tr class="wiwts-timesheet-context">';
             $table_html .= '<th colspan="9" style="text-align:left; background:#fff; padding:8px 0;">' . esc_html($title_line) . '</th>';
@@ -5552,9 +5552,6 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
             $table_html .= '<th style="text-align:left;">Clocked Hrs</th>';
             $table_html .= '<th style="text-align:left;">Payable Hrs</th>';
             $table_html .= '</tr>';
-
-            // Main entry row
-            $table_html .= '<tr>';
 
             // Main entry row
             $table_html .= '<tr>';
