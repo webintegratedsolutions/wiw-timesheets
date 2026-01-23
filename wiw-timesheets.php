@@ -1321,11 +1321,12 @@ class WIW_Timesheet_Manager
                 // Expandable edit logs (per-timesheet, shown under each daily table when that timesheet is open).
                 if (isset($timesheet_id_for_period) && $timesheet_id_for_period !== '') {
                     $edit_logs = $this->get_scoped_edit_logs_for_timesheet($client_id, absint($timesheet_id_for_period));
+                    $is_admin_view = current_user_can('manage_options');
+                    $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
 
-                    if (current_user_can('manage_options')) {
-                        $out .= '<details class="wiw-edit-logs" style="margin:12px 0 22px;">';
-                        $out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
-                        $out .= '<div style="padding-top:8px;">';
+                    $out .= '<details class="' . esc_attr($edit_logs_class) . '" style="margin:12px 0 22px;">';
+                    $out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
+                    $out .= '<div style="padding-top:8px;">';
 
                         if (empty($edit_logs)) {
                             $out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
@@ -1428,9 +1429,8 @@ $out .= '</tr>';
                             $out .= '</tbody></table>';
                         }
 
-                        $out .= '</div>';
-                        $out .= '</details>';
-                    }
+                    $out .= '</div>';
+                    $out .= '</details>';
 
                     // Expandable flags (per-timesheet, shown under each daily table when that timesheet is open).
                     $flags = $this->get_scoped_flags_for_timesheet($client_id, absint($timesheet_id_for_period));
@@ -3846,6 +3846,7 @@ HTML;
 #wiwts-client-records-view table.wp-list-table th { white-space: nowrap; }
 #wiwts-client-records-view .wiw-client-actions { gap: 4px !important; }
 #wiwts-client-records-view .wiw-client-actions .wiw-btn { padding: 6px 10px; }
+#wiwts-client-records-view .wiw-edit-logs-print-only { display: none; }
 @media print {
   /* Print only the selected week table */
   body * { visibility: hidden !important; }
@@ -3861,10 +3862,14 @@ HTML;
   /* Expandable edit logs: hide summary label and show expanded content in print */
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
+  #wiwts-client-records-view .wiw-print-target .wiw-edit-logs-print-only { display: block !important; }
   #wiwts-client-records-view .wiw-print-target button,
   #wiwts-client-records-view .wiw-print-target input,
   #wiwts-client-records-view .wiw-print-target select,
   #wiwts-client-records-view .wiw-print-target textarea { display: none !important; }
+
+  /* Hide the Actions column entirely for print */
+  #wiwts-client-records-view .wiw-print-target .wiw-col-actions { display: none !important; }
 
   /* Hide the Print button itself in print output */
   #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
@@ -4136,11 +4141,8 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                 }
 
                 $out .= '</tbody></table>';
-// === Week-level expandable flags (filtered to this week range) ===
-                $week_flags_all = array();
 
-                // Only show flags for records that are actually displayed in this section/week.
-                // (Otherwise flags from "Pending" rows can appear under the "Approved" section and vice versa.)
+                // Only show flags/edit logs for records that are actually displayed in this week.
                 $week_visible_time_ids = array();
                 foreach ($rows as $r) {
                     $rid = isset($r->wiw_time_id) ? absint($r->wiw_time_id) : 0;
@@ -4157,6 +4159,108 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                         $week_timesheet_ids[$tid] = true;
                     }
                 }
+
+                // === Week-level editable logs (filtered to this week range) ===
+                $week_entry_ids = array();
+                $week_entry_id_to_wiw_time_id = array();
+                foreach ($rows as $r) {
+                    $entry_id = isset($r->id) ? absint($r->id) : 0;
+                    if ($entry_id > 0) {
+                        $week_entry_ids[$entry_id] = true;
+                        if (isset($r->wiw_time_id)) {
+                            $week_entry_id_to_wiw_time_id[$entry_id] = (string) $r->wiw_time_id;
+                        }
+                    }
+                }
+
+                $week_edit_logs = array();
+                if (! empty($week_timesheet_ids)) {
+                    foreach (array_keys($week_timesheet_ids) as $tid) {
+                        $logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $tid);
+                        if (empty($logs_for_ts)) {
+                            continue;
+                        }
+                        foreach ($logs_for_ts as $lg) {
+                            $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+                            if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
+                                $week_edit_logs[] = $lg;
+                            }
+                        }
+                    }
+                }
+
+                $is_admin_view = current_user_can('manage_options');
+                $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
+
+                $out .= '<details class="' . esc_attr($edit_logs_class) . '" style="margin:12px 0 22px;">';
+                $out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
+                $out .= '<div style="padding-top:8px;">';
+
+                if (empty($week_edit_logs)) {
+                    $out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
+                } else {
+                    $out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
+                    $out .= '<thead><tr>';
+                    $out .= '<th style="width:120px;">Record ID</th>';
+                    $out .= '<th>When</th>';
+                    $out .= '<th>Modified</th>';
+                    $out .= '<th>Old</th>';
+                    $out .= '<th>New</th>';
+                    $out .= '<th>Edited By</th>';
+                    $out .= '</tr></thead>';
+                    $out .= '<tbody>';
+
+                    foreach ($week_edit_logs as $lg) {
+                        $when = isset($lg->created_at) ? $this->wiw_format_datetime_local_pretty((string) $lg->created_at) : '';
+
+                        $field = isset($lg->edit_type) ? (string) $lg->edit_type : '';
+                        $oldv  = isset($lg->old_value) ? (string) $lg->old_value : '';
+                        $newv  = isset($lg->new_value) ? (string) $lg->new_value : '';
+
+                        $oldv_norm = $this->normalize_datetime_to_minute($oldv);
+                        $newv_norm = $this->normalize_datetime_to_minute($newv);
+
+                        $oldv_disp = $oldv_norm;
+                        $newv_disp = $newv_norm;
+
+                        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $oldv_norm)) {
+                            $oldv_disp = date_i18n('g:i a', strtotime($oldv_norm));
+                        }
+
+                        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $newv_norm)) {
+                            $newv_disp = date_i18n('g:i a', strtotime($newv_norm));
+                        }
+
+                        $who = '';
+                        if (! empty($lg->edited_by_display_name)) {
+                            $who = (string) $lg->edited_by_display_name;
+                        } elseif (! empty($lg->edited_by_user_login)) {
+                            $who = (string) $lg->edited_by_user_login;
+                        }
+
+                        $log_entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+                        $wiw_time_id  = ($log_entry_id > 0 && isset($week_entry_id_to_wiw_time_id[$log_entry_id]))
+                            ? (string) $week_entry_id_to_wiw_time_id[$log_entry_id]
+                            : '';
+
+                        $out .= '<tr>';
+                        $out .= '<td>' . esc_html($wiw_time_id !== '' ? $wiw_time_id : 'N/A') . '</td>';
+                        $out .= '<td>' . esc_html($when !== '' ? $when : 'N/A') . '</td>';
+                        $out .= '<td><strong>' . esc_html($field !== '' ? $field : 'N/A') . '</strong></td>';
+                        $out .= '<td>' . esc_html($oldv_disp !== '' ? $oldv_disp : 'N/A') . '</td>';
+                        $out .= '<td>' . esc_html($newv_disp !== '' ? $newv_disp : 'N/A') . '</td>';
+                        $out .= '<td>' . esc_html($who !== '' ? $who : 'N/A') . '</td>';
+                        $out .= '</tr>';
+                    }
+
+                    $out .= '</tbody></table>';
+                }
+
+                $out .= '</div>';
+                $out .= '</details>';
+
+// === Week-level expandable flags (filtered to this week range) ===
+                $week_flags_all = array();
 
                 if (! empty($week_timesheet_ids)) {
 
@@ -5135,7 +5239,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $this->wiwts_store_auto_approve_report_entry($report_entry);
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
 
         $email_result = $this->wiwts_send_auto_approve_report_email($report_entry, 'dry-run');
         $email_sent   = $email_result['sent'];
@@ -5187,12 +5291,10 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
 
         $is_auto_approve = ($context === 'auto-approve');
-        $subject = $is_auto_approve
-            ? 'WIW Timesheets — Auto-Approval Report'
-            : 'WIW Timesheets — Auto-Approval Dry-Run Report';
+        $subject = 'WIW Timesheets — Auto-Approval Report';
         $message = $is_auto_approve
             ? '<p>Here is the latest auto-approval report.</p>'
-            : '<p>Here is the latest auto-approval dry-run report.</p>';
+            : '<p>Here is the latest auto-approval report.</p>';
         if ($generated_at !== '') {
             $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
         }
@@ -5235,14 +5337,14 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
         if ($recipient === '' || ! is_email($recipient)) {
-            $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
             wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_email', $redirect_url));
             exit;
         }
 
         $report_entry = get_option('wiwts_auto_approve_dry_run_report', array());
         if (! is_array($report_entry) || empty($report_entry)) {
-            $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+            $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
             wp_safe_redirect(add_query_arg('wiwts_report_email_error', 'missing_report', $redirect_url));
             exit;
         }
@@ -5251,8 +5353,8 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
         $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
 
-        $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
-        $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+        $subject = 'WIW Timesheets — Auto-Approval Report';
+        $message = '<p>Here is the latest auto-approval report.</p>';
         if ($generated_at !== '') {
             $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
         }
@@ -5270,7 +5372,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             array('Content-Type: text/html; charset=UTF-8')
         );
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
         $redirect_arg = $sent ? 'wiwts_report_emailed' : 'wiwts_report_email_error';
         $redirect_val = $sent ? '1' : 'send_failed';
         wp_safe_redirect(add_query_arg($redirect_arg, $redirect_val, $redirect_url));
@@ -5299,7 +5401,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         delete_option('wiwts_auto_approve_dry_run_report_log');
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
         wp_safe_redirect(add_query_arg('wiwts_report_log_purged', '1', $redirect_url));
         exit;
     }
@@ -5331,7 +5433,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-auto-approve-run');
 
         if (empty($result['enabled'])) {
             wp_safe_redirect(add_query_arg('wiwts_auto_approve_run', 'disabled', $redirect_url));
