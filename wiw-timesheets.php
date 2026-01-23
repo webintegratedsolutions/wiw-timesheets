@@ -5312,6 +5312,13 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             wp_die('Security check failed.');
         }
 
+        $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
+        $report_entry   = array(
+            'generated_at' => current_time('mysql'),
+            'report_text'  => $report_payload['report_text'],
+            'table_html'   => $report_payload['table_html'],
+        );
+
         $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
 
         $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
@@ -5321,12 +5328,6 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             exit;
         }
 
-        $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
-        $report_entry   = array(
-            'generated_at' => current_time('mysql'),
-            'report_text'  => $report_payload['report_text'],
-            'table_html'   => $report_payload['table_html'],
-        );
         $this->wiwts_store_auto_approve_report_entry($report_entry);
 
         $email_result = $this->wiwts_send_auto_approve_report_email($report_entry);
