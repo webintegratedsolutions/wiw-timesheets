@@ -5121,22 +5121,18 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             wp_die('Security check failed.');
         }
 
-        $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
+        $report_entry = $this->wiwts_create_and_store_auto_approve_dry_run_report();
 
-        $report_entry = array(
-            'generated_at' => current_time('mysql'),
-            'report_text'  => $report_payload['report_text'],
-            'table_html'   => $report_payload['table_html'],
-        );
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
 
-        update_option('wiwts_auto_approve_dry_run_report', $report_entry, false);
+        $email_result = $this->wiwts_send_auto_approve_dry_run_report_email($report_entry);
 
-        $report_log = get_option('wiwts_auto_approve_dry_run_report_log', array());
-        if (! is_array($report_log)) {
-            $report_log = array();
+        $redirect_args = array('wiwts_report_generated' => '1');
+        if ($email_result['sent']) {
+            $redirect_args['wiwts_report_emailed'] = '1';
+        } elseif ($email_result['error'] !== '') {
+            $redirect_args['wiwts_report_email_error'] = $email_result['error'];
         }
-        $report_log[] = $report_entry;
-        update_option('wiwts_auto_approve_dry_run_report_log', $report_log, false);
 
         $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
 
@@ -5299,6 +5295,9 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             exit;
         }
 
+        $report_entry = $this->wiwts_create_and_store_auto_approve_dry_run_report();
+        $email_result = $this->wiwts_send_auto_approve_dry_run_report_email($report_entry);
+
         $redirect_url = add_query_arg(
             array(
                 'wiwts_auto_approve_run' => '1',
@@ -5308,6 +5307,12 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             ),
             $redirect_url
         );
+
+        if ($email_result['sent']) {
+            $redirect_url = add_query_arg('wiwts_report_emailed', '1', $redirect_url);
+        } elseif ($email_result['error'] !== '') {
+            $redirect_url = add_query_arg('wiwts_report_email_error', $email_result['error'], $redirect_url);
+        }
 
         wp_safe_redirect($redirect_url);
         exit;
@@ -5859,6 +5864,80 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
         'report_text' => $report,
         'table_html'  => $table_html,
     );
+}
+
+/**
+ * Create and store a dry-run report entry (latest + log).
+ *
+ * @return array{generated_at:string, report_text:string, table_html:string}
+ */
+private function wiwts_create_and_store_auto_approve_dry_run_report(): array
+{
+    $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
+
+    $report_entry = array(
+        'generated_at' => current_time('mysql'),
+        'report_text'  => $report_payload['report_text'],
+        'table_html'   => $report_payload['table_html'],
+    );
+
+    update_option('wiwts_auto_approve_dry_run_report', $report_entry, false);
+
+    $report_log = get_option('wiwts_auto_approve_dry_run_report_log', array());
+    if (! is_array($report_log)) {
+        $report_log = array();
+    }
+    $report_log[] = $report_entry;
+    update_option('wiwts_auto_approve_dry_run_report_log', $report_log, false);
+
+    return $report_entry;
+}
+
+/**
+ * Send the dry-run report email.
+ *
+ * @param array $report_entry
+ * @return array{sent:bool, error:string}
+ */
+private function wiwts_send_auto_approve_dry_run_report_email(array $report_entry): array
+{
+    $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
+    if ($recipient === '' || ! is_email($recipient)) {
+        return array('sent' => false, 'error' => 'missing_email');
+    }
+
+    if (empty($report_entry)) {
+        return array('sent' => false, 'error' => 'missing_report');
+    }
+
+    $generated_at = isset($report_entry['generated_at']) ? (string) $report_entry['generated_at'] : '';
+    $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+    $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+
+    $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
+    $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+    if ($generated_at !== '') {
+        $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
+    }
+    if ($report_text !== '') {
+        $message .= '<pre style="white-space:pre-wrap;">' . esc_html($report_text) . '</pre>';
+    }
+    if ($table_html !== '') {
+        $message .= '<div style="margin-top:12px;">' . wp_kses_post($table_html) . '</div>';
+    }
+
+    $email_sent = wp_mail(
+        $recipient,
+        $subject,
+        $message,
+        array('Content-Type: text/html; charset=UTF-8')
+    );
+
+    if (! $email_sent) {
+        return array('sent' => false, 'error' => 'send_failed');
+    }
+
+    return array('sent' => true, 'error' => '');
 }
 
 /**

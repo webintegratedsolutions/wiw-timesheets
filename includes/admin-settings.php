@@ -305,7 +305,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                 <h2>5. Manual Run Auto-Approvals</h2>
-                <p>Run Step 5 auto-approvals once (includes Flag 104/106 auto-fixes). Requires auto-approvals to be enabled.</p>
+                <p>Run Step 5 auto-approvals once (includes Flag 104/106 auto-fixes) and email the latest dry-run report. Requires auto-approvals to be enabled.</p>
 
                 <input type="hidden" name="action" value="wiwts_manual_run_auto_approve" />
                 <?php wp_nonce_field( 'wiwts_manual_run_auto_approve', 'wiwts_manual_run_auto_approve_nonce' ); ?>
