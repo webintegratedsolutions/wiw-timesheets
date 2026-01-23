@@ -3861,10 +3861,9 @@ HTML;
   /* Print only the selected week table */
   @page { margin: 12mm; }
   body { margin: 0 !important; }
-  body * { display: none !important; }
+  body * { visibility: hidden !important; }
   #wiwts-client-records-view .wiw-print-target,
   #wiwts-client-records-view .wiw-print-target * {
-    display: revert !important;
     visibility: visible !important;
   }
 
