@@ -65,6 +65,15 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             'wiw-timesheets-settings',
             array( $this, 'admin_settings_page' )
         );
+
+        add_submenu_page(
+            'wiw-timesheets',
+            'Run Auto-Approve Now',
+            'Run Auto-Approve Now',
+            'manage_options',
+            'wiw-timesheets-auto-approve-run',
+            array( $this, 'admin_auto_approve_run_page' )
+        );
     }
 
     public function register_settings() {
@@ -260,12 +269,12 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                 <h2>3. Generate Auto-Approval Dry-Run Report</h2>
-                <p>Generate a read-only dry-run report that mirrors the current preview page. This does not approve any records.</p>
+                <p>Generate a read-only dry-run report that mirrors the current preview page and email it to the configured report email address.</p>
 
                 <input type="hidden" name="action" value="wiwts_generate_auto_approve_report" />
                 <?php wp_nonce_field( 'wiwts_generate_auto_approve_report', 'wiwts_generate_auto_approve_report_nonce' ); ?>
 
-                <?php submit_button( 'Generate Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
+                <?php submit_button( 'Generate & Email Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
             </form>
 
             <hr/>
@@ -372,5 +381,62 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             <?php endif; ?>
         </div>
         <?php
+    }
+
+    public function admin_auto_approve_run_page() {
+        $ran_status = isset( $_GET['wiwts_auto_approve_cron_ran'] )
+            ? sanitize_text_field( wp_unslash( $_GET['wiwts_auto_approve_cron_ran'] ) )
+            : '';
+        ?>
+        <div class="wrap">
+            <h1>Run Auto-Approve Cron</h1>
+            <?php if ( $ran_status === '1' ) : ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><strong>✅ Auto-approve cron triggered.</strong> Check the report email/logs for details.</p>
+                </div>
+            <?php elseif ( $ran_status === 'disabled' ) : ?>
+                <div class="notice notice-error is-dismissible">
+                    <p><strong>❌ Auto-approve run blocked:</strong> Enable auto-approvals in Settings first.</p>
+                </div>
+            <?php endif; ?>
+
+            <p>This page triggers the auto-approve cron hook immediately (same flow as the scheduled run).</p>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+                <input type="hidden" name="action" value="wiwts_run_auto_approve_cron_now" />
+                <?php wp_nonce_field( 'wiwts_run_auto_approve_cron_now', 'wiwts_run_auto_approve_cron_now_nonce' ); ?>
+                <?php submit_button( 'Run Auto-Approve Now', 'primary' ); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    public function wiwts_handle_run_auto_approve_cron_now(): void
+    {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'Permission denied.' );
+        }
+
+        if (
+            ! isset( $_POST['wiwts_run_auto_approve_cron_now_nonce'] ) ||
+            ! wp_verify_nonce(
+                sanitize_text_field( wp_unslash( $_POST['wiwts_run_auto_approve_cron_now_nonce'] ) ),
+                'wiwts_run_auto_approve_cron_now'
+            )
+        ) {
+            wp_die( 'Security check failed.' );
+        }
+
+        $redirect_url = admin_url( 'admin.php?page=wiw-timesheets-auto-approve-run' );
+        $auto_approve_enabled = (string) get_option( 'wiw_enable_auto_approvals', '' ) === '1';
+
+        if ( ! $auto_approve_enabled ) {
+            wp_safe_redirect( add_query_arg( 'wiwts_auto_approve_cron_ran', 'disabled', $redirect_url ) );
+            exit;
+        }
+
+        do_action( 'wiwts_auto_approve_past_due_run' );
+
+        wp_safe_redirect( add_query_arg( 'wiwts_auto_approve_cron_ran', '1', $redirect_url ) );
+        exit;
     }
 }

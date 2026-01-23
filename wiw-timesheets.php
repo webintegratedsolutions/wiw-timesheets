@@ -120,6 +120,7 @@ class WIW_Timesheet_Manager
         // Scheduling happens on activation. These hooks only define schedules + handlers.
         add_filter('cron_schedules', array($this, 'wiwts_add_weekly_cron_schedule'));
         add_action('wiwts_auto_approve_past_due_dry_run', array($this, 'wiwts_cron_auto_approve_past_due_dry_run'));
+        add_action('wiwts_auto_approve_past_due_run', array($this, 'wiwts_cron_auto_approve_past_due_run'));
 
         // Manual trigger should only run in wp-admin context (not during front-end + not during admin-ajax).
         add_action('admin_init', array($this, 'wiwts_maybe_run_auto_approve_dry_run_manual'));
@@ -137,6 +138,9 @@ class WIW_Timesheet_Manager
 
         // Manual auto-approval runner (admin-post) - Step 5 only
         add_action('admin_post_wiwts_manual_run_auto_approve', array($this, 'wiwts_handle_manual_run_auto_approve'));
+
+        // Manual trigger for auto-approve cron run (admin-post)
+        add_action('admin_post_wiwts_run_auto_approve_cron_now', array($this, 'wiwts_handle_run_auto_approve_cron_now'));
     }
 
 
@@ -5129,6 +5133,32 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             'table_html'   => $report_payload['table_html'],
         );
 
+        $this->wiwts_store_auto_approve_report_entry($report_entry);
+
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry, 'dry-run');
+        $email_sent   = $email_result['sent'];
+        $email_error  = $email_result['error'];
+
+        $redirect_args = array('wiwts_report_generated' => '1');
+        if ($email_sent) {
+            $redirect_args['wiwts_report_emailed'] = '1';
+        } elseif ($email_error !== '') {
+            $redirect_args['wiwts_report_email_error'] = $email_error;
+        }
+
+        wp_safe_redirect(add_query_arg($redirect_args, $redirect_url));
+        exit;
+    }
+
+    /**
+     * Persist a dry-run report entry and append it to the report log.
+     *
+     * @param array $report_entry
+     */
+    private function wiwts_store_auto_approve_report_entry(array $report_entry): void
+    {
         update_option('wiwts_auto_approve_dry_run_report', $report_entry, false);
 
         $report_log = get_option('wiwts_auto_approve_dry_run_report_log', array());
@@ -5137,10 +5167,54 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         }
         $report_log[] = $report_entry;
         update_option('wiwts_auto_approve_dry_run_report_log', $report_log, false);
+    }
 
-        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
-        wp_safe_redirect(add_query_arg('wiwts_report_generated', '1', $redirect_url));
-        exit;
+    /**
+     * Send the dry-run report email for a given report entry.
+     *
+     * @param array $report_entry
+     * @return array{sent:bool,error:string}
+     */
+    private function wiwts_send_auto_approve_report_email(array $report_entry, string $context = 'dry-run'): array
+    {
+        $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
+        if ($recipient === '' || ! is_email($recipient)) {
+            return array('sent' => false, 'error' => 'missing_email');
+        }
+
+        $generated_at = isset($report_entry['generated_at']) ? (string) $report_entry['generated_at'] : '';
+        $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+        $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+
+        $is_auto_approve = ($context === 'auto-approve');
+        $subject = $is_auto_approve
+            ? 'WIW Timesheets — Auto-Approval Report'
+            : 'WIW Timesheets — Auto-Approval Dry-Run Report';
+        $message = $is_auto_approve
+            ? '<p>Here is the latest auto-approval report.</p>'
+            : '<p>Here is the latest auto-approval dry-run report.</p>';
+        if ($generated_at !== '') {
+            $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
+        }
+        if ($report_text !== '') {
+            $message .= '<pre style="white-space:pre-wrap;">' . esc_html($report_text) . '</pre>';
+        }
+        if ($table_html !== '') {
+            $message .= '<div style="margin-top:12px;">' . wp_kses_post($table_html) . '</div>';
+        }
+
+        $sent = wp_mail(
+            $recipient,
+            $subject,
+            $message,
+            array('Content-Type: text/html; charset=UTF-8')
+        );
+
+        if (! $sent) {
+            return array('sent' => false, 'error' => 'send_failed');
+        }
+
+        return array('sent' => true, 'error' => '');
     }
 
     /**
@@ -5247,6 +5321,14 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             wp_die('Security check failed.');
         }
 
+        $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
+        $report_entry   = array(
+            'generated_at' => current_time('mysql'),
+            'report_text'  => $report_payload['report_text'],
+            'table_html'   => $report_payload['table_html'],
+        );
+        $report_entry = $this->wiwts_format_report_entry_for_auto_approve($report_entry);
+
         $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
 
         $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
@@ -5255,6 +5337,12 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             wp_safe_redirect(add_query_arg('wiwts_auto_approve_run', 'disabled', $redirect_url));
             exit;
         }
+
+        $this->wiwts_store_auto_approve_report_entry($report_entry);
+
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry, 'auto-approve');
+        $email_sent   = $email_result['sent'];
+        $email_error  = $email_result['error'];
 
         $redirect_url = add_query_arg(
             array(
@@ -5265,6 +5353,12 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             ),
             $redirect_url
         );
+
+        if ($email_sent) {
+            $redirect_url = add_query_arg('wiwts_report_emailed', '1', $redirect_url);
+        } elseif ($email_error !== '') {
+            $redirect_url = add_query_arg('wiwts_report_email_error', $email_error, $redirect_url);
+        }
 
         wp_safe_redirect($redirect_url);
         exit;
@@ -5277,6 +5371,41 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
     {
         $report = $this->wiwts_build_auto_approve_dry_run_report();
         error_log('[WIWTS][AUTO-APPROVE DRY RUN] ' . str_replace("\n", ' | ', $report));
+    }
+
+    /**
+     * Cron handler: run auto-approvals (with auto-fixes) and email the dry-run report.
+     */
+    public function wiwts_cron_auto_approve_past_due_run(): void
+    {
+        $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
+        $report_entry   = array(
+            'generated_at' => current_time('mysql'),
+            'report_text'  => $report_payload['report_text'],
+            'table_html'   => $report_payload['table_html'],
+        );
+        $report_entry = $this->wiwts_format_report_entry_for_auto_approve($report_entry);
+
+        $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
+        if (empty($result['enabled'])) {
+            error_log('[WIWTS][AUTO-APPROVE] Skipped (auto-approvals disabled).');
+            return;
+        }
+
+        $this->wiwts_store_auto_approve_report_entry($report_entry);
+
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry, 'auto-approve');
+
+        $log_context = sprintf(
+            '[WIWTS][AUTO-APPROVE] approved=%d skipped=%d updated=%d email=%s error=%s',
+            (int) ($result['approved'] ?? 0),
+            (int) ($result['skipped'] ?? 0),
+            (int) ($result['updated'] ?? 0),
+            $email_result['sent'] ? 'sent' : 'not_sent',
+            $email_result['error'] !== '' ? $email_result['error'] : 'none'
+        );
+
+        error_log($log_context);
     }
 
     private function wiwts_get_next_tuesday_8am_timestamp(): int
@@ -5296,6 +5425,37 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         }
 
         return $tues_8am->getTimestamp();
+    }
+
+    private function wiwts_format_report_entry_for_auto_approve(array $report_entry): array
+    {
+        $report_text = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+        if ($report_text !== '') {
+            $report_text = str_replace(
+                'Approval cutoff (All records before this date are past due):',
+                'Approval cutoff (All records before this date were past due):',
+                $report_text
+            );
+            $report_text = preg_replace(
+                '/^Would auto-approve \\(pending past due entries\\):\\s*(\\d+)/m',
+                'Entries that were auto-approved: $1 (read-only)',
+                $report_text
+            );
+        }
+
+        $table_html = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+        if ($table_html !== '') {
+            $table_html = str_replace(
+                'Entries that would be auto-approved (read-only)',
+                'Entries that were auto-approved (read-only)',
+                $table_html
+            );
+        }
+
+        $report_entry['report_text'] = $report_text;
+        $report_entry['table_html']  = $table_html;
+
+        return $report_entry;
     }
 
     /**
@@ -5391,21 +5551,19 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
     if (empty($rows)) {
         $table_html = '<p><strong>No past-due pending entries found.</strong></p>';
     } else {
-        // === WIWTS DRY RUN TABLE HEADER BEGIN ===
         $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
-        $table_html .= '<table class="wp-list-table widefat fixed striped" style="margin-top:8px;width:900px;">';
+        $table_html .= '<table style="margin-top:8px;width:700px;">';
         $table_html .= '<thead><tr>';
-        $table_html .= '<th style="width:140px;">&nbsp;</th>';
-        $table_html .= '<th style="width:170px;">&nbsp;</th>';
-        $table_html .= '<th style="width:190px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-        $table_html .= '<th style="width:90px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
+        $table_html .= '<th style="width:140px; text-align:left;">Shift Date</th>';
+        $table_html .= '<th style="width:170px; text-align:left;">Employee</th>';
+        $table_html .= '<th style="width:190px; text-align:left;">Sched. Start/End</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Clock In</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Clock Out</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Break (Min)</th>';
+        $table_html .= '<th style="width:90px; text-align:left;">Sched. Hrs</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Clocked Hrs</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Payable Hrs</th>';
         $table_html .= '</tr></thead><tbody>';
-        // === WIWTS DRY RUN TABLE HEADER END ===
 
         foreach ($rows as $dr) {
             $date_display = isset($dr->date) ? (string) $dr->date : 'N/A';
@@ -5450,29 +5608,14 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
             }
 
             $title_line = 'Shift Record ID #' . esc_html($shift_record_id) . ' in Timesheet ID #' . ($ts_id > 0 ? (string) $ts_id : 'N/A') . ' - For Pay Period: ' . $pp_label . '';
-            // === WIWTS DRY RUN CONTEXT ROW BEGIN ===
             $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
             $table_html .= '<td colspan="9" style="background-color: #fff;">&nbsp;</td>';
             $table_html .= '</tr>';
             $table_html .= '<tr class="wiwts-timesheet-context">';
             $table_html .= '<th colspan="9" style="text-align:left; background:#fff; padding:8px 0;">' . esc_html($title_line) . '</th>';
             $table_html .= '</tr>';
-            // === WIWTS DRY RUN CONTEXT ROW END ===
 
-            // Repeat table headers above each entry (matches client UI layout)
-            $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
-            $table_html .= '<th style="text-align:left;">Shift Date</th>';
-            $table_html .= '<th style="text-align:left;">Employee</th>';
-            $table_html .= '<th style="text-align:left;">Sched. Start/End</th>';
-            $table_html .= '<th style="text-align:left;">Clock In</th>';
-            $table_html .= '<th style="text-align:left;">Clock Out</th>';
-            $table_html .= '<th style="text-align:left;">Break (Min)</th>';
-            $table_html .= '<th style="text-align:left;">Sched. Hrs</th>';
-            $table_html .= '<th style="text-align:left;">Clocked Hrs</th>';
-            $table_html .= '<th style="text-align:left;">Payable Hrs</th>';
-            $table_html .= '</tr>';
-
-            // === WIWTS DRY RUN ENTRY ROW BEGIN ===
+            // Main entry row
             $table_html .= '<tr>';
 
             $table_html .= '<td>'
@@ -5488,7 +5631,6 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
             $table_html .= '<td>' . esc_html($clocked_hrs) . '</td>';
             $table_html .= '<td>' . esc_html($payable_hrs) . '</td>';
             $table_html .= '</tr>';
-            // === WIWTS DRY RUN ENTRY ROW END ===
 
             // (Auto-approval edit log preview row moved below the Edit Logs row to preserve expand-row structure.)
 
@@ -9436,7 +9578,7 @@ new WIW_Timesheet_Manager();
 
 /**
  * Run installation routine on plugin activation.
- * Also schedule the weekly dry-run cron.
+ * Also schedule the weekly dry-run cron and auto-approve cron.
  */
 function wiwts_activate_plugin(): void
 {
@@ -9460,6 +9602,22 @@ function wiwts_activate_plugin(): void
 
         wp_schedule_event($tues_8am->getTimestamp(), 'weekly', 'wiwts_auto_approve_past_due_dry_run');
     }
+
+    // Schedule weekly auto-approve cron (Tuesday 8:01 AM local time) if not scheduled
+    if (! wp_next_scheduled('wiwts_auto_approve_past_due_run')) {
+        $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+        $now = new DateTimeImmutable('now', $tz);
+
+        $dow             = (int) $now->format('w'); // 0 Sun ... 6 Sat. Tuesday=2
+        $days_until_tues = (2 - $dow + 7) % 7;
+
+        $tues_801am = $now->setTime(8, 1, 0)->modify('+' . $days_until_tues . ' days');
+        if ($now >= $tues_801am) {
+            $tues_801am = $tues_801am->modify('+7 days');
+        }
+
+        wp_schedule_event($tues_801am->getTimestamp(), 'weekly', 'wiwts_auto_approve_past_due_run');
+    }
 }
 
 function wiwts_deactivate_plugin(): void
@@ -9467,6 +9625,11 @@ function wiwts_deactivate_plugin(): void
     $ts = wp_next_scheduled('wiwts_auto_approve_past_due_dry_run');
     if ($ts) {
         wp_unschedule_event($ts, 'wiwts_auto_approve_past_due_dry_run');
+    }
+
+    $ts_auto = wp_next_scheduled('wiwts_auto_approve_past_due_run');
+    if ($ts_auto) {
+        wp_unschedule_event($ts_auto, 'wiwts_auto_approve_past_due_run');
     }
 }
 
