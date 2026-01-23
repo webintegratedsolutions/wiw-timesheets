@@ -5391,9 +5391,8 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
     if (empty($rows)) {
         $table_html = '<p><strong>No past-due pending entries found.</strong></p>';
     } else {
-        // === WIWTS DRY RUN TABLE HEADER BEGIN ===
         $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
-        $table_html .= '<table class="wp-list-table widefat fixed striped" style="margin-top:8px;width:900px;">';
+        $table_html .= '<table style="margin-top:8px;width:900px;">';
         $table_html .= '<thead><tr>';
         $table_html .= '<th style="width:140px;">&nbsp;</th>';
         $table_html .= '<th style="width:170px;">&nbsp;</th>';
@@ -5404,8 +5403,8 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
         $table_html .= '<th style="width:90px;">&nbsp;</th>';
         $table_html .= '<th style="width:95px;">&nbsp;</th>';
         $table_html .= '<th style="width:95px;">&nbsp;</th>';
+
         $table_html .= '</tr></thead><tbody>';
-        // === WIWTS DRY RUN TABLE HEADER END ===
 
         foreach ($rows as $dr) {
             $date_display = isset($dr->date) ? (string) $dr->date : 'N/A';
@@ -5450,14 +5449,12 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
             }
 
             $title_line = 'Shift Record ID #' . esc_html($shift_record_id) . ' in Timesheet ID #' . ($ts_id > 0 ? (string) $ts_id : 'N/A') . ' - For Pay Period: ' . $pp_label . '';
-            // === WIWTS DRY RUN CONTEXT ROW BEGIN ===
             $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
-            $table_html .= '<td colspan="9" style="background-color: #fff;">&nbsp;</td>';
+            $table_html .= '<td colspan="10" style="background-color: #fff;">&nbsp;</td>';
             $table_html .= '</tr>';
             $table_html .= '<tr class="wiwts-timesheet-context">';
             $table_html .= '<th colspan="9" style="text-align:left; background:#fff; padding:8px 0;">' . esc_html($title_line) . '</th>';
             $table_html .= '</tr>';
-            // === WIWTS DRY RUN CONTEXT ROW END ===
 
             // Repeat table headers above each entry (matches client UI layout)
             $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
@@ -5472,7 +5469,10 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
             $table_html .= '<th style="text-align:left;">Payable Hrs</th>';
             $table_html .= '</tr>';
 
-            // === WIWTS DRY RUN ENTRY ROW BEGIN ===
+            // Main entry row
+            $table_html .= '<tr>';
+
+            // Main entry row
             $table_html .= '<tr>';
 
             $table_html .= '<td>'
@@ -5488,7 +5488,6 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
             $table_html .= '<td>' . esc_html($clocked_hrs) . '</td>';
             $table_html .= '<td>' . esc_html($payable_hrs) . '</td>';
             $table_html .= '</tr>';
-            // === WIWTS DRY RUN ENTRY ROW END ===
 
             // (Auto-approval edit log preview row moved below the Edit Logs row to preserve expand-row structure.)
 
