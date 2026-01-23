@@ -5187,12 +5187,10 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
 
         $is_auto_approve = ($context === 'auto-approve');
-        $subject = $is_auto_approve
-            ? 'WIW Timesheets — Auto-Approval Report'
-            : 'WIW Timesheets — Auto-Approval Dry-Run Report';
+        $subject = 'WIW Timesheets — Auto-Approval Report';
         $message = $is_auto_approve
             ? '<p>Here is the latest auto-approval report.</p>'
-            : '<p>Here is the latest auto-approval dry-run report.</p>';
+            : '<p>Here is the latest auto-approval report.</p>';
         if ($generated_at !== '') {
             $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
         }
@@ -5251,8 +5249,8 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
         $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
 
-        $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
-        $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+        $subject = 'WIW Timesheets — Auto-Approval Report';
+        $message = '<p>Here is the latest auto-approval report.</p>';
         if ($generated_at !== '') {
             $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
         }

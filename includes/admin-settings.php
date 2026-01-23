@@ -255,17 +255,17 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             <?php endif; ?>
             <?php if ( isset( $_GET['wiwts_report_generated'] ) ) : ?>
                 <div class="notice notice-success is-dismissible">
-                    <p><strong>✅ Auto-approval dry-run report generated.</strong></p>
+                    <p><strong>✅ Auto-approval report generated.</strong></p>
                 </div>
             <?php endif; ?>
             <?php if ( isset( $_GET['wiwts_report_emailed'] ) ) : ?>
                 <div class="notice notice-success is-dismissible">
-                    <p><strong>✅ Auto-approval dry-run report emailed successfully.</strong></p>
+                    <p><strong>✅ Auto-approval report emailed successfully.</strong></p>
                 </div>
             <?php endif; ?>
             <?php if ( isset( $_GET['wiwts_report_log_purged'] ) ) : ?>
                 <div class="notice notice-success is-dismissible">
-                    <p><strong>✅ Auto-approval dry-run report log purged.</strong></p>
+                    <p><strong>✅ Auto-approval report log purged.</strong></p>
                 </div>
             <?php endif; ?>
             <?php if ( isset( $_GET['wiwts_report_email_error'] ) ) : ?>
@@ -274,7 +274,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                 if ( $error_code === 'missing_email' ) {
                     $error_message = 'Please set a valid report email address before sending.';
                 } elseif ( $error_code === 'missing_report' ) {
-                    $error_message = 'Please generate a dry-run report before sending.';
+                    $error_message = 'Please generate an auto-approval report before sending.';
                 } else {
                     $error_message = 'Report email could not be sent. Please check your mail configuration.';
                 }
@@ -327,8 +327,8 @@ trait WIW_Timesheet_Admin_Settings_Trait {
             <hr/>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <h2>3. Email Latest Dry-Run Report</h2>
-                <p>Send the most recent dry-run report to the configured report email address.</p>
+                <h2>3. Email Latest Auto-Approval Report</h2>
+                <p>Send the most recent auto-approval report to the configured report email address.</p>
 
                 <input type="hidden" name="action" value="wiwts_send_auto_approve_report_email" />
                 <?php wp_nonce_field( 'wiwts_send_auto_approve_report_email', 'wiwts_send_auto_approve_report_email_nonce' ); ?>
@@ -342,7 +342,7 @@ trait WIW_Timesheet_Admin_Settings_Trait {
                     echo '<p class="description">Set a valid report email above before sending.</p>';
                 }
                 if ( ! $report_ready ) {
-                    echo '<p class="description">Generate a dry-run report first to enable sending.</p>';
+                    echo '<p class="description">Generate an auto-approval report first to enable sending.</p>';
                 }
                 ?>
 
@@ -383,14 +383,14 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <hr/>
 
-            <h2>5. Auto-Approval Dry-Run Report Log</h2>
-            <p>This log stores every generated dry-run report for audit purposes.</p>
+            <h2>5. Auto-Approval Report Logs</h2>
+            <p>This log stores every generated auto-approval report for audit purposes.</p>
             <!-- === WIWTS PURGE REPORT LOG FORM BEGIN === -->
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                 <input type="hidden" name="action" value="wiwts_purge_auto_approve_report_log" />
                 <?php wp_nonce_field( 'wiwts_purge_auto_approve_report_log', 'wiwts_purge_auto_approve_report_log_nonce' ); ?>
                 <p>
-                    <button type="submit" class="button button-secondary" name="submit_purge_auto_approve_report_log" onclick="return confirm('Permanently delete all dry-run report log entries?');">
+                    <button type="submit" class="button button-secondary" name="submit_purge_auto_approve_report_log" onclick="return confirm('Permanently delete all auto-approval report log entries?');">
                         Purge Report Log
                     </button>
                 </p>
