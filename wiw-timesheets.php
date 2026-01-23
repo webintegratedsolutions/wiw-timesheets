@@ -5129,51 +5129,13 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             'table_html'   => $report_payload['table_html'],
         );
 
-        update_option('wiwts_auto_approve_dry_run_report', $report_entry, false);
-
-        $report_log = get_option('wiwts_auto_approve_dry_run_report_log', array());
-        if (! is_array($report_log)) {
-            $report_log = array();
-        }
-        $report_log[] = $report_entry;
-        update_option('wiwts_auto_approve_dry_run_report_log', $report_log, false);
+        $this->wiwts_store_auto_approve_report_entry($report_entry);
 
         $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
 
-        $email_error = '';
-        $email_sent  = false;
-
-        $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
-        if ($recipient === '' || ! is_email($recipient)) {
-            $email_error = 'missing_email';
-        } else {
-            $generated_at = isset($report_entry['generated_at']) ? (string) $report_entry['generated_at'] : '';
-            $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
-            $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
-
-            $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
-            $message = '<p>Here is the latest auto-approval dry-run report.</p>';
-            if ($generated_at !== '') {
-                $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
-            }
-            if ($report_text !== '') {
-                $message .= '<pre style="white-space:pre-wrap;">' . esc_html($report_text) . '</pre>';
-            }
-            if ($table_html !== '') {
-                $message .= '<div style="margin-top:12px;">' . wp_kses_post($table_html) . '</div>';
-            }
-
-            $email_sent = wp_mail(
-                $recipient,
-                $subject,
-                $message,
-                array('Content-Type: text/html; charset=UTF-8')
-            );
-
-            if (! $email_sent) {
-                $email_error = 'send_failed';
-            }
-        }
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry);
+        $email_sent   = $email_result['sent'];
+        $email_error  = $email_result['error'];
 
         $redirect_args = array('wiwts_report_generated' => '1');
         if ($email_sent) {
@@ -5184,6 +5146,66 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         wp_safe_redirect(add_query_arg($redirect_args, $redirect_url));
         exit;
+    }
+
+    /**
+     * Persist a dry-run report entry and append it to the report log.
+     *
+     * @param array $report_entry
+     */
+    private function wiwts_store_auto_approve_report_entry(array $report_entry): void
+    {
+        update_option('wiwts_auto_approve_dry_run_report', $report_entry, false);
+
+        $report_log = get_option('wiwts_auto_approve_dry_run_report_log', array());
+        if (! is_array($report_log)) {
+            $report_log = array();
+        }
+        $report_log[] = $report_entry;
+        update_option('wiwts_auto_approve_dry_run_report_log', $report_log, false);
+    }
+
+    /**
+     * Send the dry-run report email for a given report entry.
+     *
+     * @param array $report_entry
+     * @return array{sent:bool,error:string}
+     */
+    private function wiwts_send_auto_approve_report_email(array $report_entry): array
+    {
+        $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
+        if ($recipient === '' || ! is_email($recipient)) {
+            return array('sent' => false, 'error' => 'missing_email');
+        }
+
+        $generated_at = isset($report_entry['generated_at']) ? (string) $report_entry['generated_at'] : '';
+        $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+        $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+
+        $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
+        $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+        if ($generated_at !== '') {
+            $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
+        }
+        if ($report_text !== '') {
+            $message .= '<pre style="white-space:pre-wrap;">' . esc_html($report_text) . '</pre>';
+        }
+        if ($table_html !== '') {
+            $message .= '<div style="margin-top:12px;">' . wp_kses_post($table_html) . '</div>';
+        }
+
+        $sent = wp_mail(
+            $recipient,
+            $subject,
+            $message,
+            array('Content-Type: text/html; charset=UTF-8')
+        );
+
+        if (! $sent) {
+            return array('sent' => false, 'error' => 'send_failed');
+        }
+
+        return array('sent' => true, 'error' => '');
     }
 
     /**
@@ -5299,6 +5321,18 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             exit;
         }
 
+        $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
+        $report_entry   = array(
+            'generated_at' => current_time('mysql'),
+            'report_text'  => $report_payload['report_text'],
+            'table_html'   => $report_payload['table_html'],
+        );
+        $this->wiwts_store_auto_approve_report_entry($report_entry);
+
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry);
+        $email_sent   = $email_result['sent'];
+        $email_error  = $email_result['error'];
+
         $redirect_url = add_query_arg(
             array(
                 'wiwts_auto_approve_run' => '1',
@@ -5308,6 +5342,12 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             ),
             $redirect_url
         );
+
+        if ($email_sent) {
+            $redirect_url = add_query_arg('wiwts_report_emailed', '1', $redirect_url);
+        } elseif ($email_error !== '') {
+            $redirect_url = add_query_arg('wiwts_report_email_error', $email_error, $redirect_url);
+        }
 
         wp_safe_redirect($redirect_url);
         exit;
