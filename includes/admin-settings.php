@@ -260,12 +260,12 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                 <h2>3. Generate Auto-Approval Dry-Run Report</h2>
-                <p>Generate a read-only dry-run report that mirrors the current preview page. This does not approve any records.</p>
+                <p>Generate a read-only dry-run report that mirrors the current preview page and email it to the configured report email address.</p>
 
                 <input type="hidden" name="action" value="wiwts_generate_auto_approve_report" />
                 <?php wp_nonce_field( 'wiwts_generate_auto_approve_report', 'wiwts_generate_auto_approve_report_nonce' ); ?>
 
-                <?php submit_button( 'Generate Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
+                <?php submit_button( 'Generate & Email Dry-Run Report', 'secondary', 'submit_dry_run_report' ); ?>
             </form>
 
             <hr/>
