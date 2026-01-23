@@ -4141,11 +4141,8 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                 }
 
                 $out .= '</tbody></table>';
-// === Week-level expandable flags (filtered to this week range) ===
-                $week_flags_all = array();
 
-                // Only show flags for records that are actually displayed in this section/week.
-                // (Otherwise flags from "Pending" rows can appear under the "Approved" section and vice versa.)
+                // Only show flags/edit logs for records that are actually displayed in this week.
                 $week_visible_time_ids = array();
                 foreach ($rows as $r) {
                     $rid = isset($r->wiw_time_id) ? absint($r->wiw_time_id) : 0;
@@ -4162,6 +4159,108 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                         $week_timesheet_ids[$tid] = true;
                     }
                 }
+
+                // === Week-level editable logs (filtered to this week range) ===
+                $week_entry_ids = array();
+                $week_entry_id_to_wiw_time_id = array();
+                foreach ($rows as $r) {
+                    $entry_id = isset($r->id) ? absint($r->id) : 0;
+                    if ($entry_id > 0) {
+                        $week_entry_ids[$entry_id] = true;
+                        if (isset($r->wiw_time_id)) {
+                            $week_entry_id_to_wiw_time_id[$entry_id] = (string) $r->wiw_time_id;
+                        }
+                    }
+                }
+
+                $week_edit_logs = array();
+                if (! empty($week_timesheet_ids)) {
+                    foreach (array_keys($week_timesheet_ids) as $tid) {
+                        $logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $tid);
+                        if (empty($logs_for_ts)) {
+                            continue;
+                        }
+                        foreach ($logs_for_ts as $lg) {
+                            $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+                            if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
+                                $week_edit_logs[] = $lg;
+                            }
+                        }
+                    }
+                }
+
+                $is_admin_view = current_user_can('manage_options');
+                $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
+
+                $out .= '<details class="' . esc_attr($edit_logs_class) . '" style="margin:12px 0 22px;">';
+                $out .= '<summary>💡 Click to Expand: Edit Logs</summary>';
+                $out .= '<div style="padding-top:8px;">';
+
+                if (empty($week_edit_logs)) {
+                    $out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
+                } else {
+                    $out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
+                    $out .= '<thead><tr>';
+                    $out .= '<th style="width:120px;">Record ID</th>';
+                    $out .= '<th>When</th>';
+                    $out .= '<th>Modified</th>';
+                    $out .= '<th>Old</th>';
+                    $out .= '<th>New</th>';
+                    $out .= '<th>Edited By</th>';
+                    $out .= '</tr></thead>';
+                    $out .= '<tbody>';
+
+                    foreach ($week_edit_logs as $lg) {
+                        $when = isset($lg->created_at) ? $this->wiw_format_datetime_local_pretty((string) $lg->created_at) : '';
+
+                        $field = isset($lg->edit_type) ? (string) $lg->edit_type : '';
+                        $oldv  = isset($lg->old_value) ? (string) $lg->old_value : '';
+                        $newv  = isset($lg->new_value) ? (string) $lg->new_value : '';
+
+                        $oldv_norm = $this->normalize_datetime_to_minute($oldv);
+                        $newv_norm = $this->normalize_datetime_to_minute($newv);
+
+                        $oldv_disp = $oldv_norm;
+                        $newv_disp = $newv_norm;
+
+                        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $oldv_norm)) {
+                            $oldv_disp = date_i18n('g:i a', strtotime($oldv_norm));
+                        }
+
+                        if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $newv_norm)) {
+                            $newv_disp = date_i18n('g:i a', strtotime($newv_norm));
+                        }
+
+                        $who = '';
+                        if (! empty($lg->edited_by_display_name)) {
+                            $who = (string) $lg->edited_by_display_name;
+                        } elseif (! empty($lg->edited_by_user_login)) {
+                            $who = (string) $lg->edited_by_user_login;
+                        }
+
+                        $log_entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+                        $wiw_time_id  = ($log_entry_id > 0 && isset($week_entry_id_to_wiw_time_id[$log_entry_id]))
+                            ? (string) $week_entry_id_to_wiw_time_id[$log_entry_id]
+                            : '';
+
+                        $out .= '<tr>';
+                        $out .= '<td>' . esc_html($wiw_time_id !== '' ? $wiw_time_id : 'N/A') . '</td>';
+                        $out .= '<td>' . esc_html($when !== '' ? $when : 'N/A') . '</td>';
+                        $out .= '<td><strong>' . esc_html($field !== '' ? $field : 'N/A') . '</strong></td>';
+                        $out .= '<td>' . esc_html($oldv_disp !== '' ? $oldv_disp : 'N/A') . '</td>';
+                        $out .= '<td>' . esc_html($newv_disp !== '' ? $newv_disp : 'N/A') . '</td>';
+                        $out .= '<td>' . esc_html($who !== '' ? $who : 'N/A') . '</td>';
+                        $out .= '</tr>';
+                    }
+
+                    $out .= '</tbody></table>';
+                }
+
+                $out .= '</div>';
+                $out .= '</details>';
+
+// === Week-level expandable flags (filtered to this week range) ===
+                $week_flags_all = array();
 
                 if (! empty($week_timesheet_ids)) {
 
