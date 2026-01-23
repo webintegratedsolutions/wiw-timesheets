@@ -138,6 +138,9 @@ class WIW_Timesheet_Manager
 
         // Manual auto-approval runner (admin-post) - Step 5 only
         add_action('admin_post_wiwts_manual_run_auto_approve', array($this, 'wiwts_handle_manual_run_auto_approve'));
+
+        // Manual trigger for auto-approve cron run (admin-post)
+        add_action('admin_post_wiwts_run_auto_approve_cron_now', array($this, 'wiwts_handle_run_auto_approve_cron_now'));
     }
 
 
