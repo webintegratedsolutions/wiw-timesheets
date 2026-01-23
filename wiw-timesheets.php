@@ -3660,6 +3660,12 @@ HTML;
             return '';
         }
 
+        $logo_url = '';
+        $custom_logo_id = (int) get_theme_mod('custom_logo');
+        if ($custom_logo_id > 0) {
+            $logo_url = wp_get_attachment_image_url($custom_logo_id, 'full');
+        }
+
         $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets">';
 
         // Same AJAX config div as the main client view (required for Actions JS).
@@ -3847,6 +3853,7 @@ HTML;
 #wiwts-client-records-view .wiw-client-actions { gap: 4px !important; }
 #wiwts-client-records-view .wiw-client-actions .wiw-btn { padding: 6px 10px; }
 #wiwts-client-records-view .wiw-edit-logs-print-only { display: none; }
+#wiwts-client-records-view .wiw-print-header { display: none; }
 @media print {
   /* Print only the selected week table */
   body * { visibility: hidden !important; }
@@ -3863,6 +3870,9 @@ HTML;
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
   #wiwts-client-records-view .wiw-print-target .wiw-edit-logs-print-only { display: block !important; }
+  #wiwts-client-records-view .wiw-print-target .wiw-print-header { display: flex !important; align-items: center; gap: 12px; margin: 0 0 16px 0; }
+  #wiwts-client-records-view .wiw-print-target .wiw-print-header img { max-height: 48px; width: auto; }
+  #wiwts-client-records-view .wiw-print-target .wiw-print-header h2 { margin: 0; font-size: 22px; }
   #wiwts-client-records-view .wiw-print-target button,
   #wiwts-client-records-view .wiw-print-target input,
   #wiwts-client-records-view .wiw-print-target select,
@@ -3881,7 +3891,7 @@ HTML;
 </style>';
 
 
-        $render_weeks = function (array $weeks, $is_done_section = false) use (&$out, $client_id, $tz) {
+        $render_weeks = function (array $weeks, $is_done_section = false) use (&$out, $client_id, $tz, $logo_url) {
 
             foreach ($weeks as $wk) {
 
@@ -3922,6 +3932,12 @@ HTML;
                 $label_end   = date_i18n('F d, Y', strtotime($wk_end));
 
                 $out .= '<div class="wiw-week-group" data-week-start="' . esc_attr($wk_start) . '" data-week-end="' . esc_attr($wk_end) . '" style="margin:18px 0 10px 0;">';
+                $out .= '<div class="wiw-print-header">';
+                if ($logo_url) {
+                    $out .= '<img src="' . esc_url($logo_url) . '" alt="' . esc_attr(get_bloginfo('name')) . '" />';
+                }
+                $out .= '<h2>Timesheet</h2>';
+                $out .= '</div>';
                 $out .= '<div class="wiw-week-header" style="display:flex;justify-content:space-between;align-items:center;margin:0 0 8px 0;">';
                 $out .= '<h4 style="margin:0;">Week of: ' . esc_html($label_start) . ' to ' . esc_html($label_end) . '</h4>';
                 if ($is_done_section) {
