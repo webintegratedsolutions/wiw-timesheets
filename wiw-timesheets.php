@@ -5137,7 +5137,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
 
-        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry);
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry, 'dry-run');
         $email_sent   = $email_result['sent'];
         $email_error  = $email_result['error'];
 
@@ -5175,7 +5175,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
      * @param array $report_entry
      * @return array{sent:bool,error:string}
      */
-    private function wiwts_send_auto_approve_report_email(array $report_entry): array
+    private function wiwts_send_auto_approve_report_email(array $report_entry, string $context = 'dry-run'): array
     {
         $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
         if ($recipient === '' || ! is_email($recipient)) {
@@ -5186,8 +5186,13 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
         $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
 
-        $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
-        $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+        $is_auto_approve = ($context === 'auto-approve');
+        $subject = $is_auto_approve
+            ? 'WIW Timesheets — Auto-Approval Report'
+            : 'WIW Timesheets — Auto-Approval Dry-Run Report';
+        $message = $is_auto_approve
+            ? '<p>Here is the latest auto-approval report.</p>'
+            : '<p>Here is the latest auto-approval dry-run report.</p>';
         if ($generated_at !== '') {
             $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
         }
@@ -5322,6 +5327,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             'report_text'  => $report_payload['report_text'],
             'table_html'   => $report_payload['table_html'],
         );
+        $report_entry = $this->wiwts_format_report_entry_for_auto_approve($report_entry);
 
         $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
 
@@ -5334,7 +5340,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $this->wiwts_store_auto_approve_report_entry($report_entry);
 
-        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry);
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry, 'auto-approve');
         $email_sent   = $email_result['sent'];
         $email_error  = $email_result['error'];
 
@@ -5378,6 +5384,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             'report_text'  => $report_payload['report_text'],
             'table_html'   => $report_payload['table_html'],
         );
+        $report_entry = $this->wiwts_format_report_entry_for_auto_approve($report_entry);
 
         $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
         if (empty($result['enabled'])) {
@@ -5387,7 +5394,7 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
 
         $this->wiwts_store_auto_approve_report_entry($report_entry);
 
-        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry);
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry, 'auto-approve');
 
         $log_context = sprintf(
             '[WIWTS][AUTO-APPROVE] approved=%d skipped=%d updated=%d email=%s error=%s',
@@ -5418,6 +5425,37 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         }
 
         return $tues_8am->getTimestamp();
+    }
+
+    private function wiwts_format_report_entry_for_auto_approve(array $report_entry): array
+    {
+        $report_text = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+        if ($report_text !== '') {
+            $report_text = str_replace(
+                'Approval cutoff (All records before this date are past due):',
+                'Approval cutoff (All records before this date were past due):',
+                $report_text
+            );
+            $report_text = preg_replace(
+                '/^Would auto-approve \\(pending past due entries\\):\\s*(\\d+)/m',
+                'Entries that were auto-approved: $1 (read-only)',
+                $report_text
+            );
+        }
+
+        $table_html = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+        if ($table_html !== '') {
+            $table_html = str_replace(
+                'Entries that would be auto-approved (read-only)',
+                'Entries that were auto-approved (read-only)',
+                $table_html
+            );
+        }
+
+        $report_entry['report_text'] = $report_text;
+        $report_entry['table_html']  = $table_html;
+
+        return $report_entry;
     }
 
     /**
