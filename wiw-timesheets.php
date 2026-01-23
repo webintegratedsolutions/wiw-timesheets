@@ -120,6 +120,7 @@ class WIW_Timesheet_Manager
         // Scheduling happens on activation. These hooks only define schedules + handlers.
         add_filter('cron_schedules', array($this, 'wiwts_add_weekly_cron_schedule'));
         add_action('wiwts_auto_approve_past_due_dry_run', array($this, 'wiwts_cron_auto_approve_past_due_dry_run'));
+        add_action('wiwts_auto_approve_past_due_run', array($this, 'wiwts_cron_auto_approve_past_due_run'));
 
         // Manual trigger should only run in wp-admin context (not during front-end + not during admin-ajax).
         add_action('admin_init', array($this, 'wiwts_maybe_run_auto_approve_dry_run_manual'));
@@ -5363,6 +5364,40 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
         error_log('[WIWTS][AUTO-APPROVE DRY RUN] ' . str_replace("\n", ' | ', $report));
     }
 
+    /**
+     * Cron handler: run auto-approvals (with auto-fixes) and email the dry-run report.
+     */
+    public function wiwts_cron_auto_approve_past_due_run(): void
+    {
+        $report_payload = $this->wiwts_build_auto_approve_dry_run_payload();
+        $report_entry   = array(
+            'generated_at' => current_time('mysql'),
+            'report_text'  => $report_payload['report_text'],
+            'table_html'   => $report_payload['table_html'],
+        );
+
+        $result = $this->wiwts_run_auto_approve_past_due_with_autofix();
+        if (empty($result['enabled'])) {
+            error_log('[WIWTS][AUTO-APPROVE] Skipped (auto-approvals disabled).');
+            return;
+        }
+
+        $this->wiwts_store_auto_approve_report_entry($report_entry);
+
+        $email_result = $this->wiwts_send_auto_approve_report_email($report_entry);
+
+        $log_context = sprintf(
+            '[WIWTS][AUTO-APPROVE] approved=%d skipped=%d updated=%d email=%s error=%s',
+            (int) ($result['approved'] ?? 0),
+            (int) ($result['skipped'] ?? 0),
+            (int) ($result['updated'] ?? 0),
+            $email_result['sent'] ? 'sent' : 'not_sent',
+            $email_result['error'] !== '' ? $email_result['error'] : 'none'
+        );
+
+        error_log($log_context);
+    }
+
     private function wiwts_get_next_tuesday_8am_timestamp(): int
     {
         $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
@@ -9502,7 +9537,7 @@ new WIW_Timesheet_Manager();
 
 /**
  * Run installation routine on plugin activation.
- * Also schedule the weekly dry-run cron.
+ * Also schedule the weekly dry-run cron and auto-approve cron.
  */
 function wiwts_activate_plugin(): void
 {
@@ -9526,6 +9561,22 @@ function wiwts_activate_plugin(): void
 
         wp_schedule_event($tues_8am->getTimestamp(), 'weekly', 'wiwts_auto_approve_past_due_dry_run');
     }
+
+    // Schedule weekly auto-approve cron (Tuesday 8:01 AM local time) if not scheduled
+    if (! wp_next_scheduled('wiwts_auto_approve_past_due_run')) {
+        $tz  = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('America/Toronto');
+        $now = new DateTimeImmutable('now', $tz);
+
+        $dow             = (int) $now->format('w'); // 0 Sun ... 6 Sat. Tuesday=2
+        $days_until_tues = (2 - $dow + 7) % 7;
+
+        $tues_801am = $now->setTime(8, 1, 0)->modify('+' . $days_until_tues . ' days');
+        if ($now >= $tues_801am) {
+            $tues_801am = $tues_801am->modify('+7 days');
+        }
+
+        wp_schedule_event($tues_801am->getTimestamp(), 'weekly', 'wiwts_auto_approve_past_due_run');
+    }
 }
 
 function wiwts_deactivate_plugin(): void
@@ -9533,6 +9584,11 @@ function wiwts_deactivate_plugin(): void
     $ts = wp_next_scheduled('wiwts_auto_approve_past_due_dry_run');
     if ($ts) {
         wp_unschedule_event($ts, 'wiwts_auto_approve_past_due_dry_run');
+    }
+
+    $ts_auto = wp_next_scheduled('wiwts_auto_approve_past_due_run');
+    if ($ts_auto) {
+        wp_unschedule_event($ts_auto, 'wiwts_auto_approve_past_due_run');
     }
 }
 
