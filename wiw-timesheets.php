@@ -5478,16 +5478,15 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
         $table_html .= '<h3 style="margin:14px 0 8px 0;">Entries that would be auto-approved (read-only)</h3>';
         $table_html .= '<table style="margin-top:8px;width:900px;">';
         $table_html .= '<thead><tr>';
-        $table_html .= '<th style="width:140px;">&nbsp;</th>';
-        $table_html .= '<th style="width:170px;">&nbsp;</th>';
-        $table_html .= '<th style="width:190px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-        $table_html .= '<th style="width:90px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-        $table_html .= '<th style="width:95px;">&nbsp;</th>';
-
+        $table_html .= '<th style="width:140px; text-align:left;">Shift Date</th>';
+        $table_html .= '<th style="width:170px; text-align:left;">Employee</th>';
+        $table_html .= '<th style="width:190px; text-align:left;">Sched. Start/End</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Clock In</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Clock Out</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Break (Min)</th>';
+        $table_html .= '<th style="width:90px; text-align:left;">Sched. Hrs</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Clocked Hrs</th>';
+        $table_html .= '<th style="width:95px; text-align:left;">Payable Hrs</th>';
         $table_html .= '</tr></thead><tbody>';
 
         foreach ($rows as $dr) {
@@ -5538,19 +5537,6 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
             $table_html .= '</tr>';
             $table_html .= '<tr class="wiwts-timesheet-context">';
             $table_html .= '<th colspan="9" style="text-align:left; background:#fff; padding:8px 0;">' . esc_html($title_line) . '</th>';
-            $table_html .= '</tr>';
-
-            // Repeat table headers above each entry (matches client UI layout)
-            $table_html .= '<tr class="wiwts-repeat-header" style="background:#f6f7f7;">';
-            $table_html .= '<th style="text-align:left;">Shift Date</th>';
-            $table_html .= '<th style="text-align:left;">Employee</th>';
-            $table_html .= '<th style="text-align:left;">Sched. Start/End</th>';
-            $table_html .= '<th style="text-align:left;">Clock In</th>';
-            $table_html .= '<th style="text-align:left;">Clock Out</th>';
-            $table_html .= '<th style="text-align:left;">Break (Min)</th>';
-            $table_html .= '<th style="text-align:left;">Sched. Hrs</th>';
-            $table_html .= '<th style="text-align:left;">Clocked Hrs</th>';
-            $table_html .= '<th style="text-align:left;">Payable Hrs</th>';
             $table_html .= '</tr>';
 
             // Main entry row
