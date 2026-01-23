@@ -5134,6 +5134,50 @@ function wiwts_maybe_run_auto_approve_dry_run_manual(): void
             $redirect_args['wiwts_report_email_error'] = $email_result['error'];
         }
 
+        $redirect_url = admin_url('admin.php?page=wiw-timesheets-settings');
+
+        $email_error = '';
+        $email_sent  = false;
+
+        $recipient = sanitize_email((string) get_option('wiw_auto_approve_report_email'));
+        if ($recipient === '' || ! is_email($recipient)) {
+            $email_error = 'missing_email';
+        } else {
+            $generated_at = isset($report_entry['generated_at']) ? (string) $report_entry['generated_at'] : '';
+            $report_text  = isset($report_entry['report_text']) ? (string) $report_entry['report_text'] : '';
+            $table_html   = isset($report_entry['table_html']) ? (string) $report_entry['table_html'] : '';
+
+            $subject = 'WIW Timesheets — Auto-Approval Dry-Run Report';
+            $message = '<p>Here is the latest auto-approval dry-run report.</p>';
+            if ($generated_at !== '') {
+                $message .= '<p><strong>Generated at:</strong> ' . esc_html($generated_at) . '</p>';
+            }
+            if ($report_text !== '') {
+                $message .= '<pre style="white-space:pre-wrap;">' . esc_html($report_text) . '</pre>';
+            }
+            if ($table_html !== '') {
+                $message .= '<div style="margin-top:12px;">' . wp_kses_post($table_html) . '</div>';
+            }
+
+            $email_sent = wp_mail(
+                $recipient,
+                $subject,
+                $message,
+                array('Content-Type: text/html; charset=UTF-8')
+            );
+
+            if (! $email_sent) {
+                $email_error = 'send_failed';
+            }
+        }
+
+        $redirect_args = array('wiwts_report_generated' => '1');
+        if ($email_sent) {
+            $redirect_args['wiwts_report_emailed'] = '1';
+        } elseif ($email_error !== '') {
+            $redirect_args['wiwts_report_email_error'] = $email_error;
+        }
+
         wp_safe_redirect(add_query_arg($redirect_args, $redirect_url));
         exit;
     }
