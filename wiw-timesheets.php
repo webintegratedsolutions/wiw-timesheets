@@ -3859,11 +3859,16 @@ HTML;
 #wiwts-client-records-view .wiw-print-header { display: none; }
 @media print {
   /* Print only the selected week table */
-  body * { visibility: hidden !important; }
+  @page { margin: 12mm; }
+  body { margin: 0 !important; }
+  body * { display: none !important; }
   #wiwts-client-records-view .wiw-print-target,
-  #wiwts-client-records-view .wiw-print-target * { visibility: visible !important; }
+  #wiwts-client-records-view .wiw-print-target * {
+    display: revert !important;
+    visibility: visible !important;
+  }
 
-  #wiwts-client-records-view .wiw-print-target { position: static; width: 100%; }
+  #wiwts-client-records-view .wiw-print-target { position: static; width: 100%; margin: 0 !important; }
 
   /* Hide interactive UI + Actions column for print */
   /* Expandable flags: hide summary label and show expanded content in print */
