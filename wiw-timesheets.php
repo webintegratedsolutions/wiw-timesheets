@@ -158,7 +158,11 @@ class WIW_Timesheet_Manager
         $client_id_raw   = get_user_meta($current_user_id, 'client_account_number', true);
         $client_id       = is_scalar($client_id_raw) ? trim((string) $client_id_raw) : '';
 
-        $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets">';
+$is_admin_front = current_user_can('manage_options');
+$view_class = $is_admin_front ? 'wiwts-view-frontend-admin' : 'wiwts-view-client';
+
+$out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . esc_attr($view_class) . '">';
+
         // === WIWTS STEP 12 BEGIN: Fix AJAX config attributes ===
         $out .= '<div id="wiwts-client-ajax"'
             . ' data-ajax-url="' . esc_url(admin_url('admin-ajax.php')) . '"'
@@ -3660,7 +3664,10 @@ HTML;
             return '';
         }
 
-        $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets">';
+$is_admin_front = current_user_can('manage_options');
+$view_class = $is_admin_front ? 'wiwts-view-frontend-admin' : 'wiwts-view-client';
+
+$out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . esc_attr($view_class) . '">';
 
         // Same AJAX config div as the main client view (required for Actions JS).
         $out .= '<div id="wiwts-client-ajax"'
@@ -3839,46 +3846,148 @@ HTML;
         // Cache flags by timesheet_id to avoid repeated queries across weeks.
         $wiwts_flags_cache_by_timesheet = array();
 
-        // Week View only: tighten spacing + prevent wrap on time columns
-        $out .= '<style>
+// Week View only: tighten spacing + prevent wrap on time columns
+$out .= '<style>
 #wiwts-client-records-view table.wp-list-table th,
-#wiwts-client-records-view table.wp-list-table td { padding: 6px 8px; vertical-align: middle; }
-#wiwts-client-records-view table.wp-list-table th { white-space: nowrap; }
-#wiwts-client-records-view .wiw-client-actions { gap: 4px !important; }
-#wiwts-client-records-view .wiw-client-actions .wiw-btn { padding: 6px 10px; }
-#wiwts-client-records-view .wiw-edit-logs-print-only { display: none; }
+#wiwts-client-records-view table.wp-list-table td {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+#wiwts-client-records-view table.wp-list-table th {
+  white-space: nowrap;
+}
+
+#wiwts-client-records-view .wiw-client-actions {
+  gap: 4px !important;
+}
+
+#wiwts-client-records-view .wiw-client-actions .wiw-btn {
+  padding: 6px 10px;
+}
+
+/* Hidden by default on screen; enabled only during print */
+#wiwts-client-records-view .wiw-edit-logs-print-only {
+  display: none;
+}
+
 @media print {
-  /* Print only the selected week table */
-  body * { visibility: hidden !important; }
-  #wiwts-client-records-view .wiw-print-target,
-  #wiwts-client-records-view .wiw-print-target * { visibility: visible !important; }
 
-  #wiwts-client-records-view .wiw-print-target { position: absolute; left: 0; top: 0; width: 100%; }
+  /* IMPORTANT:
+     Do NOT hide body children here (theme wrappers vary and can blank the print).
+     Only control what prints INSIDE the timesheet wrapper. */
 
-  /* Hide interactive UI + Actions column for print */
-  /* Expandable flags: hide summary label and show expanded content in print */
+  /* Hide all week groups, then show ONLY the selected week */
+  #wiwts-client-records-view .wiw-week-group { display: none !important; }
+  #wiwts-client-records-view .wiw-week-group.wiw-print-target {
+    display: block !important;
+    position: static !important;
+    width: auto !important;
+  }
+
+  /* Preserve table layout in print */
+  #wiwts-client-records-view table { display: table !important; }
+  #wiwts-client-records-view thead { display: table-header-group !important; }
+  #wiwts-client-records-view tbody { display: table-row-group !important; }
+  #wiwts-client-records-view tr { display: table-row !important; page-break-inside: avoid; }
+  #wiwts-client-records-view th,
+  #wiwts-client-records-view td { display: table-cell !important; }
+
+  /* Expand flags for print */
   #wiwts-client-records-view .wiw-print-target details.wiw-flags > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-flags > div { display: block !important; }
-  /* Expandable edit logs: hide summary label and show expanded content in print */
+
+  /* Expand edit logs for print */
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
   #wiwts-client-records-view .wiw-print-target .wiw-edit-logs-print-only { display: block !important; }
+
+  /* Hide interactive UI */
   #wiwts-client-records-view .wiw-print-target button,
   #wiwts-client-records-view .wiw-print-target input,
   #wiwts-client-records-view .wiw-print-target select,
   #wiwts-client-records-view .wiw-print-target textarea { display: none !important; }
 
-  /* Hide the Actions column entirely for print */
-  #wiwts-client-records-view .wiw-print-target .wiw-col-actions { display: none !important; }
-
-  /* Hide the Print button itself in print output */
+  /* Hide Actions column + Print button */
+  #wiwts-client-records-view .wiw-print-target .wiw-col-actions,
   #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
 
-  /* Avoid breaking rows across pages where possible */
-  #wiwts-client-records-view .wiw-print-target table { page-break-inside: auto; }
-  #wiwts-client-records-view .wiw-print-target tr { page-break-inside: avoid; page-break-after: auto; }
+/* Print: hide the top "Timesheets / location / approval deadline" block only */
+#wiwts-client-records-view > h3[style*="font-size:18px"] { 
+  display: none !important; 
+}
+#wiwts-client-records-view > p[style*="font-size:16px"][style*="line-height:1.4"] { 
+  display: none !important; 
+}
+
+/* Print: hide top headings and section divider above the week tables */
+#wiwts-client-records-view > h3 {
+  display: none !important;
+}
+
+#wiwts-client-records-view > p {
+  display: none !important;
+}
+
+#wiwts-client-records-view > hr {
+  display: none !important;
+}
+
+/* Print: hide "Request Staff" link */
+header a[href*="request"] {
+  display: none !important;
+}
+
+/* Print: hide mobile menu toggle button */
+button[aria-label*="menu"],
+button[aria-label*="Menu"],
+.menu-toggle,
+.nav-toggle,
+.mobile-menu-toggle {
+  display: none !important;
+}
+
+/* Client view only: approval line (print-only) */
+#wiwts-client-records-view.wiwts-view-client tr.wiw-approval-print-only {
+  display: none;
+}
+
+@media print {
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target tr.wiw-approval-print-only {
+    display: table-row !important;
+  }
+
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target td.wiw-approval-print-only-cell {
+    text-align: right !important;
+    font-size: 12px;
+    padding-top: 2px;
+    padding-bottom: 6px;
+  }
+}
+
 }
 </style>';
+
+// Client weekly view only: scoped overrides (do not affect front-end admin weekly view)
+// Client weekly view only: hide flags + edit logs (do not affect front-end admin view)
+$out .= '<style>
+@media print {
+
+  /* CLIENT VIEW ONLY */
+
+  /* Hide entire Flags section */
+  #wiwts-client-records-view.wiwts-view-client details.wiw-flags {
+    display: none !important;
+  }
+
+  /* Hide entire Edit Logs section (table + "No edit logs found..." message) */
+  #wiwts-client-records-view.wiwts-view-client details.wiw-edit-logs,
+  #wiwts-client-records-view.wiwts-view-client .wiw-edit-logs-print-only {
+    display: none !important;
+  }
+}
+</style>';
+
 
 
         $render_weeks = function (array $weeks, $is_done_section = false) use (&$out, $client_id, $tz) {
@@ -4189,6 +4298,115 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                     }
                 }
 
+                // Build: [wiw_time_id] => "Approved by: X on Y" / "Automatically approved by: X on Y"
+$approval_note_by_wiw_time_id = array();
+
+if (!empty($week_edit_logs)) {
+    foreach ($week_edit_logs as $lg) {
+        // IMPORTANT: we need the shift record id (wiw_time_id), not the edit log row id
+        $log_wiw_time_id = isset($lg->wiw_time_id) ? (string) $lg->wiw_time_id : '';
+        if ($log_wiw_time_id === '') {
+            continue;
+        }
+
+        $etype = isset($lg->edit_type) ? (string) $lg->edit_type : '';
+        $who   = isset($lg->edited_by_name) ? (string) $lg->edited_by_name : '';
+        $when  = isset($lg->created_at) ? (string) $lg->created_at : '';
+
+        if ($who === '' || $when === '') {
+            continue;
+        }
+
+        // If you already have a helper formatter, use it; otherwise format safely:
+        $when_pretty = $this->wiwts_format_datetime_local_pretty($when);
+
+        $prefix = ($etype === 'Auto-Approved Time Record')
+            ? 'Automatically approved by: '
+            : 'Approved by: ';
+
+        // Keep the most recent one if multiple exist (simple overwrite is fine if logs are already ordered DESC)
+        $approval_note_by_wiw_time_id[$log_wiw_time_id] = $prefix . $who . ' on ' . $when_pretty;
+    }
+}
+
+
+// Build "approved by" lookup per entry_id (client print-only)
+// We prefer the most recent log where edit_type indicates approval.
+$approval_note_by_entry_id = array();
+
+if (!empty($week_edit_logs)) {
+    foreach ($week_edit_logs as $lg) {
+        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+        if ($entry_id <= 0) {
+            continue;
+        }
+
+        $edit_type = isset($lg->edit_type) ? trim((string)$lg->edit_type) : '';
+        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
+            continue;
+        }
+
+        $created_raw = isset($lg->created_at) ? (string)$lg->created_at : '';
+        $created_ts  = $created_raw !== '' ? strtotime($created_raw) : 0;
+
+        // Edited-by display name (your log rows use "edited_by_display_name" in the table output)
+        $by_name = '';
+        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+            $by_name = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+            $by_name = trim($lg->edited_by);
+        }
+
+        // Keep only the most recent approval-type log per entry_id.
+        if (!isset($approval_note_by_entry_id[$entry_id]) || $created_ts > (int)$approval_note_by_entry_id[$entry_id]['ts']) {
+            $approval_note_by_entry_id[$entry_id] = array(
+                'ts'        => (int)$created_ts,
+                'created_at'=> $created_raw,
+                'by'        => $by_name,
+                'is_auto'   => ($edit_type === 'Auto-Approved Time Record'),
+            );
+        }
+    }
+}
+
+// Build "approved by" lookup per entry_id (client print-only)
+// We prefer the most recent log where edit_type indicates approval.
+$approval_note_by_entry_id = array();
+
+if (!empty($week_edit_logs)) {
+    foreach ($week_edit_logs as $lg) {
+        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+        if ($entry_id <= 0) {
+            continue;
+        }
+
+        $edit_type = isset($lg->edit_type) ? trim((string)$lg->edit_type) : '';
+        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
+            continue;
+        }
+
+        $created_raw = isset($lg->created_at) ? (string)$lg->created_at : '';
+        $created_ts  = $created_raw !== '' ? strtotime($created_raw) : 0;
+
+        // Edited-by display name (your log rows use "edited_by_display_name" in the table output)
+        $by_name = '';
+        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+            $by_name = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+            $by_name = trim($lg->edited_by);
+        }
+
+        // Keep only the most recent approval-type log per entry_id.
+        if (!isset($approval_note_by_entry_id[$entry_id]) || $created_ts > (int)$approval_note_by_entry_id[$entry_id]['ts']) {
+            $approval_note_by_entry_id[$entry_id] = array(
+                'ts'        => (int)$created_ts,
+                'created_at'=> $created_raw,
+                'by'        => $by_name,
+                'is_auto'   => ($edit_type === 'Auto-Approved Time Record'),
+            );
+        }
+    }
+}
                 $is_admin_view = current_user_can('manage_options');
                 $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
 
