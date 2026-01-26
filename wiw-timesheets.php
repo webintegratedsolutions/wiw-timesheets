@@ -4401,44 +4401,47 @@ if (!empty($week_edit_logs)) {
 
                 // Print-only approval lines (after the week table).
                 $approval_lines = array();
-                if (! empty($rows) && (! empty($approval_note_by_entry_id) || ! empty($approval_note_by_wiw_time_id))) {
-                    $seen_entries = array();
-                    foreach ($rows as $r) {
-                        $entry_id = isset($r->id) ? absint($r->id) : 0;
-                        $wiw_time_id = isset($r->wiw_time_id) ? trim((string) $r->wiw_time_id) : '';
-                        $row_key = '';
+                if (! empty($week_edit_logs)) {
+                    $seen_approvals = array();
+                    foreach ($week_edit_logs as $lg) {
+                        $edit_type = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+                        if (stripos($edit_type, 'Approved Time Record') === false) {
+                            continue;
+                        }
+
+                        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+                        $wiw_time_id = isset($lg->wiw_time_id) ? trim((string) $lg->wiw_time_id) : '';
+
+                        $approval_key = '';
                         if ($entry_id > 0) {
-                            $row_key = 'entry-' . $entry_id;
+                            $approval_key = 'entry-' . $entry_id;
                         } elseif ($wiw_time_id !== '') {
-                            $row_key = 'time-' . $wiw_time_id;
+                            $approval_key = 'time-' . $wiw_time_id;
                         }
-                        if ($row_key === '' || isset($seen_entries[$row_key])) {
+
+                        if ($approval_key === '' || isset($seen_approvals[$approval_key])) {
                             continue;
                         }
-                        $seen_entries[$row_key] = true;
+                        $seen_approvals[$approval_key] = true;
 
-                        $note = null;
-                        if (isset($approval_note_by_entry_id[$entry_id])) {
-                            $note = $approval_note_by_entry_id[$entry_id];
-                        } else {
-                            if ($wiw_time_id !== '' && isset($approval_note_by_wiw_time_id[$wiw_time_id])) {
-                                $note = $approval_note_by_wiw_time_id[$wiw_time_id];
-                            }
+                        $by = '';
+                        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+                            $by = trim($lg->edited_by_display_name);
+                        } elseif (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+                            $by = trim($lg->edited_by_name);
+                        } elseif (isset($lg->edited_by_user_login) && is_string($lg->edited_by_user_login)) {
+                            $by = trim($lg->edited_by_user_login);
+                        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+                            $by = trim($lg->edited_by);
                         }
 
-                        if (empty($note) || ! is_array($note)) {
-                            continue;
-                        }
-
-                        $by   = isset($note['by']) ? trim((string) $note['by']) : '';
-                        $when = isset($note['created_at']) ? trim((string) $note['created_at']) : '';
-
+                        $when = isset($lg->created_at) ? trim((string) $lg->created_at) : '';
                         if ($when === '') {
                             continue;
                         }
 
                         $when_pretty = $this->wiw_format_datetime_local_pretty($when);
-                        if (! empty($note['is_auto'])) {
+                        if ($edit_type === 'Auto-Approved Time Record') {
                             $approval_lines[] = 'Automatically approved on ' . $when_pretty . '.';
                         } elseif ($by !== '') {
                             $approval_lines[] = 'Approved by ' . $by . ' on ' . $when_pretty . '.';
