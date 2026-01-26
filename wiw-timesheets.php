@@ -4309,7 +4309,7 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                     }
                 }
 
-                // Build: [wiw_time_id] => "Approved by: X on Y" / "Automatically approved by: X on Y"
+// Build: [wiw_time_id] => approval meta (used for print-only approval lines fallback)
 $approval_note_by_wiw_time_id = array();
 
 if (!empty($week_edit_logs)) {
@@ -4324,19 +4324,20 @@ if (!empty($week_edit_logs)) {
         $who   = isset($lg->edited_by_name) ? (string) $lg->edited_by_name : '';
         $when  = isset($lg->created_at) ? (string) $lg->created_at : '';
 
-        if ($who === '' || $when === '') {
+        if ($when === '') {
             continue;
         }
 
         // If you already have a helper formatter, use it; otherwise format safely:
-        $when_pretty = $this->wiw_format_datetime_local_pretty($when);
-
-        $prefix = ($etype === 'Auto-Approved Time Record')
-            ? 'Automatically approved by: '
-            : 'Approved by: ';
-
-        // Keep the most recent one if multiple exist (simple overwrite is fine if logs are already ordered DESC)
-        $approval_note_by_wiw_time_id[$log_wiw_time_id] = $prefix . $who . ' on ' . $when_pretty;
+        $created_ts = strtotime($when);
+        if (! isset($approval_note_by_wiw_time_id[$log_wiw_time_id]) || $created_ts > (int) $approval_note_by_wiw_time_id[$log_wiw_time_id]['ts']) {
+            $approval_note_by_wiw_time_id[$log_wiw_time_id] = array(
+                'ts'        => (int) $created_ts,
+                'created_at'=> $when,
+                'by'        => $who,
+                'is_auto'   => ($etype === 'Auto-Approved Time Record'),
+            );
+        }
     }
 }
 
@@ -4386,7 +4387,7 @@ if (!empty($week_edit_logs)) {
 
                 // Print-only approval lines (after the week table).
                 $approval_lines = array();
-                if (! empty($rows) && ! empty($approval_note_by_entry_id)) {
+                if (! empty($rows) && (! empty($approval_note_by_entry_id) || ! empty($approval_note_by_wiw_time_id))) {
                     $seen_entries = array();
                     foreach ($rows as $r) {
                         $entry_id = isset($r->id) ? absint($r->id) : 0;
@@ -4395,11 +4396,20 @@ if (!empty($week_edit_logs)) {
                         }
                         $seen_entries[$entry_id] = true;
 
-                        if (! isset($approval_note_by_entry_id[$entry_id])) {
+                        $note = null;
+                        if (isset($approval_note_by_entry_id[$entry_id])) {
+                            $note = $approval_note_by_entry_id[$entry_id];
+                        } else {
+                            $wiw_time_id = isset($r->wiw_time_id) ? trim((string) $r->wiw_time_id) : '';
+                            if ($wiw_time_id !== '' && isset($approval_note_by_wiw_time_id[$wiw_time_id])) {
+                                $note = $approval_note_by_wiw_time_id[$wiw_time_id];
+                            }
+                        }
+
+                        if (empty($note) || ! is_array($note)) {
                             continue;
                         }
 
-                        $note = $approval_note_by_entry_id[$entry_id];
                         $by   = isset($note['by']) ? trim((string) $note['by']) : '';
                         $when = isset($note['created_at']) ? trim((string) $note['created_at']) : '';
 
