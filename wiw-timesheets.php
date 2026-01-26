@@ -3906,7 +3906,8 @@ $out .= '<style>
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
   #wiwts-client-records-view .wiw-print-target .wiw-edit-logs-print-only { display: block !important; }
-  #wiwts-client-records-view .wiw-print-target .wiw-approval-print-only {
+  #wiwts-client-records-view .wiw-print-target .wiw-approval-print-only,
+  #wiwts-client-records-view.wiwts-view-client .wiw-approval-print-only {
     display: block !important;
     margin: 8px 0 14px;
     font-size: 12px;
