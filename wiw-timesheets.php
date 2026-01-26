@@ -492,6 +492,16 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
                     ? ' | Timesheet #' . $timesheet_id_for_period
                     : '';
 
+                $edit_logs_for_period = array();
+                $approval_log_map     = array();
+                if ($timesheet_id_for_period !== '') {
+                    $edit_logs_for_period = $this->get_scoped_edit_logs_for_timesheet(
+                        $client_id,
+                        absint($timesheet_id_for_period)
+                    );
+                    $approval_log_map = $this->wiwts_build_approval_log_map($edit_logs_for_period);
+                }
+
                 if (current_user_can('manage_options')) {
                     $out .= '<h3 style="margin:12px 0 8px;">🗓️ Pay Period: '
                         . esc_html($pay_period_label . $ts_label)
@@ -990,11 +1000,6 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
                             $out .= '</tr>';
                         }
 
-                        // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) BEGIN ===
-                        // Used for Approve confirmation flags list in row rendering (frontend admin view).
-                        $wiwts_unresolved_flags_cache_by_timesheet = array();
-                        // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) END ===
-
                         foreach ($daily_rows as $dr) {
 
                             $date_display = isset($dr->date) ? (string) $dr->date : 'N/A';
@@ -1206,7 +1211,7 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
                                 $unresolved_flags_attr = ' data-unresolved-flags="' . esc_attr(implode('||', $wiwts_client_flags_unresolved_cache[$tid_for_flags])) . '"';
                             }
 
-                            // === WIWTS STEP 2 BEGIN: Hide entry action buttons for archived entries (client UI) ===
+                    // === WIWTS STEP 2 BEGIN: Actions column text (client UI) ===
 
                             // IMPORTANT:
                             // The client "Timesheet Records" filter applies to wp_wiw_timesheet_entries.status,
@@ -1218,99 +1223,33 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
 
                             $is_archived_row = ($entry_status_for_actions === 'archived') || ($current_filter_status === 'archived');
 
+                            $wiw_time_id_key = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+                            $action_text = '';
+
                             if ($is_archived_row) {
+                                $action_text = 'Archived';
+                            } elseif ($is_approved) {
+                                $action_text = 'Approved';
 
-                                // No buttons for archived rows in the client UI.
-                                $out .= '<td><span class="wiw-muted">Archived</span></td>';
-                            } else {
-
-                                $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
-
-// === WIWTS APPROVE BUTTON FLAGS DATA (frontend admin view) BEGIN ===
-                        $wiwts_flags_json_attr = '';
-
-                        $wiwts_row_wiw_time_id  = isset($dr->wiw_time_id) ? trim((string) $dr->wiw_time_id) : '';
-                        $wiwts_row_timesheet_id = isset($dr->_wiw_timesheet_id) ? absint($dr->_wiw_timesheet_id) : (isset($timesheet_id) ? absint($timesheet_id) : 0);
-
-                        // Build unresolved flags list for this row at render time (safe cache per timesheet_id)
-                        $wiwts_unresolved_list_for_row = array();
-
-                        if ($wiwts_row_timesheet_id > 0 && $wiwts_row_wiw_time_id !== '') {
-
-                            if (! isset($wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id])) {
-
-                                $tmp_map = array();
-
-                                // Pull all flags for this timesheet and build unresolved-by-wiw_time_id map
-                                $flags_for_ts = $this->get_scoped_flags_for_timesheet($client_id, $wiwts_row_timesheet_id);
-
-                                if (! empty($flags_for_ts) && is_array($flags_for_ts)) {
-                                    foreach ($flags_for_ts as $fg) {
-
-                                        // Unresolved only
-                                        $st = isset($fg->flag_status) ? strtolower(trim((string) $fg->flag_status)) : '';
-                                        if ($st === 'resolved') {
-                                            continue;
+                                if (! empty($approval_log_map)
+                                    && $wiw_time_id_key !== ''
+                                    && isset($approval_log_map[$wiw_time_id_key])
+                                ) {
+                                    $log = $approval_log_map[$wiw_time_id_key];
+                                    if (! empty($log['is_auto'])) {
+                                        $action_text = 'Automatically Approved';
+                                    } else {
+                                        $approved_date = $this->wiw_format_date_local_pretty((string) $log['created_at']);
+                                        if ($approved_date !== 'N/A') {
+                                            $action_text = 'Approved on ' . $approved_date;
                                         }
-
-                                        $k = isset($fg->wiw_time_id) ? trim((string) $fg->wiw_time_id) : '';
-                                        if ($k === '') {
-                                            continue;
-                                        }
-
-                                        // Show ONLY the human description (Phase 14 schema uses "description")
-                                        $msg = '';
-                                        if (isset($fg->flag_message)) {
-                                            $msg = trim((string) $fg->flag_message);
-                                        }
-                                        if ($msg === '' && isset($fg->description)) {
-                                            $msg = trim((string) $fg->description);
-                                        }
-
-                                        $label = ($msg !== '') ? $msg : 'Unspecified flag';
-
-                                        if (! isset($tmp_map[$k])) {
-                                            $tmp_map[$k] = array();
-                                        }
-                                        $tmp_map[$k][] = $label;
                                     }
                                 }
-
-                                $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id] = $tmp_map;
+                            } else {
+                                $action_text = $status_raw !== '' ? ucwords($status_raw) : 'Pending';
                             }
 
-                            $tmp_map2 = $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id];
-                            if (isset($tmp_map2[$wiwts_row_wiw_time_id]) && is_array($tmp_map2[$wiwts_row_wiw_time_id])) {
-                                $wiwts_unresolved_list_for_row = $tmp_map2[$wiwts_row_wiw_time_id];
-                            }
-                        }
-
-                        if (! empty($wiwts_unresolved_list_for_row) && is_array($wiwts_unresolved_list_for_row)) {
-                            $wiwts_unresolved_list_for_row = array_values(array_unique(array_map('strval', $wiwts_unresolved_list_for_row)));
-                            $wiwts_flags_json_attr = ' data-unresolved-flags-json="' . esc_attr(wp_json_encode($wiwts_unresolved_list_for_row)) . '"';
-                        }
-
-                        $actions_html .= '<button type="button" class="wiw-btn primary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $wiwts_flags_json_attr . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
-// === WIWTS APPROVE BUTTON FLAGS DATA (frontend admin view) END ===
-
-                                if (! $is_approved) {
-                                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
-                                }
-
-                                $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '">Save</button>';
-
-                                if ($wiwts_show_admin_reset_under_approved) {
-                                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '" data-reset-preview-only="1" title="Preview reset (no changes yet)">Reset</button>';
-                                } else {
-                                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '" data-reset-preview-only="1" style="display:none;">Reset</button>';
-                                }
-
-                                $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
-
-                                $actions_html .= '</div>';
-
-                                $out .= '<td>' . $actions_html . '</td>';
-                            }
+                            $out .= '<td>' . esc_html($action_text) . '</td>';
 
                             // === WIWTS STEP 2 END ===
 
@@ -1324,7 +1263,7 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
 
                 // Expandable edit logs (per-timesheet, shown under each daily table when that timesheet is open).
                 if (isset($timesheet_id_for_period) && $timesheet_id_for_period !== '') {
-                    $edit_logs = $this->get_scoped_edit_logs_for_timesheet($client_id, absint($timesheet_id_for_period));
+                    $edit_logs = $edit_logs_for_period;
                     $is_admin_view = current_user_can('manage_options');
                     $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
 
@@ -4069,10 +4008,7 @@ $out .= '<style>
                 $out .= '<th class="wiw-col-actions" style="width:140px;">Actions</th>';
                 $out .= '</tr></thead><tbody>';
 
-                // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) BEGIN ===
-                // Used for Approve confirmation flags list in row rendering (client records view).
-                $wiwts_unresolved_flags_cache_by_timesheet = array();
-                // === WIWTS UNRESOLVED FLAGS CACHE (per timesheet) END ===
+                $approval_log_map_cache = array();
 
                 foreach ($rows as $dr) {
 
@@ -4162,105 +4098,40 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                     $entry_status_for_actions = isset($dr->status) ? strtolower(trim((string) $dr->status)) : $status;
                     $is_archived_row = ($entry_status_for_actions === 'archived');
 
-                    if ($is_archived_row) {
-
-                        $out .= '<td class="wiw-col-actions"><span class="wiw-muted">Archived</span></td>';
-
-                    } else {
-
-                        $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
-
-// === WIWTS APPROVE BUTTON FLAGS DATA (client records view) BEGIN ===
-                        $wiwts_flags_json_attr = '';
-
-                        $wiwts_row_wiw_time_id  = isset($dr->wiw_time_id) ? trim((string) $dr->wiw_time_id) : '';
-                        $wiwts_row_timesheet_id = isset($dr->_wiw_timesheet_id) ? absint($dr->_wiw_timesheet_id) : 0;
-
-                        // Build unresolved flags list for this row at render time (safe cache per timesheet_id)
-                        $wiwts_unresolved_list_for_row = array();
-
-                        if ($wiwts_row_timesheet_id > 0 && $wiwts_row_wiw_time_id !== '') {
-
-                            if (! isset($wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id])) {
-
-                                $tmp_map    = array();
-                                $is_admin_u = current_user_can('manage_options');
-
-                                // Pull flags for this timesheet and build unresolved-by-wiw_time_id map
-                                $flags_for_ts = $this->get_scoped_flags_for_timesheet($client_id, $wiwts_row_timesheet_id);
-
-                                if (! empty($flags_for_ts) && is_array($flags_for_ts)) {
-                                    foreach ($flags_for_ts as $fg) {
-
-                                        // Unresolved only
-                                        $st = isset($fg->flag_status) ? strtolower(trim((string) $fg->flag_status)) : '';
-                                        if ($st === 'resolved') {
-                                            continue;
-                                        }
-
-                                        // Client visibility rules (hide 109/107 for non-admin)
-                                        $flag_type_raw = isset($fg->flag_type) ? trim((string) $fg->flag_type) : '';
-                                        if (! $is_admin_u && preg_match('/^(109|107)\b/', $flag_type_raw)) {
-                                            continue;
-                                        }
-
-                                        $k = isset($fg->wiw_time_id) ? trim((string) $fg->wiw_time_id) : '';
-                                        if ($k === '') {
-                                            continue;
-                                        }
-
-                                        // Show ONLY the human description (Phase 14 schema uses "description")
-                                        $msg = '';
-                                        if (isset($fg->flag_message)) {
-                                            $msg = trim((string) $fg->flag_message);
-                                        }
-                                        if ($msg === '' && isset($fg->description)) {
-                                            $msg = trim((string) $fg->description);
-                                        }
-
-                                        $label = ($msg !== '') ? $msg : 'Unspecified flag';
-
-                                        if (! isset($tmp_map[$k])) {
-                                            $tmp_map[$k] = array();
-                                        }
-                                        $tmp_map[$k][] = $label;
-                                    }
-                                }
-
-                                $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id] = $tmp_map;
-                            }
-
-                            $tmp_map2 = $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id];
-                            if (isset($tmp_map2[$wiwts_row_wiw_time_id]) && is_array($tmp_map2[$wiwts_row_wiw_time_id])) {
-                                $wiwts_unresolved_list_for_row = $tmp_map2[$wiwts_row_wiw_time_id];
-                            }
+                    $wiw_time_id_key = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
+                    $approval_log_map = array();
+                    if ($timesheet_id > 0) {
+                        if (! isset($approval_log_map_cache[$timesheet_id])) {
+                            $logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $timesheet_id);
+                            $approval_log_map_cache[$timesheet_id] = $this->wiwts_build_approval_log_map($logs_for_ts);
                         }
-
-                        if (! empty($wiwts_unresolved_list_for_row) && is_array($wiwts_unresolved_list_for_row)) {
-                            $wiwts_unresolved_list_for_row = array_values(array_unique(array_map('strval', $wiwts_unresolved_list_for_row)));
-                            $wiwts_flags_json_attr = ' data-unresolved-flags-json="' . esc_attr(wp_json_encode($wiwts_unresolved_list_for_row)) . '"';
-                        }
-
-                        $actions_html .= '<button type="button" class="wiw-btn primary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $wiwts_flags_json_attr . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
-// === WIWTS APPROVE BUTTON FLAGS DATA (client records view) END ===
-
-
-                        if (! $is_approved) {
-                            $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
-                        }
-
-                        $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '">Save</button>';
-
-                        // Reset button shows only during edit mode (same as main view)
-                        $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" style="display:none;">Reset</button>';
-
-                        $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
-
-                        $actions_html .= '</div>';
-
-                        $out .= '<td class="wiw-col-actions">' . $actions_html . '</td>';
-
+                        $approval_log_map = $approval_log_map_cache[$timesheet_id];
                     }
+
+                    if ($is_archived_row) {
+                        $action_text = 'Archived';
+                    } elseif ($is_approved) {
+                        $action_text = 'Approved';
+
+                        if (! empty($approval_log_map)
+                            && $wiw_time_id_key !== ''
+                            && isset($approval_log_map[$wiw_time_id_key])
+                        ) {
+                            $log = $approval_log_map[$wiw_time_id_key];
+                            if (! empty($log['is_auto'])) {
+                                $action_text = 'Automatically Approved';
+                            } else {
+                                $approved_date = $this->wiw_format_date_local_pretty((string) $log['created_at']);
+                                if ($approved_date !== 'N/A') {
+                                    $action_text = 'Approved on ' . $approved_date;
+                                }
+                            }
+                        }
+                    } else {
+                        $action_text = $status_raw !== '' ? ucwords($status_raw) : 'Pending';
+                    }
+
+                    $out .= '<td class="wiw-col-actions">' . esc_html($action_text) . '</td>';
 
                     $out .= '</tr>';
                 }
@@ -5137,6 +5008,86 @@ if (!empty($week_edit_logs)) {
         } catch (Exception $e) {
             return 'N/A';
         }
+    }
+
+    /**
+     * Format a local DATETIME string to a date-only value using WP timezone + date format.
+     * Example output: "December 22, 2025"
+     */
+    private function wiw_format_date_local_pretty($datetime_str)
+    {
+        $datetime_str = is_scalar($datetime_str) ? trim((string) $datetime_str) : '';
+        if ($datetime_str === '') {
+            return 'N/A';
+        }
+
+        try {
+            $wp_timezone_string = get_option('timezone_string');
+            if (empty($wp_timezone_string)) {
+                $wp_timezone_string = 'UTC';
+            }
+            $wp_tz = new DateTimeZone($wp_timezone_string);
+
+            $dt = new DateTime($datetime_str, $wp_tz);
+            $dt->setTimezone($wp_tz);
+
+            $date_format = get_option('date_format');
+            if (empty($date_format)) {
+                $date_format = 'F j, Y';
+            }
+
+            return $dt->format($date_format);
+        } catch (Exception $e) {
+            return 'N/A';
+        }
+    }
+
+    /**
+     * Build a lookup of approval logs by WIW time ID.
+     *
+     * @param array $edit_logs Edit log rows for a timesheet.
+     * @return array<string, array{ts:int, created_at:string, is_auto:bool}>
+     */
+    private function wiwts_build_approval_log_map($edit_logs)
+    {
+        $map = array();
+
+        if (empty($edit_logs) || ! is_array($edit_logs)) {
+            return $map;
+        }
+
+        foreach ($edit_logs as $lg) {
+            $wiw_time_id = isset($lg->wiw_time_id) ? (string) $lg->wiw_time_id : '';
+            if ($wiw_time_id === '') {
+                continue;
+            }
+
+            $edit_type = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+            $is_auto   = ($edit_type === 'Auto-Approved Time Record');
+
+            if (! $is_auto
+                && $edit_type !== 'Approved Time Sheet'
+                && $edit_type !== 'Approved Time Record'
+            ) {
+                continue;
+            }
+
+            $created_raw = isset($lg->created_at) ? (string) $lg->created_at : '';
+            $created_ts  = $created_raw !== '' ? strtotime($created_raw) : 0;
+            if ($created_ts <= 0) {
+                continue;
+            }
+
+            if (! isset($map[$wiw_time_id]) || $created_ts > (int) $map[$wiw_time_id]['ts']) {
+                $map[$wiw_time_id] = array(
+                    'ts'         => (int) $created_ts,
+                    'created_at' => $created_raw,
+                    'is_auto'    => $is_auto,
+                );
+            }
+        }
+
+        return $map;
     }
 
     /**
