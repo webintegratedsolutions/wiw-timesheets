@@ -4364,6 +4364,10 @@ if (!empty($week_edit_logs)) {
         $by_name = '';
         if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
             $by_name = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+            $by_name = trim($lg->edited_by_name);
+        } elseif (isset($lg->edited_by_user_login) && is_string($lg->edited_by_user_login)) {
+            $by_name = trim($lg->edited_by_user_login);
         } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
             $by_name = trim($lg->edited_by);
         }
