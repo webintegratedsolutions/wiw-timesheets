@@ -3871,6 +3871,11 @@ $out .= '<style>
   display: none;
 }
 
+/* Hidden by default on screen; enabled only during print */
+#wiwts-client-records-view .wiw-approval-print-only {
+  display: none;
+}
+
 @media print {
 
   /* IMPORTANT:
@@ -3901,6 +3906,12 @@ $out .= '<style>
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
   #wiwts-client-records-view .wiw-print-target .wiw-edit-logs-print-only { display: block !important; }
+  #wiwts-client-records-view .wiw-print-target .wiw-approval-print-only {
+    display: block !important;
+    margin: 8px 0 14px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
 
   /* Hide interactive UI */
   #wiwts-client-records-view .wiw-print-target button,
@@ -4407,6 +4418,46 @@ if (!empty($week_edit_logs)) {
         }
     }
 }
+
+                // Print-only approval lines (after the week table).
+                $approval_lines = array();
+                if (! empty($rows) && ! empty($approval_note_by_entry_id)) {
+                    $seen_entries = array();
+                    foreach ($rows as $r) {
+                        $entry_id = isset($r->id) ? absint($r->id) : 0;
+                        if ($entry_id <= 0 || isset($seen_entries[$entry_id])) {
+                            continue;
+                        }
+                        $seen_entries[$entry_id] = true;
+
+                        if (! isset($approval_note_by_entry_id[$entry_id])) {
+                            continue;
+                        }
+
+                        $note = $approval_note_by_entry_id[$entry_id];
+                        $by   = isset($note['by']) ? trim((string) $note['by']) : '';
+                        $when = isset($note['created_at']) ? trim((string) $note['created_at']) : '';
+
+                        if ($by === '' || $when === '') {
+                            continue;
+                        }
+
+                        $when_pretty = $this->wiwts_format_datetime_local_pretty($when);
+                        $line_prefix = ! empty($note['is_auto'])
+                            ? 'Automatically approved by '
+                            : 'Approved by ';
+
+                        $approval_lines[] = $line_prefix . $by . ' on ' . $when_pretty . '.';
+                    }
+                }
+
+                if (! empty($approval_lines)) {
+                    $out .= '<div class="wiw-approval-print-only">';
+                    foreach ($approval_lines as $line) {
+                        $out .= '<div>' . esc_html($line) . '</div>';
+                    }
+                    $out .= '</div>';
+                }
                 $is_admin_view = current_user_can('manage_options');
                 $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
 
