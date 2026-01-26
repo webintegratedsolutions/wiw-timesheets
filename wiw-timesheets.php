@@ -4321,7 +4321,21 @@ if (!empty($week_edit_logs)) {
         }
 
         $etype = isset($lg->edit_type) ? (string) $lg->edit_type : '';
-        $who   = isset($lg->edited_by_name) ? (string) $lg->edited_by_name : '';
+        $is_approval_type = (stripos($etype, 'Approved Time Record') !== false);
+        if (! $is_approval_type) {
+            continue;
+        }
+
+        $who   = '';
+        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+            $who = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+            $who = trim($lg->edited_by_name);
+        } elseif (isset($lg->edited_by_user_login) && is_string($lg->edited_by_user_login)) {
+            $who = trim($lg->edited_by_user_login);
+        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+            $who = trim($lg->edited_by);
+        }
         $when  = isset($lg->created_at) ? (string) $lg->created_at : '';
 
         if ($when === '') {
@@ -4391,16 +4405,22 @@ if (!empty($week_edit_logs)) {
                     $seen_entries = array();
                     foreach ($rows as $r) {
                         $entry_id = isset($r->id) ? absint($r->id) : 0;
-                        if ($entry_id <= 0 || isset($seen_entries[$entry_id])) {
+                        $wiw_time_id = isset($r->wiw_time_id) ? trim((string) $r->wiw_time_id) : '';
+                        $row_key = '';
+                        if ($entry_id > 0) {
+                            $row_key = 'entry-' . $entry_id;
+                        } elseif ($wiw_time_id !== '') {
+                            $row_key = 'time-' . $wiw_time_id;
+                        }
+                        if ($row_key === '' || isset($seen_entries[$row_key])) {
                             continue;
                         }
-                        $seen_entries[$entry_id] = true;
+                        $seen_entries[$row_key] = true;
 
                         $note = null;
                         if (isset($approval_note_by_entry_id[$entry_id])) {
                             $note = $approval_note_by_entry_id[$entry_id];
                         } else {
-                            $wiw_time_id = isset($r->wiw_time_id) ? trim((string) $r->wiw_time_id) : '';
                             if ($wiw_time_id !== '' && isset($approval_note_by_wiw_time_id[$wiw_time_id])) {
                                 $note = $approval_note_by_wiw_time_id[$wiw_time_id];
                             }
