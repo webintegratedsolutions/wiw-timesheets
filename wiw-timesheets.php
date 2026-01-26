@@ -3908,8 +3908,7 @@ $out .= '<style>
   #wiwts-client-records-view .wiw-print-target select,
   #wiwts-client-records-view .wiw-print-target textarea { display: none !important; }
 
-  /* Hide Actions column + Print button */
-  #wiwts-client-records-view .wiw-print-target .wiw-col-actions,
+  /* Hide Print button (keep Actions column visible for print) */
   #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
 
 /* Print: hide the top "Timesheets / location / approval deadline" block only */
@@ -3974,6 +3973,23 @@ $out .= '<style>
 @media print {
 
   /* CLIENT VIEW ONLY */
+  #wiwts-client-records-view.wiwts-view-client {
+    font-size: 11px;
+  }
+
+  #wiwts-client-records-view.wiwts-view-client table th,
+  #wiwts-client-records-view.wiwts-view-client table td {
+    font-size: 11px;
+  }
+
+  /* Show Actions column/buttons in client print output */
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target .wiw-col-actions {
+    display: table-cell !important;
+  }
+
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target .wiw-client-actions button {
+    display: inline-block !important;
+  }
 
   /* Hide entire Flags section */
   #wiwts-client-records-view.wiwts-view-client details.wiw-flags {
