@@ -4283,6 +4283,7 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                 // === Week-level editable logs (filtered to this week range) ===
                 $week_entry_ids = array();
                 $week_entry_id_to_wiw_time_id = array();
+                $week_wiw_time_ids = $week_visible_time_ids;
                 foreach ($rows as $r) {
                     $entry_id = isset($r->id) ? absint($r->id) : 0;
                     if ($entry_id > 0) {
@@ -4302,7 +4303,11 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                         }
                         foreach ($logs_for_ts as $lg) {
                             $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
-                            if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
+                            $wiw_time_id = isset($lg->wiw_time_id) ? absint($lg->wiw_time_id) : 0;
+                            if (
+                                ($entry_id > 0 && isset($week_entry_ids[$entry_id]))
+                                || ($wiw_time_id > 0 && isset($week_wiw_time_ids[$wiw_time_id]))
+                            ) {
                                 $week_edit_logs[] = $lg;
                             }
                         }
