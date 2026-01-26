@@ -5122,7 +5122,11 @@ if (!empty($week_edit_logs)) {
 		SELECT l.*
 		FROM {$table_logs} l
 		WHERE l.timesheet_id = %d
-		  AND l.location_id = %s
+		  AND (
+			l.location_id = %s
+			OR l.location_id IS NULL
+			OR l.location_id = 0
+		  )
 		ORDER BY l.created_at DESC, l.id DESC
 		LIMIT 200
 	";
