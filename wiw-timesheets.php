@@ -4329,7 +4329,7 @@ if (!empty($week_edit_logs)) {
         }
 
         // If you already have a helper formatter, use it; otherwise format safely:
-        $when_pretty = $this->wiwts_format_datetime_local_pretty($when);
+        $when_pretty = $this->wiw_format_datetime_local_pretty($when);
 
         $prefix = ($etype === 'Auto-Approved Time Record')
             ? 'Automatically approved by: '
@@ -4340,45 +4340,6 @@ if (!empty($week_edit_logs)) {
     }
 }
 
-
-// Build "approved by" lookup per entry_id (client print-only)
-// We prefer the most recent log where edit_type indicates approval.
-$approval_note_by_entry_id = array();
-
-if (!empty($week_edit_logs)) {
-    foreach ($week_edit_logs as $lg) {
-        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
-        if ($entry_id <= 0) {
-            continue;
-        }
-
-        $edit_type = isset($lg->edit_type) ? trim((string)$lg->edit_type) : '';
-        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
-            continue;
-        }
-
-        $created_raw = isset($lg->created_at) ? (string)$lg->created_at : '';
-        $created_ts  = $created_raw !== '' ? strtotime($created_raw) : 0;
-
-        // Edited-by display name (your log rows use "edited_by_display_name" in the table output)
-        $by_name = '';
-        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
-            $by_name = trim($lg->edited_by_display_name);
-        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
-            $by_name = trim($lg->edited_by);
-        }
-
-        // Keep only the most recent approval-type log per entry_id.
-        if (!isset($approval_note_by_entry_id[$entry_id]) || $created_ts > (int)$approval_note_by_entry_id[$entry_id]['ts']) {
-            $approval_note_by_entry_id[$entry_id] = array(
-                'ts'        => (int)$created_ts,
-                'created_at'=> $created_raw,
-                'by'        => $by_name,
-                'is_auto'   => ($edit_type === 'Auto-Approved Time Record'),
-            );
-        }
-    }
-}
 
 // Build "approved by" lookup per entry_id (client print-only)
 // We prefer the most recent log where edit_type indicates approval.
@@ -4442,7 +4403,7 @@ if (!empty($week_edit_logs)) {
                             continue;
                         }
 
-                        $when_pretty = $this->wiwts_format_datetime_local_pretty($when);
+                        $when_pretty = $this->wiw_format_datetime_local_pretty($when);
                         $line_prefix = ! empty($note['is_auto'])
                             ? 'Automatically approved by '
                             : 'Approved by ';
