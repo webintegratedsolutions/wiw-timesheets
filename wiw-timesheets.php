@@ -1229,7 +1229,7 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
                             if ($is_archived_row) {
                                 $action_text = 'Archived';
                             } elseif ($is_approved) {
-                                $action_text = 'Approved';
+                                $action_text = 'Approved on N/A';
 
                                 if (! empty($approval_log_map)
                                     && $wiw_time_id_key !== ''
@@ -1240,9 +1240,7 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
                                         $action_text = 'Automatically Approved';
                                     } else {
                                         $approved_date = $this->wiw_format_date_local_pretty((string) $log['created_at']);
-                                        if ($approved_date !== 'N/A') {
-                                            $action_text = 'Approved on ' . $approved_date;
-                                        }
+                                        $action_text = 'Approved on ' . $approved_date;
                                     }
                                 }
                             } else {
@@ -4111,7 +4109,7 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                     if ($is_archived_row) {
                         $action_text = 'Archived';
                     } elseif ($is_approved) {
-                        $action_text = 'Approved';
+                        $action_text = 'Approved on N/A';
 
                         if (! empty($approval_log_map)
                             && $wiw_time_id_key !== ''
@@ -4122,9 +4120,7 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                                 $action_text = 'Automatically Approved';
                             } else {
                                 $approved_date = $this->wiw_format_date_local_pretty((string) $log['created_at']);
-                                if ($approved_date !== 'N/A') {
-                                    $action_text = 'Approved on ' . $approved_date;
-                                }
+                                $action_text = 'Approved on ' . $approved_date;
                             }
                         }
                     } else {
@@ -4229,7 +4225,7 @@ if (!empty($week_edit_logs)) {
         }
 
         $edit_type = isset($lg->edit_type) ? trim((string)$lg->edit_type) : '';
-        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
+        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Sheet') {
             continue;
         }
 
@@ -4268,7 +4264,7 @@ if (!empty($week_edit_logs)) {
         }
 
         $edit_type = isset($lg->edit_type) ? trim((string)$lg->edit_type) : '';
-        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
+        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Sheet') {
             continue;
         }
 
@@ -5065,10 +5061,7 @@ if (!empty($week_edit_logs)) {
             $edit_type = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
             $is_auto   = ($edit_type === 'Auto-Approved Time Record');
 
-            if (! $is_auto
-                && $edit_type !== 'Approved Time Sheet'
-                && $edit_type !== 'Approved Time Record'
-            ) {
+            if (! $is_auto && $edit_type !== 'Approved Time Sheet') {
                 continue;
             }
 
@@ -5099,7 +5092,6 @@ if (!empty($week_edit_logs)) {
         global $wpdb;
 
         $table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
-        $table_ts   = $wpdb->prefix . 'wiw_timesheets';
 
         $timesheet_id = absint($timesheet_id);
         $is_admin     = current_user_can('manage_options');
@@ -5120,7 +5112,7 @@ if (!empty($week_edit_logs)) {
             return $wpdb->get_results($wpdb->prepare($sql, $timesheet_id));
         }
 
-        // Clients: enforce location scope via join to timesheets.
+        // Clients: enforce location scope via log location_id.
         $client_id = is_scalar($client_id) ? trim((string) $client_id) : '';
         if ($client_id === '') {
             return array();
@@ -5129,9 +5121,8 @@ if (!empty($week_edit_logs)) {
         $sql = "
 		SELECT l.*
 		FROM {$table_logs} l
-		INNER JOIN {$table_ts} ts ON ts.id = l.timesheet_id
 		WHERE l.timesheet_id = %d
-		  AND ts.location_id = %s
+		  AND l.location_id = %s
 		ORDER BY l.created_at DESC, l.id DESC
 		LIMIT 200
 	";
