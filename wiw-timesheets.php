@@ -4399,20 +4399,20 @@ if (!empty($week_edit_logs)) {
                         $by   = isset($note['by']) ? trim((string) $note['by']) : '';
                         $when = isset($note['created_at']) ? trim((string) $note['created_at']) : '';
 
-                        if ($by === '' || $when === '') {
+                        if ($when === '') {
                             continue;
                         }
 
                         $when_pretty = $this->wiw_format_datetime_local_pretty($when);
-                        $line_prefix = ! empty($note['is_auto'])
-                            ? 'Automatically approved by '
-                            : 'Approved by ';
-
-                        $approval_lines[] = $line_prefix . $by . ' on ' . $when_pretty . '.';
+                        if (! empty($note['is_auto'])) {
+                            $approval_lines[] = 'Automatically approved on ' . $when_pretty . '.';
+                        } elseif ($by !== '') {
+                            $approval_lines[] = 'Approved by ' . $by . ' on ' . $when_pretty . '.';
+                        }
                     }
                 }
 
-                if (! empty($approval_lines)) {
+                if (! empty($approval_lines) && ! current_user_can('manage_options')) {
                     $out .= '<div class="wiw-approval-print-only">';
                     foreach ($approval_lines as $line) {
                         $out .= '<div>' . esc_html($line) . '</div>';
