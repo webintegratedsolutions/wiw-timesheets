@@ -3860,7 +3860,11 @@ HTML;
         }
 
 $is_admin_front = current_user_can('manage_options');
+$wiwts_debug_approval_enabled = (isset($_GET['wiwts_debug_approval']) && $_GET['wiwts_debug_approval'] == '1');
 $view_class = $is_admin_front ? 'wiwts-view-frontend-admin' : 'wiwts-view-client';
+if ($wiwts_debug_approval_enabled) {
+    $view_class .= ' wiwts-debug-approval';
+}
 
 $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . esc_attr($view_class) . '">';
 
@@ -4066,6 +4070,11 @@ $out .= '<style>
   display: none;
 }
 
+/* Debug mode: allow edit logs on screen for client view */
+#wiwts-client-records-view.wiwts-debug-approval .wiw-edit-logs-print-only {
+  display: block;
+}
+
 @media print {
 
   /* IMPORTANT:
@@ -4197,7 +4206,7 @@ $out .= '<style>
 
 
 
-        $render_weeks = function (array $weeks, $is_done_section = false) use (&$out, $client_id, $tz) {
+        $render_weeks = function (array $weeks, $is_done_section = false) use (&$out, $client_id, $tz, $wiwts_debug_approval_enabled) {
 
             foreach ($weeks as $wk) {
 
@@ -4562,8 +4571,7 @@ if ($is_approved) {
                         }
                     }
                 }
-// === WIWTS APPROVAL NOTE DEBUG (admin-only) BEGIN ===
-$wiwts_debug_approval_enabled = (current_user_can('manage_options') && isset($_GET['wiwts_debug_approval']) && $_GET['wiwts_debug_approval'] == '1');
+// === WIWTS APPROVAL NOTE DEBUG BEGIN ===
 
 $wiwts_debug_approval_summary = array(
     'week_edit_logs_count' => is_array($week_edit_logs) ? count($week_edit_logs) : 0,
@@ -4622,7 +4630,7 @@ if ($wiwts_debug_approval_enabled && ! empty($week_edit_logs) && is_array($week_
     $wiwts_debug_approval_summary['edit_types']    = array_keys($seen_types);
     $wiwts_debug_approval_summary['sample_rows']   = $sample_rows;
 }
-// === WIWTS APPROVAL NOTE DEBUG (admin-only) END ===
+// === WIWTS APPROVAL NOTE DEBUG END ===
 
 
 // === WIWTS APPROVAL NOTE LOOKUP (by wiw_time_id) BEGIN ===
