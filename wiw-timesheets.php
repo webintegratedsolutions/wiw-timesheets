@@ -5813,36 +5813,36 @@ function wiwts_build_auto_approve_dry_run_report(): string
     // This week's Tuesday 08:00 (Tuesday within the current week starting Sunday)
     $tuesday_8am_dt = $week_start_dt->modify('+2 days')->setTime(8, 0, 0);
 
-    // Before Tue 8am → still approving the previous week
+    // Before Tue 8am → still approving the previous week (KEEP EXISTING LOGIC)
     $approval_week_start_dt = ($now < $tuesday_8am_dt)
         ? $week_start_dt->modify('-7 days')
         : $week_start_dt;
 
-    $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
+    /**
+     * CHANGE: Only shift the "Approval cutoff" forward by +7 days.
+     * Keep the "Next approval deadline" calculation exactly as it was (based on approval_week_start_dt).
+     */
+    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
 
-    // Human-readable approval deadline:
-    // Tuesday 8:00 AM following the approval week
-    $approval_deadline_dt = $approval_week_start_dt
-        ->modify('+9 days')   // Sunday → following Tuesday
-        ->setTime(8, 0, 0);
+    // Next approval deadline should remain based on the selected approval week start (UNCHANGED BEHAVIOR)
+    $approval_deadline_dt = $approval_week_start_dt->modify('+9 days')->setTime(8, 0, 0);
 
     $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
     $past_due_pending_count = (int) $wpdb->get_var(
         $wpdb->prepare(
             "SELECT COUNT(*) FROM {$table_entries} WHERE status = 'pending' AND date < %s",
-            $approval_week_start_ymd
+            $approval_cutoff_ymd
         )
     );
 
     $lines   = array();
     $lines[] = 'Now: ' . $now->format('Y-m-d H:i:s T');
-    $lines[] = 'Approval cutoff (All records before this date are past due): ' . $approval_week_start_ymd;
     $lines[] = 'Next approval deadline: ' . $approval_deadline_dt->format('l, F j, Y \a\t g:i A T');
+    $lines[] = 'Approval cutoff (All records before this date will be past due): ' . $approval_cutoff_ymd;
     $lines[] = 'Would auto-approve (pending past due entries): ' . $past_due_pending_count;
 
     return implode("\n", $lines);
-
 }
 
 /**
