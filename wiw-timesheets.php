@@ -3854,7 +3854,11 @@ HTML;
 
   #wiwts-client-records-view .wiw-print-target { position: absolute; left: 0; top: 0; width: 100%; }
 
-  /* Hide interactive UI + Actions column for print */
+  /* Hide interactive UI + Actions column buttons for print */
+  #wiwts-client-records-view table.wp-list-table td.wiw-col-actions button,
+  #wiwts-client-records-view table.wp-list-table td.wiw-col-actions input,
+  #wiwts-client-records-view table.wp-list-table td.wiw-col-actions select,
+  #wiwts-client-records-view table.wp-list-table td.wiw-col-actions textarea { display: none !important; }
   /* Expandable flags: hide summary label and show expanded content in print */
   #wiwts-client-records-view .wiw-print-target details.wiw-flags > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-flags > div { display: block !important; }
