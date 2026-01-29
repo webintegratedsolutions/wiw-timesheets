@@ -3871,6 +3871,11 @@ $out .= '<style>
   display: none;
 }
 
+/* Hidden by default on screen; enabled only during print */
+#wiwts-client-records-view .wiw-approval-print-only {
+  display: none;
+}
+
 @media print {
 
   /* IMPORTANT:
@@ -3901,6 +3906,13 @@ $out .= '<style>
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > summary { display: none !important; }
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
   #wiwts-client-records-view .wiw-print-target .wiw-edit-logs-print-only { display: block !important; }
+  #wiwts-client-records-view .wiw-print-target .wiw-approval-print-only,
+  #wiwts-client-records-view.wiwts-view-client .wiw-approval-print-only {
+    display: block !important;
+    margin: 8px 0 14px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
 
   /* Hide interactive UI */
   #wiwts-client-records-view .wiw-print-target button,
@@ -4288,6 +4300,7 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                 // === Week-level editable logs (filtered to this week range) ===
                 $week_entry_ids = array();
                 $week_entry_id_to_wiw_time_id = array();
+                $week_wiw_time_ids = $week_visible_time_ids;
                 foreach ($rows as $r) {
                     $entry_id = isset($r->id) ? absint($r->id) : 0;
                     if ($entry_id > 0) {
@@ -4307,14 +4320,18 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                         }
                         foreach ($logs_for_ts as $lg) {
                             $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
-                            if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
+                            $wiw_time_id = isset($lg->wiw_time_id) ? absint($lg->wiw_time_id) : 0;
+                            if (
+                                ($entry_id > 0 && isset($week_entry_ids[$entry_id]))
+                                || ($wiw_time_id > 0 && isset($week_wiw_time_ids[$wiw_time_id]))
+                            ) {
                                 $week_edit_logs[] = $lg;
                             }
                         }
                     }
                 }
 
-                // Build: [wiw_time_id] => "Approved by: X on Y" / "Automatically approved by: X on Y"
+// Build: [wiw_time_id] => approval meta (used for print-only approval lines fallback)
 $approval_note_by_wiw_time_id = array();
 
 if (!empty($week_edit_logs)) {
@@ -4326,22 +4343,37 @@ if (!empty($week_edit_logs)) {
         }
 
         $etype = isset($lg->edit_type) ? (string) $lg->edit_type : '';
-        $who   = isset($lg->edited_by_name) ? (string) $lg->edited_by_name : '';
+        $is_approval_type = (stripos($etype, 'Approved Time Record') !== false);
+        if (! $is_approval_type) {
+            continue;
+        }
+
+        $who   = '';
+        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+            $who = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+            $who = trim($lg->edited_by_name);
+        } elseif (isset($lg->edited_by_user_login) && is_string($lg->edited_by_user_login)) {
+            $who = trim($lg->edited_by_user_login);
+        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+            $who = trim($lg->edited_by);
+        }
         $when  = isset($lg->created_at) ? (string) $lg->created_at : '';
 
-        if ($who === '' || $when === '') {
+        if ($when === '') {
             continue;
         }
 
         // If you already have a helper formatter, use it; otherwise format safely:
-        $when_pretty = $this->wiwts_format_datetime_local_pretty($when);
-
-        $prefix = ($etype === 'Auto-Approved Time Record')
-            ? 'Automatically approved by: '
-            : 'Approved by: ';
-
-        // Keep the most recent one if multiple exist (simple overwrite is fine if logs are already ordered DESC)
-        $approval_note_by_wiw_time_id[$log_wiw_time_id] = $prefix . $who . ' on ' . $when_pretty;
+        $created_ts = strtotime($when);
+        if (! isset($approval_note_by_wiw_time_id[$log_wiw_time_id]) || $created_ts > (int) $approval_note_by_wiw_time_id[$log_wiw_time_id]['ts']) {
+            $approval_note_by_wiw_time_id[$log_wiw_time_id] = array(
+                'ts'        => (int) $created_ts,
+                'created_at'=> $when,
+                'by'        => $who,
+                'is_auto'   => ($etype === 'Auto-Approved Time Record'),
+            );
+        }
     }
 }
 
@@ -4369,6 +4401,10 @@ if (!empty($week_edit_logs)) {
         $by_name = '';
         if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
             $by_name = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+            $by_name = trim($lg->edited_by_name);
+        } elseif (isset($lg->edited_by_user_login) && is_string($lg->edited_by_user_login)) {
+            $by_name = trim($lg->edited_by_user_login);
         } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
             $by_name = trim($lg->edited_by);
         }
@@ -4385,44 +4421,63 @@ if (!empty($week_edit_logs)) {
     }
 }
 
-// Build "approved by" lookup per entry_id (client print-only)
-// We prefer the most recent log where edit_type indicates approval.
-$approval_note_by_entry_id = array();
+                // Print-only approval lines (after the week table).
+                $approval_lines = array();
+                if (! empty($week_edit_logs)) {
+                    $seen_approvals = array();
+                    foreach ($week_edit_logs as $lg) {
+                        $edit_type = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+                        if (stripos($edit_type, 'Approved Time Record') === false) {
+                            continue;
+                        }
 
-if (!empty($week_edit_logs)) {
-    foreach ($week_edit_logs as $lg) {
-        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
-        if ($entry_id <= 0) {
-            continue;
-        }
+                        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+                        $wiw_time_id = isset($lg->wiw_time_id) ? trim((string) $lg->wiw_time_id) : '';
 
-        $edit_type = isset($lg->edit_type) ? trim((string)$lg->edit_type) : '';
-        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
-            continue;
-        }
+                        $approval_key = '';
+                        if ($entry_id > 0) {
+                            $approval_key = 'entry-' . $entry_id;
+                        } elseif ($wiw_time_id !== '') {
+                            $approval_key = 'time-' . $wiw_time_id;
+                        }
 
-        $created_raw = isset($lg->created_at) ? (string)$lg->created_at : '';
-        $created_ts  = $created_raw !== '' ? strtotime($created_raw) : 0;
+                        if ($approval_key === '' || isset($seen_approvals[$approval_key])) {
+                            continue;
+                        }
+                        $seen_approvals[$approval_key] = true;
 
-        // Edited-by display name (your log rows use "edited_by_display_name" in the table output)
-        $by_name = '';
-        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
-            $by_name = trim($lg->edited_by_display_name);
-        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
-            $by_name = trim($lg->edited_by);
-        }
+                        $by = '';
+                        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+                            $by = trim($lg->edited_by_display_name);
+                        } elseif (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+                            $by = trim($lg->edited_by_name);
+                        } elseif (isset($lg->edited_by_user_login) && is_string($lg->edited_by_user_login)) {
+                            $by = trim($lg->edited_by_user_login);
+                        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+                            $by = trim($lg->edited_by);
+                        }
 
-        // Keep only the most recent approval-type log per entry_id.
-        if (!isset($approval_note_by_entry_id[$entry_id]) || $created_ts > (int)$approval_note_by_entry_id[$entry_id]['ts']) {
-            $approval_note_by_entry_id[$entry_id] = array(
-                'ts'        => (int)$created_ts,
-                'created_at'=> $created_raw,
-                'by'        => $by_name,
-                'is_auto'   => ($edit_type === 'Auto-Approved Time Record'),
-            );
-        }
-    }
-}
+                        $when = isset($lg->created_at) ? trim((string) $lg->created_at) : '';
+                        if ($when === '') {
+                            continue;
+                        }
+
+                        $when_pretty = $this->wiw_format_datetime_local_pretty($when);
+                        if ($edit_type === 'Auto-Approved Time Record') {
+                            $approval_lines[] = 'Automatically approved on ' . $when_pretty . '.';
+                        } elseif ($by !== '') {
+                            $approval_lines[] = 'Approved by ' . $by . ' on ' . $when_pretty . '.';
+                        }
+                    }
+                }
+
+                if (! empty($approval_lines) && ! current_user_can('manage_options')) {
+                    $out .= '<div class="wiw-approval-print-only">';
+                    foreach ($approval_lines as $line) {
+                        $out .= '<div>' . esc_html($line) . '</div>';
+                    }
+                    $out .= '</div>';
+                }
                 $is_admin_view = current_user_can('manage_options');
                 $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
 
