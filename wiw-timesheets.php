@@ -5552,13 +5552,14 @@ if (!empty($week_edit_logs)) {
 
         $timesheet_id = absint($timesheet_id);
         $is_admin     = current_user_can('manage_options');
+        $debug_approval_enabled = (isset($_GET['wiwts_debug_approval']) && $_GET['wiwts_debug_approval'] == '1');
 
         if ($timesheet_id <= 0) {
             return array();
         }
 
-        // Admins: return ALL edit logs for the timesheet (no location scoping).
-        if ($is_admin) {
+        // Debug mode: return ALL edit logs for the timesheet (no location scoping).
+        if ($debug_approval_enabled || $is_admin) {
             $sql = "
 			SELECT l.*
 			FROM {$table_logs} l
