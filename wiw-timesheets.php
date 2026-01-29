@@ -4569,12 +4569,14 @@ $wiwts_debug_approval_summary = array(
     'week_edit_logs_count' => is_array($week_edit_logs) ? count($week_edit_logs) : 0,
     'sample_fields'        => array(),
     'edit_types'           => array(),
+    'sample_rows'          => array(),
 );
 
 if ($wiwts_debug_approval_enabled && ! empty($week_edit_logs) && is_array($week_edit_logs)) {
 
-    $seen_types = array();
+    $seen_types    = array();
     $sample_fields = array();
+    $sample_rows   = array();
 
     foreach ($week_edit_logs as $lg) {
 
@@ -4596,14 +4598,29 @@ if ($wiwts_debug_approval_enabled && ! empty($week_edit_logs) && is_array($week_
             $seen_types[$t] = true;
         }
 
+        // Capture a few raw rows to debug approval notes.
+        if (count($sample_rows) < 6 && is_object($lg)) {
+            $sample_rows[] = array(
+                'entry_id'               => isset($lg->entry_id) ? (string) $lg->entry_id : '',
+                'wiw_time_id'            => isset($lg->wiw_time_id) ? (string) $lg->wiw_time_id : '',
+                'www_time_id'            => isset($lg->www_time_id) ? (string) $lg->www_time_id : '',
+                'edit_type'              => isset($lg->edit_type) ? (string) $lg->edit_type : '',
+                'created_at'             => isset($lg->created_at) ? (string) $lg->created_at : '',
+                'when'                   => isset($lg->when) ? (string) $lg->when : '',
+                'edited_by_display_name' => isset($lg->edited_by_display_name) ? (string) $lg->edited_by_display_name : '',
+                'edited_by_user_login'   => isset($lg->edited_by_user_login) ? (string) $lg->edited_by_user_login : '',
+            );
+        }
+
         // Keep it lightweight
-        if (count($seen_types) >= 20 && count($sample_fields) >= 12) {
+        if (count($seen_types) >= 20 && count($sample_fields) >= 12 && count($sample_rows) >= 6) {
             break;
         }
     }
 
     $wiwts_debug_approval_summary['sample_fields'] = array_keys($sample_fields);
     $wiwts_debug_approval_summary['edit_types']    = array_keys($seen_types);
+    $wiwts_debug_approval_summary['sample_rows']   = $sample_rows;
 }
 // === WIWTS APPROVAL NOTE DEBUG (admin-only) END ===
 
@@ -4799,6 +4816,15 @@ if (!empty($week_edit_logs)) {
                 if (empty($week_edit_logs)) {
                     $out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
                 } else {
+                    if (! empty($wiwts_debug_approval_enabled)) {
+                        $out .= '<div class="notice notice-warning" style="margin:0 0 12px;">'
+                            . '<p style="margin:8px 0;"><strong>WIWTS Debug:</strong> approval note data snapshot</p>'
+                            . '<pre style="white-space:pre-wrap;margin:8px 0;">'
+                            . esc_html(wp_json_encode($wiwts_debug_approval_summary, JSON_PRETTY_PRINT))
+                            . '</pre>'
+                            . '</div>';
+                    }
+
                     $out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
                     $out .= '<thead><tr>';
                     $out .= '<th style="width:120px;">Record ID</th>';
@@ -4808,10 +4834,6 @@ if (!empty($week_edit_logs)) {
                     $out .= '<th>New</th>';
                     $out .= '<th>Edited By</th>';
                     $out .= '</tr></thead>';
-if (! empty($wiwts_debug_approval_enabled)) {
-    $out .= "\n<!-- WIWTS DEBUG APPROVAL: " . esc_html(wp_json_encode($wiwts_debug_approval_summary)) . " -->\n";
-}
-
                     $out .= '<tbody>';
 
                     foreach ($week_edit_logs as $lg) {
