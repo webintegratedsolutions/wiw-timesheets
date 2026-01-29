@@ -71,7 +71,20 @@ class WIW_Timesheet_Manager
     // Include time formatting methods
     use WIWTS_Time_Formatting_Trait;
 
+    /**
+     * Compatibility wrapper (do not remove):
+     * Some UI code calls wiwts_format_datetime_local_pretty(), but the actual formatter
+     * lives in the time formatting trait as wiw_format_datetime_local_pretty().
+     *
+     * This wrapper prevents fatal errors and preserves backwards compatibility.
+     */
+    public function wiwts_format_datetime_local_pretty($when_raw)
+    {
+        return $this->wiw_format_datetime_local_pretty($when_raw);
+    }
+
     public function __construct() {
+
         // 1. Add Admin Menus and Settings
         add_action('admin_menu', array($this, 'add_admin_menus'));
         add_action('admin_init', array($this, 'register_settings'));
@@ -902,9 +915,131 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
                     // ===  Overdue view should display pending daily rows ===
                     $daily_status_filter = ($filter_status === 'overdue') ? 'pending' : $filter_status;
 
-                    $daily_rows = $this->get_scoped_daily_records_for_timesheet($client_id, $timesheet_id, $daily_status_filter);
+$daily_rows = $this->get_scoped_daily_records_for_timesheet($client_id, $timesheet_id, $daily_status_filter);
 
-                    // If no daily rows exist, still show a single summary row using the timesheet header.
+// === WIWTS APPROVAL NOTE LOOKUP (client main view) BEGIN ===
+// Build two lookup maps to show:
+// - "Automatically approved on <date>"
+// - "Approved by: <name> on <date>"
+// without adding buttons or breaking any existing workflows.
+$approval_note_by_wiw_time_id = array();
+$approval_note_by_entry_id    = array();
+$entry_id_to_wiw_time_id      = array();
+
+// Map entry_id -> wiw_time_id from the records we already have on-screen
+if (!empty($daily_rows)) {
+    foreach ($daily_rows as $dr_map) {
+        $eid = isset($dr_map->id) ? absint($dr_map->id) : 0;
+        $wid = isset($dr_map->wiw_time_id) ? trim((string) $dr_map->wiw_time_id) : '';
+        if ($eid > 0 && $wid !== '') {
+            $entry_id_to_wiw_time_id[$eid] = $wid;
+        }
+    }
+}
+
+// Pull edit logs once for this timesheet and build the lookups.
+// IMPORTANT: get_scoped_edit_logs_for_timesheet() is already used elsewhere in this plugin.
+// We only use approval-type log rows.
+$edit_logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $timesheet_id);
+
+if (!empty($edit_logs_for_ts)) {
+    foreach ($edit_logs_for_ts as $lg) {
+
+        $edit_type = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
+            continue;
+        }
+
+        // Entry id
+        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+
+        // Determine wiw_time_id (prefer direct property, otherwise map from entry_id -> wiw_time_id)
+        $log_wiw_time_id = '';
+        if (isset($lg->wiw_time_id) && (string) $lg->wiw_time_id !== '') {
+            $log_wiw_time_id = trim((string) $lg->wiw_time_id);
+        } elseif ($entry_id > 0 && isset($entry_id_to_wiw_time_id[$entry_id])) {
+            $log_wiw_time_id = (string) $entry_id_to_wiw_time_id[$entry_id];
+        }
+
+        // Timestamp (created_at is the canonical column in this project)
+        $when_raw = '';
+        if (isset($lg->created_at) && (string) $lg->created_at !== '') {
+            $when_raw = (string) $lg->created_at;
+        } elseif (isset($lg->when) && (string) $lg->when !== '') {
+            $when_raw = (string) $lg->when;
+        }
+
+        $when_ts = ($when_raw !== '') ? strtotime($when_raw) : 0;
+        if (!$when_ts) {
+            continue;
+        }
+
+        // Date-only formatting in site timezone
+        $when_date_pretty = '';
+        try {
+            $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+            $dt = new DateTime('@' . $when_ts);
+            $dt->setTimezone($tz);
+            $when_date_pretty = $dt->format(get_option('date_format'));
+        } catch (Exception $e) {
+            $when_date_pretty = date(get_option('date_format'), $when_ts);
+        }
+
+        // Who (manual only). Support multiple possible column names.
+        $who = '';
+        if (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+            $who = trim($lg->edited_by_name);
+        } elseif (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+            $who = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+            $who = trim($lg->edited_by);
+        }
+
+        // Compose the text per requirement
+        if ($edit_type === 'Auto-Approved Time Record') {
+            $note_text = 'Automatically approved on ' . $when_date_pretty;
+        } else {
+            $note_text = ($who !== '')
+                ? ('Approved by: ' . $who . ' on ' . $when_date_pretty)
+                : ('Approved on ' . $when_date_pretty);
+        }
+
+        // Save per entry_id (most precise for logs) - keep the most recent
+        if ($entry_id > 0) {
+            if (!isset($approval_note_by_entry_id[$entry_id]) || !is_array($approval_note_by_entry_id[$entry_id]) || $when_ts > (int) $approval_note_by_entry_id[$entry_id]['ts']) {
+                $approval_note_by_entry_id[$entry_id] = array(
+                    'ts'         => (int) $when_ts,
+                    'created_at' => $when_raw,
+                    'by'         => $who,
+                    'is_auto'    => ($edit_type === 'Auto-Approved Time Record'),
+                );
+            }
+        }
+
+        // Save per wiw_time_id - keep the most recent
+        if ($log_wiw_time_id !== '') {
+            if (!isset($approval_note_by_wiw_time_id[$log_wiw_time_id]) || !is_array($approval_note_by_wiw_time_id[$log_wiw_time_id]) || $when_ts > (int) $approval_note_by_wiw_time_id[$log_wiw_time_id]['ts']) {
+                $approval_note_by_wiw_time_id[$log_wiw_time_id] = array(
+                    'ts'   => (int) $when_ts,
+                    'text' => (string) $note_text,
+                );
+            }
+        }
+    }
+
+    // Flatten wiw_time_id map to [wiw_time_id] => "text"
+    foreach ($approval_note_by_wiw_time_id as $k => $v) {
+        if (is_array($v) && isset($v['text'])) {
+            $approval_note_by_wiw_time_id[$k] = (string) $v['text'];
+        } else {
+            $approval_note_by_wiw_time_id[$k] = (string) $v;
+        }
+    }
+}
+// === WIWTS APPROVAL NOTE LOOKUP (client main view) END ===
+
+// If no daily rows exist, still show a single summary row using the timesheet header.
+
                     if (empty($daily_rows)) {
                         $week_start = isset($ts->week_start_date) ? (string) $ts->week_start_date : '';
                         $week_end   = isset($ts->week_end_date) ? (string) $ts->week_end_date : '';
@@ -1226,86 +1361,146 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
 
                                 $actions_html  = '<div class="wiw-client-actions" style="display:flex;flex-direction:column;gap:6px;">';
 
-// === WIWTS APPROVE BUTTON FLAGS DATA (frontend admin view) BEGIN ===
-                        $wiwts_flags_json_attr = '';
+// === WIWTS APPROVE BUTTON FLAGS DATA (client records view) BEGIN ===
+$wiwts_flags_json_attr = '';
 
-                        $wiwts_row_wiw_time_id  = isset($dr->wiw_time_id) ? trim((string) $dr->wiw_time_id) : '';
-                        $wiwts_row_timesheet_id = isset($dr->_wiw_timesheet_id) ? absint($dr->_wiw_timesheet_id) : (isset($timesheet_id) ? absint($timesheet_id) : 0);
+$wiwts_row_wiw_time_id  = isset($dr->wiw_time_id) ? trim((string) $dr->wiw_time_id) : '';
+$wiwts_row_timesheet_id = isset($dr->_wiw_timesheet_id) ? absint($dr->_wiw_timesheet_id) : (isset($timesheet_id) ? absint($timesheet_id) : 0);
 
-                        // Build unresolved flags list for this row at render time (safe cache per timesheet_id)
-                        $wiwts_unresolved_list_for_row = array();
+$wiwts_unresolved_list_for_row = array();
 
-                        if ($wiwts_row_timesheet_id > 0 && $wiwts_row_wiw_time_id !== '') {
+// Cache unresolved flags per timesheet_id so we don't query repeatedly per row
+static $wiwts_unresolved_flags_cache_by_timesheet = array();
 
-                            if (! isset($wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id])) {
+if ($wiwts_row_timesheet_id > 0) {
 
-                                $tmp_map = array();
+    if (! isset($wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id])) {
 
-                                // Pull all flags for this timesheet and build unresolved-by-wiw_time_id map
-                                $flags_for_ts = $this->get_scoped_flags_for_timesheet($client_id, $wiwts_row_timesheet_id);
+        $tmp_map = array();
 
-                                if (! empty($flags_for_ts) && is_array($flags_for_ts)) {
-                                    foreach ($flags_for_ts as $fg) {
+        // Pull all flags for this timesheet and build unresolved-by-wiw_time_id map
+        $flags_for_ts = $this->get_scoped_flags_for_timesheet($client_id, $wiwts_row_timesheet_id);
 
-                                        // Unresolved only
-                                        $st = isset($fg->flag_status) ? strtolower(trim((string) $fg->flag_status)) : '';
-                                        if ($st === 'resolved') {
-                                            continue;
-                                        }
+        if (! empty($flags_for_ts) && is_array($flags_for_ts)) {
+            foreach ($flags_for_ts as $fg) {
 
-                                        $k = isset($fg->wiw_time_id) ? trim((string) $fg->wiw_time_id) : '';
-                                        if ($k === '') {
-                                            continue;
-                                        }
+                // Unresolved only
+                $st = isset($fg->flag_status) ? strtolower(trim((string) $fg->flag_status)) : '';
+                if ($st === 'resolved') {
+                    continue;
+                }
 
-                                        // Show ONLY the human description (Phase 14 schema uses "description")
-                                        $msg = '';
-                                        if (isset($fg->flag_message)) {
-                                            $msg = trim((string) $fg->flag_message);
-                                        }
-                                        if ($msg === '' && isset($fg->description)) {
-                                            $msg = trim((string) $fg->description);
-                                        }
+                $k = isset($fg->wiw_time_id) ? trim((string) $fg->wiw_time_id) : '';
+                if ($k === '') {
+                    continue;
+                }
 
-                                        $label = ($msg !== '') ? $msg : 'Unspecified flag';
+                // Show ONLY the human description (Phase 14 schema uses "description")
+                $msg = '';
+                if (isset($fg->flag_message)) {
+                    $msg = trim((string) $fg->flag_message);
+                }
+                if ($msg === '' && isset($fg->description)) {
+                    $msg = trim((string) $fg->description);
+                }
 
-                                        if (! isset($tmp_map[$k])) {
-                                            $tmp_map[$k] = array();
-                                        }
-                                        $tmp_map[$k][] = $label;
-                                    }
-                                }
+                $label = ($msg !== '') ? $msg : 'Unspecified flag';
 
-                                $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id] = $tmp_map;
-                            }
+                if (! isset($tmp_map[$k])) {
+                    $tmp_map[$k] = array();
+                }
+                $tmp_map[$k][] = $label;
+            }
+        }
 
-                            $tmp_map2 = $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id];
-                            if (isset($tmp_map2[$wiwts_row_wiw_time_id]) && is_array($tmp_map2[$wiwts_row_wiw_time_id])) {
-                                $wiwts_unresolved_list_for_row = $tmp_map2[$wiwts_row_wiw_time_id];
-                            }
-                        }
+        $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id] = $tmp_map;
+    }
 
-                        if (! empty($wiwts_unresolved_list_for_row) && is_array($wiwts_unresolved_list_for_row)) {
-                            $wiwts_unresolved_list_for_row = array_values(array_unique(array_map('strval', $wiwts_unresolved_list_for_row)));
-                            $wiwts_flags_json_attr = ' data-unresolved-flags-json="' . esc_attr(wp_json_encode($wiwts_unresolved_list_for_row)) . '"';
-                        }
+    $tmp_map2 = $wiwts_unresolved_flags_cache_by_timesheet[$wiwts_row_timesheet_id];
+    if ($wiwts_row_wiw_time_id !== '' && isset($tmp_map2[$wiwts_row_wiw_time_id]) && is_array($tmp_map2[$wiwts_row_wiw_time_id])) {
+        $wiwts_unresolved_list_for_row = $tmp_map2[$wiwts_row_wiw_time_id];
+    }
+}
 
-                        $actions_html .= '<button type="button" class="wiw-btn primary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $wiwts_flags_json_attr . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
-// === WIWTS APPROVE BUTTON FLAGS DATA (frontend admin view) END ===
+if (! empty($wiwts_unresolved_list_for_row) && is_array($wiwts_unresolved_list_for_row)) {
+    $wiwts_unresolved_list_for_row = array_values(array_unique(array_map('strval', $wiwts_unresolved_list_for_row)));
+    $wiwts_flags_json_attr = ' data-unresolved-flags-json="' . esc_attr(wp_json_encode($wiwts_unresolved_list_for_row)) . '"';
+}
 
-                                if (! $is_approved) {
-                                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
-                                }
+// Approved rows: render ONLY the approval note text (no hidden buttons that print CSS can reveal)
+if ($is_approved) {
 
-                                $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '">Save</button>';
+    $approval_note = 'Approved';
 
-                                if ($wiwts_show_admin_reset_under_approved) {
-                                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '" data-reset-preview-only="1" title="Preview reset (no changes yet)">Reset</button>';
-                                } else {
-                                    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '" data-reset-preview-only="1" style="display:none;">Reset</button>';
-                                }
+    // 1) Prefer wiw_time_id-based approval note if available (most direct match to the record)
+    if (isset($wiwts_row_wiw_time_id) && $wiwts_row_wiw_time_id !== '' && isset($approval_note_by_wiw_time_id) && isset($approval_note_by_wiw_time_id[$wiwts_row_wiw_time_id])) {
+        $approval_note = (string) $approval_note_by_wiw_time_id[$wiwts_row_wiw_time_id];
 
-                                $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
+    } else {
+
+        // 2) Fallback: entry_id-based approval note (if that map exists in this view)
+        $entry_id_for_note = isset($dr->id) ? absint($dr->id) : 0;
+
+        if ($entry_id_for_note > 0 && isset($approval_note_by_entry_id) && isset($approval_note_by_entry_id[$entry_id_for_note]) && is_array($approval_note_by_entry_id[$entry_id_for_note])) {
+
+            $note_row = $approval_note_by_entry_id[$entry_id_for_note];
+
+            $when_raw = isset($note_row['created_at']) ? (string) $note_row['created_at'] : '';
+            $when_ts  = ($when_raw !== '') ? strtotime($when_raw) : 0;
+
+            // Date-only formatting in site timezone
+            $when_date_pretty = '';
+            if ($when_ts) {
+                try {
+                    $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+                    $dt = new DateTime('@' . $when_ts);
+                    $dt->setTimezone($tz);
+                    $when_date_pretty = $dt->format(get_option('date_format'));
+                } catch (Exception $e) {
+                    $when_date_pretty = date(get_option('date_format'), $when_ts);
+                }
+            }
+
+            $is_auto = ! empty($note_row['is_auto']);
+            $by_name = isset($note_row['by']) ? trim((string) $note_row['by']) : '';
+
+            if ($is_auto) {
+                $approval_note = ($when_date_pretty !== '')
+                    ? ('Automatically approved on ' . $when_date_pretty)
+                    : 'Automatically approved';
+            } else {
+                if ($by_name !== '' && $when_date_pretty !== '') {
+                    $approval_note = 'Approved by: ' . $by_name . ' on ' . $when_date_pretty;
+                } elseif ($when_date_pretty !== '') {
+                    $approval_note = 'Approved on ' . $when_date_pretty;
+                } elseif ($by_name !== '') {
+                    $approval_note = 'Approved by: ' . $by_name;
+                } else {
+                    $approval_note = 'Approved';
+                }
+            }
+        }
+    }
+
+    $actions_html .= '<span class="wiw-approved-note" style="font-size:12px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
+
+} else {
+
+
+    // Not approved: keep the existing Approve button (needed for normal workflow + flags JSON)
+    $actions_html .= '<button type="button" class="wiw-btn primary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $wiwts_flags_json_attr . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+
+    // Only show the rest of the action buttons when NOT approved
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-edit-btn">Edit</button>';
+
+    $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '">Save</button>';
+
+    // Reset button shows only during edit mode (same as main view)
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1" style="display:none;">Reset</button>';
+
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-cancel-btn" style="display:none;">Cancel</button>';
+}
+
 
                                 $actions_html .= '</div>';
 
@@ -4237,7 +4432,65 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                             $wiwts_flags_json_attr = ' data-unresolved-flags-json="' . esc_attr(wp_json_encode($wiwts_unresolved_list_for_row)) . '"';
                         }
 
-                        $actions_html .= '<button type="button" class="wiw-btn primary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $wiwts_flags_json_attr . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+// Approved rows: show approval note text instead of an "Approved" button.
+if ($is_approved) {
+
+    $approval_note = 'Approved';
+
+    // 1) Prefer entry_id-based approval note (works even if logs do not contain wiw_time_id)
+    $entry_id_for_note = isset($dr->id) ? absint($dr->id) : 0;
+    if ($entry_id_for_note > 0 && isset($approval_note_by_entry_id[$entry_id_for_note]) && is_array($approval_note_by_entry_id[$entry_id_for_note])) {
+
+        $note_row = $approval_note_by_entry_id[$entry_id_for_note];
+
+        // Date-only formatting in site timezone (matches your requirement)
+        $when_raw = isset($note_row['created_at']) ? (string) $note_row['created_at'] : '';
+        $when_ts  = ($when_raw !== '') ? strtotime($when_raw) : 0;
+
+        $when_date_pretty = '';
+        if ($when_ts) {
+            try {
+                $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+                $dt = new DateTime('@' . $when_ts);
+                $dt->setTimezone($tz);
+                $when_date_pretty = $dt->format(get_option('date_format'));
+            } catch (Exception $e) {
+                $when_date_pretty = date(get_option('date_format'), $when_ts);
+            }
+        }
+
+        $is_auto = ! empty($note_row['is_auto']);
+        $by_name = isset($note_row['by']) ? trim((string) $note_row['by']) : '';
+
+        if ($is_auto) {
+            $approval_note = ($when_date_pretty !== '')
+                ? ('Automatically approved on ' . $when_date_pretty)
+                : 'Automatically approved';
+        } else {
+            if ($by_name !== '' && $when_date_pretty !== '') {
+                $approval_note = 'Approved by: ' . $by_name . ' on ' . $when_date_pretty;
+            } elseif ($when_date_pretty !== '') {
+                $approval_note = 'Approved on ' . $when_date_pretty;
+            } else {
+                $approval_note = 'Approved';
+            }
+        }
+
+    } else {
+        // 2) Fallback: wiw_time_id-based note if available
+        if ($wiwts_row_wiw_time_id !== '' && isset($approval_note_by_wiw_time_id[$wiwts_row_wiw_time_id])) {
+            $approval_note = (string) $approval_note_by_wiw_time_id[$wiwts_row_wiw_time_id];
+        }
+    }
+
+    $actions_html .= '<span class="wiw-approved-note" style="font-size:12px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
+
+} else {
+
+                            // Not approved: keep the existing Approve button (needed for normal workflow + flags JSON)
+                            $actions_html .= '<button type="button" class="wiw-btn primary wiw-client-approve-btn" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '"' . $wiwts_flags_json_attr . $approve_disabled . '>' . esc_html($approve_label) . '</button>';
+
+                        }
 // === WIWTS APPROVE BUTTON FLAGS DATA (client records view) END ===
 
 
@@ -4309,37 +4562,154 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                         }
                     }
                 }
+// === WIWTS APPROVAL NOTE DEBUG (admin-only) BEGIN ===
+$wiwts_debug_approval_enabled = (current_user_can('manage_options') && isset($_GET['wiwts_debug_approval']) && $_GET['wiwts_debug_approval'] == '1');
 
-                // Build: [wiw_time_id] => "Approved by: X on Y" / "Automatically approved by: X on Y"
+$wiwts_debug_approval_summary = array(
+    'week_edit_logs_count' => is_array($week_edit_logs) ? count($week_edit_logs) : 0,
+    'sample_fields'        => array(),
+    'edit_types'           => array(),
+);
+
+if ($wiwts_debug_approval_enabled && ! empty($week_edit_logs) && is_array($week_edit_logs)) {
+
+    $seen_types = array();
+    $sample_fields = array();
+
+    foreach ($week_edit_logs as $lg) {
+
+        // Capture which fields exist on the log objects (first few only)
+        if (count($sample_fields) < 12) {
+            if (is_object($lg)) {
+                foreach (get_object_vars($lg) as $k => $v) {
+                    $sample_fields[$k] = true;
+                    if (count($sample_fields) >= 12) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Capture edit_type values
+        $t = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+        if ($t !== '') {
+            $seen_types[$t] = true;
+        }
+
+        // Keep it lightweight
+        if (count($seen_types) >= 20 && count($sample_fields) >= 12) {
+            break;
+        }
+    }
+
+    $wiwts_debug_approval_summary['sample_fields'] = array_keys($sample_fields);
+    $wiwts_debug_approval_summary['edit_types']    = array_keys($seen_types);
+}
+// === WIWTS APPROVAL NOTE DEBUG (admin-only) END ===
+
+
+// === WIWTS APPROVAL NOTE LOOKUP (by wiw_time_id) BEGIN ===
+// Build: [wiw_time_id] => approval note for approved rows
+// Examples:
+// - "Automatically approved on Jan 20, 2026"
+// - "Approved by: Jane Smith on Jan 15, 2026"
 $approval_note_by_wiw_time_id = array();
 
-if (!empty($week_edit_logs)) {
+if (! empty($week_edit_logs)) {
     foreach ($week_edit_logs as $lg) {
-        // IMPORTANT: we need the shift record id (wiw_time_id), not the edit log row id
-        $log_wiw_time_id = isset($lg->wiw_time_id) ? (string) $lg->wiw_time_id : '';
+
+        // ---- Identify wiw_time_id safely (some log rows may use different property names) ----
+        $log_wiw_time_id = '';
+        if (isset($lg->wiw_time_id) && (string) $lg->wiw_time_id !== '') {
+            $log_wiw_time_id = (string) $lg->wiw_time_id;
+        } elseif (isset($lg->www_time_id) && (string) $lg->www_time_id !== '') {
+            // Fallback (older schema naming seen elsewhere in this project)
+            $log_wiw_time_id = (string) $lg->www_time_id;
+        }
+
         if ($log_wiw_time_id === '') {
             continue;
         }
 
-        $etype = isset($lg->edit_type) ? (string) $lg->edit_type : '';
-        $who   = isset($lg->edited_by_name) ? (string) $lg->edited_by_name : '';
-        $when  = isset($lg->created_at) ? (string) $lg->created_at : '';
-
-        if ($who === '' || $when === '') {
+        // ---- Approval-type only ----
+        $etype = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+        if ($etype !== 'Auto-Approved Time Record' && $etype !== 'Approved Time Record') {
             continue;
         }
 
-        // If you already have a helper formatter, use it; otherwise format safely:
-        $when_pretty = $this->wiwts_format_datetime_local_pretty($when);
+        // ---- Timestamp ----
+        $when_raw = '';
+        if (isset($lg->created_at) && (string) $lg->created_at !== '') {
+            $when_raw = (string) $lg->created_at;
+        } elseif (isset($lg->when) && (string) $lg->when !== '') {
+            $when_raw = (string) $lg->when;
+        }
 
-        $prefix = ($etype === 'Auto-Approved Time Record')
-            ? 'Automatically approved by: '
-            : 'Approved by: ';
+        if ($when_raw === '') {
+            continue;
+        }
 
-        // Keep the most recent one if multiple exist (simple overwrite is fine if logs are already ordered DESC)
-        $approval_note_by_wiw_time_id[$log_wiw_time_id] = $prefix . $who . ' on ' . $when_pretty;
+        $when_ts = strtotime($when_raw);
+        if (! $when_ts) {
+            continue;
+        }
+
+        // ---- Date-only display in site timezone (per requirement) ----
+        $when_date_pretty = '';
+        try {
+            $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+            $dt = new DateTime('@' . $when_ts);
+            $dt->setTimezone($tz);
+            $when_date_pretty = $dt->format(get_option('date_format'));
+        } catch (Exception $e) {
+            $when_date_pretty = date(get_option('date_format'), $when_ts);
+        }
+
+        // ---- Who (manual only). Support multiple possible column names. ----
+        $who = '';
+        if (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+            $who = trim($lg->edited_by_name);
+        } elseif (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+            $who = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+            $who = trim($lg->edited_by);
+        }
+
+        // ---- Compose note text per requirement ----
+        if ($etype === 'Auto-Approved Time Record') {
+            $note_text = 'Automatically approved on ' . $when_date_pretty;
+        } else {
+            if ($who === '') {
+                // If manual approval exists but no name is available, keep a safe fallback.
+                $note_text = 'Approved on ' . $when_date_pretty;
+            } else {
+                $note_text = 'Approved by: ' . $who . ' on ' . $when_date_pretty;
+            }
+        }
+
+        // Keep only the most recent approval-type log per wiw_time_id
+        if (
+            ! isset($approval_note_by_wiw_time_id[$log_wiw_time_id]) ||
+            ! is_array($approval_note_by_wiw_time_id[$log_wiw_time_id]) ||
+            $when_ts > (int) $approval_note_by_wiw_time_id[$log_wiw_time_id]['ts']
+        ) {
+            $approval_note_by_wiw_time_id[$log_wiw_time_id] = array(
+                'ts'   => (int) $when_ts,
+                'text' => (string) $note_text,
+            );
+        }
+    }
+
+    // Flatten to [wiw_time_id] => "text"
+    foreach ($approval_note_by_wiw_time_id as $k => $v) {
+        if (is_array($v) && isset($v['text'])) {
+            $approval_note_by_wiw_time_id[$k] = (string) $v['text'];
+        } else {
+            $approval_note_by_wiw_time_id[$k] = (string) $v;
+        }
     }
 }
+// === WIWTS APPROVAL NOTE LOOKUP (by wiw_time_id) END ===
 
 
 // Build "approved by" lookup per entry_id (client print-only)
@@ -4438,6 +4808,10 @@ if (!empty($week_edit_logs)) {
                     $out .= '<th>New</th>';
                     $out .= '<th>Edited By</th>';
                     $out .= '</tr></thead>';
+if (! empty($wiwts_debug_approval_enabled)) {
+    $out .= "\n<!-- WIWTS DEBUG APPROVAL: " . esc_html(wp_json_encode($wiwts_debug_approval_summary)) . " -->\n";
+}
+
                     $out .= '<tbody>';
 
                     foreach ($week_edit_logs as $lg) {
