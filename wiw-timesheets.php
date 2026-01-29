@@ -5569,23 +5569,26 @@ if (!empty($week_edit_logs)) {
             return $wpdb->get_results($wpdb->prepare($sql, $timesheet_id));
         }
 
-        // Clients: enforce location scope via join to timesheets.
+        // Clients: enforce location scope via logs location_id or timesheet location_id.
         $client_id = is_scalar($client_id) ? trim((string) $client_id) : '';
         if ($client_id === '') {
             return array();
         }
 
         $sql = "
-		SELECT l.*
-		FROM {$table_logs} l
-		INNER JOIN {$table_ts} ts ON ts.id = l.timesheet_id
-		WHERE l.timesheet_id = %d
-		  AND ts.location_id = %s
-		ORDER BY l.created_at DESC, l.id DESC
-		LIMIT 200
-	";
+			SELECT l.*
+			FROM {$table_logs} l
+			LEFT JOIN {$table_ts} ts ON ts.id = l.timesheet_id
+			WHERE l.timesheet_id = %d
+			  AND (
+			    l.location_id = %s
+			    OR (l.location_id = 0 AND ts.location_id = %s)
+			  )
+			ORDER BY l.created_at DESC, l.id DESC
+			LIMIT 200
+		";
 
-        return $wpdb->get_results($wpdb->prepare($sql, $timesheet_id, $client_id));
+        return $wpdb->get_results($wpdb->prepare($sql, $timesheet_id, $client_id, $client_id));
     }
 
     /**
