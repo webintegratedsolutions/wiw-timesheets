@@ -3902,12 +3902,6 @@ $out .= '<style>
   #wiwts-client-records-view .wiw-print-target details.wiw-edit-logs > div { display: block !important; }
   #wiwts-client-records-view .wiw-print-target .wiw-edit-logs-print-only { display: block !important; }
 
-  /* Hide interactive UI */
-  #wiwts-client-records-view .wiw-print-target button,
-  #wiwts-client-records-view .wiw-print-target input,
-  #wiwts-client-records-view .wiw-print-target select,
-  #wiwts-client-records-view .wiw-print-target textarea { display: none !important; }
-
   /* Hide Print button (keep Actions column visible for print) */
   #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
 
@@ -3987,7 +3981,9 @@ $out .= '<style>
     display: table-cell !important;
   }
 
-  #wiwts-client-records-view.wiwts-view-client .wiw-print-target .wiw-client-actions button {
+  /* Print: only show buttons that are already visible on screen.
+     Do NOT override inline display:none used for Save/Reset/Cancel states. */
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target .wiw-client-actions button:not([style*="display:none"]):not([style*="display: none"]) {
     display: inline-block !important;
   }
 
@@ -4147,7 +4143,7 @@ $out .= '<style>
 
 $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                     $out .= '<td class="wiw-client-cell-clocked">' . esc_html($clocked_hrs) . '</td>';
-                    $out .= '<td class="wiw-client-cell-payable">' . esc_html($payable_hrs) . '</td>';
+                    $out .= '<td class="wiw-client-cell-payable"><strong>' . esc_html($payable_hrs) . '</strong></td>';
 
                     // Approve button gating (same)
                     $is_approved   = ($status === 'approved');
