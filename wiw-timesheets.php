@@ -4254,6 +4254,252 @@ $out .= '<style>
                 }
                 $out .= '</div>';
 
+                // Collect edit logs and approval notes before rendering rows.
+                $week_timesheet_ids = array();
+                $week_entry_ids = array();
+                $week_entry_id_to_wiw_time_id = array();
+                foreach ($rows as $r) {
+                    $tid = isset($r->_wiw_timesheet_id) ? absint($r->_wiw_timesheet_id) : 0;
+                    if ($tid > 0) {
+                        $week_timesheet_ids[$tid] = true;
+                    }
+
+                    $entry_id = isset($r->id) ? absint($r->id) : 0;
+                    if ($entry_id > 0) {
+                        $week_entry_ids[$entry_id] = true;
+                        if (isset($r->wiw_time_id)) {
+                            $week_entry_id_to_wiw_time_id[$entry_id] = (string) $r->wiw_time_id;
+                        }
+                    }
+                }
+
+                $week_edit_logs = array();
+                if (! empty($week_timesheet_ids)) {
+                    foreach (array_keys($week_timesheet_ids) as $tid) {
+                        $logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $tid);
+                        if (empty($logs_for_ts)) {
+                            continue;
+                        }
+                        foreach ($logs_for_ts as $lg) {
+                            $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+                            if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
+                                $week_edit_logs[] = $lg;
+                            }
+                        }
+                    }
+                }
+
+// === WIWTS APPROVAL NOTE DEBUG BEGIN ===
+
+$wiwts_debug_approval_summary = array(
+    'week_edit_logs_count' => is_array($week_edit_logs) ? count($week_edit_logs) : 0,
+    'sample_fields'        => array(),
+    'edit_types'           => array(),
+    'sample_rows'          => array(),
+);
+
+if ($wiwts_debug_approval_enabled && ! empty($week_edit_logs) && is_array($week_edit_logs)) {
+
+    $seen_types    = array();
+    $sample_fields = array();
+    $sample_rows   = array();
+
+    foreach ($week_edit_logs as $lg) {
+
+        // Capture which fields exist on the log objects (first few only)
+        if (count($sample_fields) < 12) {
+            if (is_object($lg)) {
+                foreach (get_object_vars($lg) as $k => $v) {
+                    $sample_fields[$k] = true;
+                    if (count($sample_fields) >= 12) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Capture edit_type values
+        $t = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+        if ($t !== '') {
+            $seen_types[$t] = true;
+        }
+
+        // Capture a few raw rows to debug approval notes.
+        if (count($sample_rows) < 6 && is_object($lg)) {
+            $sample_rows[] = array(
+                'entry_id'               => isset($lg->entry_id) ? (string) $lg->entry_id : '',
+                'wiw_time_id'            => isset($lg->wiw_time_id) ? (string) $lg->wiw_time_id : '',
+                'www_time_id'            => isset($lg->www_time_id) ? (string) $lg->www_time_id : '',
+                'edit_type'              => isset($lg->edit_type) ? (string) $lg->edit_type : '',
+                'created_at'             => isset($lg->created_at) ? (string) $lg->created_at : '',
+                'when'                   => isset($lg->when) ? (string) $lg->when : '',
+                'edited_by_display_name' => isset($lg->edited_by_display_name) ? (string) $lg->edited_by_display_name : '',
+                'edited_by_user_login'   => isset($lg->edited_by_user_login) ? (string) $lg->edited_by_user_login : '',
+            );
+        }
+
+        // Keep it lightweight
+        if (count($seen_types) >= 20 && count($sample_fields) >= 12 && count($sample_rows) >= 6) {
+            break;
+        }
+    }
+
+    $wiwts_debug_approval_summary['sample_fields'] = array_keys($sample_fields);
+    $wiwts_debug_approval_summary['edit_types']    = array_keys($seen_types);
+    $wiwts_debug_approval_summary['sample_rows']   = $sample_rows;
+}
+// === WIWTS APPROVAL NOTE DEBUG END ===
+
+
+// === WIWTS APPROVAL NOTE LOOKUP (by wiw_time_id) BEGIN ===
+// Build: [wiw_time_id] => approval note for approved rows
+// Examples:
+// - "Automatically approved on Jan 20, 2026"
+// - "Approved by: Jane Smith on Jan 15, 2026"
+$approval_note_by_wiw_time_id = array();
+
+if (! empty($week_edit_logs)) {
+    foreach ($week_edit_logs as $lg) {
+
+        // ---- Identify wiw_time_id safely (some log rows may use different property names) ----
+        $log_wiw_time_id = '';
+        if (isset($lg->wiw_time_id) && (string) $lg->wiw_time_id !== '') {
+            $log_wiw_time_id = (string) $lg->wiw_time_id;
+        } elseif (isset($lg->www_time_id) && (string) $lg->www_time_id !== '') {
+            // Fallback (older schema naming seen elsewhere in this project)
+            $log_wiw_time_id = (string) $lg->www_time_id;
+        }
+
+        if ($log_wiw_time_id === '') {
+            continue;
+        }
+
+        // ---- Approval-type only ----
+        $etype = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+        if ($etype !== 'Auto-Approved Time Record' && $etype !== 'Approved Time Record') {
+            continue;
+        }
+
+        // ---- Timestamp ----
+        $when_raw = '';
+        if (isset($lg->created_at) && (string) $lg->created_at !== '') {
+            $when_raw = (string) $lg->created_at;
+        } elseif (isset($lg->when) && (string) $lg->when !== '') {
+            $when_raw = (string) $lg->when;
+        }
+
+        if ($when_raw === '') {
+            continue;
+        }
+
+        $when_ts = strtotime($when_raw);
+        if (! $when_ts) {
+            continue;
+        }
+
+        // ---- Date-only display in site timezone (per requirement) ----
+        $when_date_pretty = '';
+        try {
+            $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
+            $dt = new DateTime('@' . $when_ts);
+            $dt->setTimezone($tz);
+            $when_date_pretty = $dt->format(get_option('date_format'));
+        } catch (Exception $e) {
+            $when_date_pretty = date(get_option('date_format'), $when_ts);
+        }
+
+        // ---- Who (manual only). Support multiple possible column names. ----
+        $who = '';
+        if (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
+            $who = trim($lg->edited_by_name);
+        } elseif (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+            $who = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+            $who = trim($lg->edited_by);
+        }
+
+        $is_auto_approval = ($etype === 'Auto-Approved Time Record')
+            || (isset($lg->edited_by_display_name) && (string) $lg->edited_by_display_name === 'Automatically Approved');
+
+        // ---- Compose note text per requirement ----
+        if ($is_auto_approval) {
+            $note_text = 'Automatically approved on ' . $when_date_pretty;
+        } else {
+            if ($who === '') {
+                // If manual approval exists but no name is available, keep a safe fallback.
+                $note_text = 'Approved on ' . $when_date_pretty;
+            } else {
+                $note_text = 'Approved by: ' . $who . ' on ' . $when_date_pretty;
+            }
+        }
+
+        // Keep only the most recent approval-type log per wiw_time_id
+        if (
+            ! isset($approval_note_by_wiw_time_id[$log_wiw_time_id]) ||
+            ! is_array($approval_note_by_wiw_time_id[$log_wiw_time_id]) ||
+            $when_ts > (int) $approval_note_by_wiw_time_id[$log_wiw_time_id]['ts']
+        ) {
+            $approval_note_by_wiw_time_id[$log_wiw_time_id] = array(
+                'ts'   => (int) $when_ts,
+                'text' => (string) $note_text,
+            );
+        }
+    }
+
+    // Flatten to [wiw_time_id] => "text"
+    foreach ($approval_note_by_wiw_time_id as $k => $v) {
+        if (is_array($v) && isset($v['text'])) {
+            $approval_note_by_wiw_time_id[$k] = (string) $v['text'];
+        } else {
+            $approval_note_by_wiw_time_id[$k] = (string) $v;
+        }
+    }
+}
+// === WIWTS APPROVAL NOTE LOOKUP (by wiw_time_id) END ===
+
+
+// Build "approved by" lookup per entry_id (client print-only)
+// We prefer the most recent log where edit_type indicates approval.
+$approval_note_by_entry_id = array();
+
+if (!empty($week_edit_logs)) {
+    foreach ($week_edit_logs as $lg) {
+        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
+        if ($entry_id <= 0) {
+            continue;
+        }
+
+        $edit_type = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
+        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
+            continue;
+        }
+
+        $created_raw = isset($lg->created_at) ? (string)$lg->created_at : '';
+        $created_ts  = $created_raw !== '' ? strtotime($created_raw) : 0;
+
+        // Edited-by display name (your log rows use "edited_by_display_name" in the table output)
+        $by_name = '';
+        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
+            $by_name = trim($lg->edited_by_display_name);
+        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
+            $by_name = trim($lg->edited_by);
+        }
+
+        $is_auto_approval = ($edit_type === 'Auto-Approved Time Record')
+            || (isset($lg->edited_by_display_name) && (string) $lg->edited_by_display_name === 'Automatically Approved');
+
+        // Keep only the most recent approval-type log per entry_id.
+        if (!isset($approval_note_by_entry_id[$entry_id]) || $created_ts > (int)$approval_note_by_entry_id[$entry_id]['ts']) {
+            $approval_note_by_entry_id[$entry_id] = array(
+                'ts'        => (int)$created_ts,
+                'created_at'=> $created_raw,
+                'by'        => $by_name,
+                'is_auto'   => $is_auto_approval,
+            );
+        }
+    }
+}
+
                 // Table header = same columns as main client view (client layout; no Location column)
                 $out .= '<table class="wp-list-table widefat fixed striped" style="margin-bottom:16px;width:100%;">';
                 $out .= '<thead><tr>';
@@ -4534,286 +4780,7 @@ if ($is_approved) {
                     }
                 }
 
-                // Gather unique timesheet IDs present in this week (rows may span multiple pay periods/employees)
-                $week_timesheet_ids = array();
-                foreach ($rows as $r) {
-                    $tid = isset($r->_wiw_timesheet_id) ? absint($r->_wiw_timesheet_id) : 0;
-                    if ($tid > 0) {
-                        $week_timesheet_ids[$tid] = true;
-                    }
-                }
-
-                // === Week-level editable logs (filtered to this week range) ===
-                $week_entry_ids = array();
-                $week_entry_id_to_wiw_time_id = array();
-                foreach ($rows as $r) {
-                    $entry_id = isset($r->id) ? absint($r->id) : 0;
-                    if ($entry_id > 0) {
-                        $week_entry_ids[$entry_id] = true;
-                        if (isset($r->wiw_time_id)) {
-                            $week_entry_id_to_wiw_time_id[$entry_id] = (string) $r->wiw_time_id;
-                        }
-                    }
-                }
-
-                $week_edit_logs = array();
-                if (! empty($week_timesheet_ids)) {
-                    foreach (array_keys($week_timesheet_ids) as $tid) {
-                        $logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $tid);
-                        if (empty($logs_for_ts)) {
-                            continue;
-                        }
-                        foreach ($logs_for_ts as $lg) {
-                            $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
-                            if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
-                                $week_edit_logs[] = $lg;
-                            }
-                        }
-                    }
-                }
-// === WIWTS APPROVAL NOTE DEBUG BEGIN ===
-
-$wiwts_debug_approval_summary = array(
-    'week_edit_logs_count' => is_array($week_edit_logs) ? count($week_edit_logs) : 0,
-    'sample_fields'        => array(),
-    'edit_types'           => array(),
-    'sample_rows'          => array(),
-);
-
-if ($wiwts_debug_approval_enabled && ! empty($week_edit_logs) && is_array($week_edit_logs)) {
-
-    $seen_types    = array();
-    $sample_fields = array();
-    $sample_rows   = array();
-
-    foreach ($week_edit_logs as $lg) {
-
-        // Capture which fields exist on the log objects (first few only)
-        if (count($sample_fields) < 12) {
-            if (is_object($lg)) {
-                foreach (get_object_vars($lg) as $k => $v) {
-                    $sample_fields[$k] = true;
-                    if (count($sample_fields) >= 12) {
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Capture edit_type values
-        $t = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
-        if ($t !== '') {
-            $seen_types[$t] = true;
-        }
-
-        // Capture a few raw rows to debug approval notes.
-        if (count($sample_rows) < 6 && is_object($lg)) {
-            $sample_rows[] = array(
-                'entry_id'               => isset($lg->entry_id) ? (string) $lg->entry_id : '',
-                'wiw_time_id'            => isset($lg->wiw_time_id) ? (string) $lg->wiw_time_id : '',
-                'www_time_id'            => isset($lg->www_time_id) ? (string) $lg->www_time_id : '',
-                'edit_type'              => isset($lg->edit_type) ? (string) $lg->edit_type : '',
-                'created_at'             => isset($lg->created_at) ? (string) $lg->created_at : '',
-                'when'                   => isset($lg->when) ? (string) $lg->when : '',
-                'edited_by_display_name' => isset($lg->edited_by_display_name) ? (string) $lg->edited_by_display_name : '',
-                'edited_by_user_login'   => isset($lg->edited_by_user_login) ? (string) $lg->edited_by_user_login : '',
-            );
-        }
-
-        // Keep it lightweight
-        if (count($seen_types) >= 20 && count($sample_fields) >= 12 && count($sample_rows) >= 6) {
-            break;
-        }
-    }
-
-    $wiwts_debug_approval_summary['sample_fields'] = array_keys($sample_fields);
-    $wiwts_debug_approval_summary['edit_types']    = array_keys($seen_types);
-    $wiwts_debug_approval_summary['sample_rows']   = $sample_rows;
-}
-// === WIWTS APPROVAL NOTE DEBUG END ===
-
-
-// === WIWTS APPROVAL NOTE LOOKUP (by wiw_time_id) BEGIN ===
-// Build: [wiw_time_id] => approval note for approved rows
-// Examples:
-// - "Automatically approved on Jan 20, 2026"
-// - "Approved by: Jane Smith on Jan 15, 2026"
-$approval_note_by_wiw_time_id = array();
-
-if (! empty($week_edit_logs)) {
-    foreach ($week_edit_logs as $lg) {
-
-        // ---- Identify wiw_time_id safely (some log rows may use different property names) ----
-        $log_wiw_time_id = '';
-        if (isset($lg->wiw_time_id) && (string) $lg->wiw_time_id !== '') {
-            $log_wiw_time_id = (string) $lg->wiw_time_id;
-        } elseif (isset($lg->www_time_id) && (string) $lg->www_time_id !== '') {
-            // Fallback (older schema naming seen elsewhere in this project)
-            $log_wiw_time_id = (string) $lg->www_time_id;
-        }
-
-        if ($log_wiw_time_id === '') {
-            continue;
-        }
-
-        // ---- Approval-type only ----
-        $etype = isset($lg->edit_type) ? trim((string) $lg->edit_type) : '';
-        if ($etype !== 'Auto-Approved Time Record' && $etype !== 'Approved Time Record') {
-            continue;
-        }
-
-        // ---- Timestamp ----
-        $when_raw = '';
-        if (isset($lg->created_at) && (string) $lg->created_at !== '') {
-            $when_raw = (string) $lg->created_at;
-        } elseif (isset($lg->when) && (string) $lg->when !== '') {
-            $when_raw = (string) $lg->when;
-        }
-
-        if ($when_raw === '') {
-            continue;
-        }
-
-        $when_ts = strtotime($when_raw);
-        if (! $when_ts) {
-            continue;
-        }
-
-        // ---- Date-only display in site timezone (per requirement) ----
-        $when_date_pretty = '';
-        try {
-            $tz = function_exists('wp_timezone') ? wp_timezone() : new DateTimeZone('UTC');
-            $dt = new DateTime('@' . $when_ts);
-            $dt->setTimezone($tz);
-            $when_date_pretty = $dt->format(get_option('date_format'));
-        } catch (Exception $e) {
-            $when_date_pretty = date(get_option('date_format'), $when_ts);
-        }
-
-        // ---- Who (manual only). Support multiple possible column names. ----
-        $who = '';
-        if (isset($lg->edited_by_name) && is_string($lg->edited_by_name)) {
-            $who = trim($lg->edited_by_name);
-        } elseif (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
-            $who = trim($lg->edited_by_display_name);
-        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
-            $who = trim($lg->edited_by);
-        }
-
-        // ---- Compose note text per requirement ----
-        if ($etype === 'Auto-Approved Time Record') {
-            $note_text = 'Automatically approved on ' . $when_date_pretty;
-        } else {
-            if ($who === '') {
-                // If manual approval exists but no name is available, keep a safe fallback.
-                $note_text = 'Approved on ' . $when_date_pretty;
-            } else {
-                $note_text = 'Approved by: ' . $who . ' on ' . $when_date_pretty;
-            }
-        }
-
-        // Keep only the most recent approval-type log per wiw_time_id
-        if (
-            ! isset($approval_note_by_wiw_time_id[$log_wiw_time_id]) ||
-            ! is_array($approval_note_by_wiw_time_id[$log_wiw_time_id]) ||
-            $when_ts > (int) $approval_note_by_wiw_time_id[$log_wiw_time_id]['ts']
-        ) {
-            $approval_note_by_wiw_time_id[$log_wiw_time_id] = array(
-                'ts'   => (int) $when_ts,
-                'text' => (string) $note_text,
-            );
-        }
-    }
-
-    // Flatten to [wiw_time_id] => "text"
-    foreach ($approval_note_by_wiw_time_id as $k => $v) {
-        if (is_array($v) && isset($v['text'])) {
-            $approval_note_by_wiw_time_id[$k] = (string) $v['text'];
-        } else {
-            $approval_note_by_wiw_time_id[$k] = (string) $v;
-        }
-    }
-}
-// === WIWTS APPROVAL NOTE LOOKUP (by wiw_time_id) END ===
-
-
-// Build "approved by" lookup per entry_id (client print-only)
-// We prefer the most recent log where edit_type indicates approval.
-$approval_note_by_entry_id = array();
-
-if (!empty($week_edit_logs)) {
-    foreach ($week_edit_logs as $lg) {
-        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
-        if ($entry_id <= 0) {
-            continue;
-        }
-
-        $edit_type = isset($lg->edit_type) ? trim((string)$lg->edit_type) : '';
-        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
-            continue;
-        }
-
-        $created_raw = isset($lg->created_at) ? (string)$lg->created_at : '';
-        $created_ts  = $created_raw !== '' ? strtotime($created_raw) : 0;
-
-        // Edited-by display name (your log rows use "edited_by_display_name" in the table output)
-        $by_name = '';
-        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
-            $by_name = trim($lg->edited_by_display_name);
-        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
-            $by_name = trim($lg->edited_by);
-        }
-
-        // Keep only the most recent approval-type log per entry_id.
-        if (!isset($approval_note_by_entry_id[$entry_id]) || $created_ts > (int)$approval_note_by_entry_id[$entry_id]['ts']) {
-            $approval_note_by_entry_id[$entry_id] = array(
-                'ts'        => (int)$created_ts,
-                'created_at'=> $created_raw,
-                'by'        => $by_name,
-                'is_auto'   => ($edit_type === 'Auto-Approved Time Record'),
-            );
-        }
-    }
-}
-
-// Build "approved by" lookup per entry_id (client print-only)
-// We prefer the most recent log where edit_type indicates approval.
-$approval_note_by_entry_id = array();
-
-if (!empty($week_edit_logs)) {
-    foreach ($week_edit_logs as $lg) {
-        $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
-        if ($entry_id <= 0) {
-            continue;
-        }
-
-        $edit_type = isset($lg->edit_type) ? trim((string)$lg->edit_type) : '';
-        if ($edit_type !== 'Auto-Approved Time Record' && $edit_type !== 'Approved Time Record') {
-            continue;
-        }
-
-        $created_raw = isset($lg->created_at) ? (string)$lg->created_at : '';
-        $created_ts  = $created_raw !== '' ? strtotime($created_raw) : 0;
-
-        // Edited-by display name (your log rows use "edited_by_display_name" in the table output)
-        $by_name = '';
-        if (isset($lg->edited_by_display_name) && is_string($lg->edited_by_display_name)) {
-            $by_name = trim($lg->edited_by_display_name);
-        } elseif (isset($lg->edited_by) && is_string($lg->edited_by)) {
-            $by_name = trim($lg->edited_by);
-        }
-
-        // Keep only the most recent approval-type log per entry_id.
-        if (!isset($approval_note_by_entry_id[$entry_id]) || $created_ts > (int)$approval_note_by_entry_id[$entry_id]['ts']) {
-            $approval_note_by_entry_id[$entry_id] = array(
-                'ts'        => (int)$created_ts,
-                'created_at'=> $created_raw,
-                'by'        => $by_name,
-                'is_auto'   => ($edit_type === 'Auto-Approved Time Record'),
-            );
-        }
-    }
-}
+                // Keep existing week_timesheet_ids and week_edit_logs for flags/logs rendering below.
                 $is_admin_view = current_user_can('manage_options');
                 $edit_logs_class = $is_admin_view ? 'wiw-edit-logs' : 'wiw-edit-logs wiw-edit-logs-print-only';
 
