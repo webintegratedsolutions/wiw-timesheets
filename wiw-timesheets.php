@@ -938,9 +938,10 @@ if (!empty($daily_rows)) {
 }
 
 // Pull edit logs once for this timesheet and build the lookups.
-// IMPORTANT: get_scoped_edit_logs_for_timesheet() is already used elsewhere in this plugin.
+// NOTE: For approval notes, use the unscoped log set so the Actions column
+// always reflects the latest approval data (independent of debug mode).
 // We only use approval-type log rows.
-$edit_logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $timesheet_id);
+$edit_logs_for_ts = $this->get_timesheet_edit_logs_for_approval_notes($timesheet_id);
 
 if (!empty($edit_logs_for_ts)) {
     foreach ($edit_logs_for_ts as $lg) {
@@ -4274,6 +4275,7 @@ $out .= '<style>
                 }
 
                 $week_edit_logs = array();
+                $week_edit_logs_for_notes = array();
                 if (! empty($week_timesheet_ids)) {
                     foreach (array_keys($week_timesheet_ids) as $tid) {
                         $logs_for_ts = $this->get_scoped_edit_logs_for_timesheet($client_id, $tid);
@@ -4284,6 +4286,16 @@ $out .= '<style>
                             $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
                             if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
                                 $week_edit_logs[] = $lg;
+                            }
+                        }
+
+                        $logs_for_notes = $this->get_timesheet_edit_logs_for_approval_notes($tid);
+                        if (! empty($logs_for_notes)) {
+                            foreach ($logs_for_notes as $lg_note) {
+                                $entry_id = isset($lg_note->entry_id) ? absint($lg_note->entry_id) : 0;
+                                if ($entry_id > 0 && isset($week_entry_ids[$entry_id])) {
+                                    $week_edit_logs_for_notes[] = $lg_note;
+                                }
                             }
                         }
                     }
@@ -4357,9 +4369,10 @@ if ($wiwts_debug_approval_enabled && ! empty($week_edit_logs) && is_array($week_
 // - "Automatically approved on Jan 20, 2026"
 // - "Approved by: Jane Smith on Jan 15, 2026"
 $approval_note_by_wiw_time_id = array();
+$approval_logs_source = ! empty($week_edit_logs_for_notes) ? $week_edit_logs_for_notes : $week_edit_logs;
 
-if (! empty($week_edit_logs)) {
-    foreach ($week_edit_logs as $lg) {
+if (! empty($approval_logs_source)) {
+    foreach ($approval_logs_source as $lg) {
 
         // ---- Identify wiw_time_id safely (some log rows may use different property names) ----
         $log_wiw_time_id = '';
@@ -4368,6 +4381,13 @@ if (! empty($week_edit_logs)) {
         } elseif (isset($lg->www_time_id) && (string) $lg->www_time_id !== '') {
             // Fallback (older schema naming seen elsewhere in this project)
             $log_wiw_time_id = (string) $lg->www_time_id;
+        }
+
+        if ($log_wiw_time_id === '' && isset($lg->entry_id)) {
+            $log_entry_id = absint($lg->entry_id);
+            if ($log_entry_id > 0 && isset($week_entry_id_to_wiw_time_id[$log_entry_id])) {
+                $log_wiw_time_id = (string) $week_entry_id_to_wiw_time_id[$log_entry_id];
+            }
         }
 
         if ($log_wiw_time_id === '') {
@@ -4462,8 +4482,8 @@ if (! empty($week_edit_logs)) {
 // We prefer the most recent log where edit_type indicates approval.
 $approval_note_by_entry_id = array();
 
-if (!empty($week_edit_logs)) {
-    foreach ($week_edit_logs as $lg) {
+if (!empty($approval_logs_source)) {
+    foreach ($approval_logs_source as $lg) {
         $entry_id = isset($lg->entry_id) ? absint($lg->entry_id) : 0;
         if ($entry_id <= 0) {
             continue;
@@ -5519,17 +5539,16 @@ if ($is_approved) {
 
         $timesheet_id = absint($timesheet_id);
         $is_admin     = current_user_can('manage_options');
-        $debug_approval_enabled = (isset($_GET['wiwts_debug_approval']) && $_GET['wiwts_debug_approval'] == '1');
 
         if ($timesheet_id <= 0) {
             return array();
         }
 
-        // Debug mode: return ALL edit logs for the timesheet (no location scoping).
-        if ($debug_approval_enabled || $is_admin) {
+        // Admins: return ALL edit logs for the timesheet (no location scoping).
+        if ($is_admin) {
             $sql = "
-			SELECT l.*
-			FROM {$table_logs} l
+				SELECT l.*
+				FROM {$table_logs} l
 			WHERE l.timesheet_id = %d
 			ORDER BY l.created_at DESC, l.id DESC
 			LIMIT 200
@@ -5557,6 +5576,34 @@ if ($is_approved) {
 		";
 
         return $wpdb->get_results($wpdb->prepare($sql, $timesheet_id, $client_id, $client_id));
+    }
+
+    /**
+     * Fetch edit logs for approval notes (unscoped).
+     *
+     * This ensures the Actions column can always show the latest approval details,
+     * even when client scoping would otherwise hide those logs.
+     */
+    private function get_timesheet_edit_logs_for_approval_notes($timesheet_id)
+    {
+        global $wpdb;
+
+        $table_logs = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+
+        $timesheet_id = absint($timesheet_id);
+        if ($timesheet_id <= 0) {
+            return array();
+        }
+
+        $sql = "
+			SELECT l.*
+			FROM {$table_logs} l
+			WHERE l.timesheet_id = %d
+			ORDER BY l.created_at DESC, l.id DESC
+			LIMIT 200
+		";
+
+        return $wpdb->get_results($wpdb->prepare($sql, $timesheet_id));
     }
 
     /**
