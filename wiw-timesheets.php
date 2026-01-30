@@ -2436,6 +2436,19 @@ function timeTo12h(v){
   </div>
 </div>
 
+<div id="wiwts-approve-modal" class="wiwts-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="wiwts-approve-modal-title">
+  <div class="wiwts-modal__dialog" role="document">
+    <h3 id="wiwts-approve-modal-title">Confirm approval</h3>
+    <p>Are you sure you want to approve this timesheet record?</p>
+    <p class="wiwts-modal__flags-title">Unresolved flags:</p>
+    <ul id="wiwts-approve-modal-flags" class="wiwts-modal__flags-list"></ul>
+    <div class="wiwts-modal__actions">
+      <button type="button" class="wiw-btn secondary" id="wiwts-approve-modal-cancel">Cancel</button>
+      <button type="button" class="wiw-btn primary" id="wiwts-approve-modal-confirm">Approve</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   if (window.wiwtsResetPreviewInitAdminView) return;
