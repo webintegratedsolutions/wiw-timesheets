@@ -3262,6 +3262,73 @@ function timeTo12h(v){
     }
   }
 
+  function ensureApproveModal(){
+    var modal = document.getElementById("wiwts-approve-modal");
+    var list = document.getElementById("wiwts-approve-modal-flags");
+    var approveBtn = document.getElementById("wiwts-approve-modal-confirm");
+    var cancelBtn = document.getElementById("wiwts-approve-modal-cancel");
+
+    if (modal && list && approveBtn && cancelBtn) {
+      return { modal: modal, list: list, approveBtn: approveBtn, cancelBtn: cancelBtn };
+    }
+
+    modal = document.createElement("div");
+    modal.id = "wiwts-approve-modal";
+    modal.className = "wiwts-modal";
+    modal.setAttribute("aria-hidden", "true");
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", "wiwts-approve-modal-title");
+
+    var dialog = document.createElement("div");
+    dialog.className = "wiwts-modal__dialog";
+    dialog.setAttribute("role", "document");
+
+    var title = document.createElement("h3");
+    title.id = "wiwts-approve-modal-title";
+    title.textContent = "Confirm approval";
+
+    var desc = document.createElement("p");
+    desc.textContent = "Are you sure you want to approve this timesheet record?";
+
+    var flagsTitle = document.createElement("p");
+    flagsTitle.className = "wiwts-modal__flags-title";
+    flagsTitle.textContent = "Unresolved flags:";
+
+    list = document.createElement("ul");
+    list.id = "wiwts-approve-modal-flags";
+    list.className = "wiwts-modal__flags-list";
+
+    var actions = document.createElement("div");
+    actions.className = "wiwts-modal__actions";
+
+    cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "wiw-btn secondary";
+    cancelBtn.id = "wiwts-approve-modal-cancel";
+    cancelBtn.textContent = "Cancel";
+
+    approveBtn = document.createElement("button");
+    approveBtn.type = "button";
+    approveBtn.className = "wiw-btn primary";
+    approveBtn.id = "wiwts-approve-modal-confirm";
+    approveBtn.textContent = "Approve";
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(approveBtn);
+
+    dialog.appendChild(title);
+    dialog.appendChild(desc);
+    dialog.appendChild(flagsTitle);
+    dialog.appendChild(list);
+    dialog.appendChild(actions);
+
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    return { modal: modal, list: list, approveBtn: approveBtn, cancelBtn: cancelBtn };
+  }
+
   // === WIWTS setEditing BEGIN (records view) ===
 function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
@@ -3807,10 +3874,11 @@ function timeTo12h(v){
       });
 
       if (flagsArr.length) {
-        var modal = document.getElementById("wiwts-approve-modal");
-        var list = document.getElementById("wiwts-approve-modal-flags");
-        var approveBtn = document.getElementById("wiwts-approve-modal-confirm");
-        var cancelBtn = document.getElementById("wiwts-approve-modal-cancel");
+        var modalParts = ensureApproveModal();
+        var modal = modalParts.modal;
+        var list = modalParts.list;
+        var approveBtn = modalParts.approveBtn;
+        var cancelBtn = modalParts.cancelBtn;
 
         if (!modal || !list || !approveBtn || !cancelBtn) {
           // Fallback: if modal not found, do not block approval.
