@@ -483,6 +483,8 @@ $week_start_date
                 continue;
             }
 
+            $has_local_edits = false;
+
             foreach ( $bundle['records'] as $time_entry ) {
                 $wiw_time_id = (int) ( $time_entry->id ?? 0 );
                 if ( ! $wiw_time_id ) {
@@ -664,7 +666,49 @@ $week_start_date
 
                 ];
 
+                $clock_in_for_flags  = $clock_in_local;
+                $clock_out_for_flags = $clock_out_local;
+
                 if ( $entry_id ) {
+                    $existing_entry = $wpdb->get_row(
+                        $wpdb->prepare(
+                            "SELECT clock_in, clock_out, break_minutes, clocked_hours, payable_hours, additional_hours, status
+                             FROM {$table_timesheet_entries}
+                             WHERE id = %d",
+                            $entry_id
+                        )
+                    );
+
+                    $has_local_edit = (bool) $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT 1
+                             FROM {$wpdb->prefix}wiw_timesheet_edit_logs
+                             WHERE entry_id = %d OR wiw_time_id = %d
+                             LIMIT 1",
+                            $entry_id,
+                            $wiw_time_id
+                        )
+                    );
+
+                    $is_approved = ( $existing_entry && isset( $existing_entry->status ) )
+                        ? ( strtolower( (string) $existing_entry->status ) === 'approved' )
+                        : false;
+
+                    if ( ( $has_local_edit || $is_approved ) && $existing_entry ) {
+                        $has_local_edits = true;
+
+                        $entry_data['clock_in']         = $existing_entry->clock_in;
+                        $entry_data['clock_out']        = $existing_entry->clock_out;
+                        $entry_data['break_minutes']    = (int) $existing_entry->break_minutes;
+                        $entry_data['clocked_hours']    = (float) $existing_entry->clocked_hours;
+                        $entry_data['payable_hours']    = (float) $existing_entry->payable_hours;
+                        $entry_data['additional_hours'] = (float) $existing_entry->additional_hours;
+                        $entry_data['status']           = $existing_entry->status;
+
+                        $clock_in_for_flags  = $existing_entry->clock_in;
+                        $clock_out_for_flags = $existing_entry->clock_out;
+                    }
+
 
                     // Preserve existing confirmed/denied status on resync.
                     if ( isset( $entry_data['extra_time_status'] ) ) {
@@ -684,8 +728,8 @@ $week_start_date
                 // ✅ Store flags for this time record during sync (deletes old, inserts current)
                 $this->wiwts_sync_store_time_flags(
                     $wiw_time_id,
-                    (string) ( $clock_in_local ?? '' ),
-                    (string) ( $clock_out_local ?? '' ),
+                    (string) ( $clock_in_for_flags ?? '' ),
+                    (string) ( $clock_out_for_flags ?? '' ),
                     (string) ( $scheduled_start_local ?? '' ),
                     (string) ( $scheduled_end_local ?? '' ),
                     $wp_timezone,
@@ -693,6 +737,33 @@ $week_start_date
                     $payable_hours_local
                 );
 
+            }
+
+            if ( $has_local_edits ) {
+                $totals = $wpdb->get_row(
+                    $wpdb->prepare(
+                        "SELECT
+                            COALESCE(SUM(clocked_hours), 0) AS total_clocked,
+                            COALESCE(SUM(scheduled_hours), 0) AS total_scheduled
+                         FROM {$table_timesheet_entries}
+                         WHERE timesheet_id = %d",
+                        $header_id
+                    )
+                );
+
+                if ( $totals ) {
+                    $wpdb->update(
+                        $table_timesheets,
+                        array(
+                            'total_clocked_hours'   => (float) round( (float) $totals->total_clocked, 2 ),
+                            'total_scheduled_hours' => (float) round( (float) $totals->total_scheduled, 2 ),
+                            'updated_at'            => $now,
+                        ),
+                        array( 'id' => $header_id ),
+                        array( '%f', '%f', '%s' ),
+                        array( '%d' )
+                    );
+                }
             }
         }
     }
