@@ -286,3 +286,20 @@ background-color: #c2fce4;
 #wiwts-client-records-view.wiwts-debug-approval .wiw-edit-logs-print-only {
     display: none !important;
 }
+
+.wiwts-modal__actions #wiwts-approve-modal-cancel,
+.wiwts-modal__actions #wiwts-approve-modal-confirm{
+  padding: 5px 20px 7px;
+}
+
+#wiwts-approve-modal-title{
+font-size: 1.27rem;
+}
+
+.wiwts-modal__dialog {
+    padding: 27px 22px 27px;
+}
+
+.wiwts-modal__flags-list {
+    margin: 0 0 27px 18px;
+}
