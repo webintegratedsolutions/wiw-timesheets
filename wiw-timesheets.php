@@ -124,6 +124,10 @@ class WIW_Timesheet_Manager
         // 7. Finalize local timesheet (admin-post)
         add_action('admin_post_wiw_finalize_local_timesheet', array($this, 'handle_finalize_local_timesheet'));
 
+        // 7a. Sync timesheets shortly after user login (WP-Cron)
+        add_action('wp_login', array($this, 'wiwts_schedule_login_sync'), 10, 2);
+        add_action('wiwts_login_sync', array($this, 'wiwts_run_login_sync'), 10, 1);
+
         // ✅ Register additional AJAX hooks (THIS was missing)
         // ✅ Register additional AJAX hooks (THIS was missing)
         $this->register_ajax_hooks();
@@ -154,6 +158,78 @@ class WIW_Timesheet_Manager
 
         // Manual trigger for auto-approve cron run (admin-post)
         add_action('admin_post_wiwts_run_auto_approve_cron_now', array($this, 'wiwts_handle_run_auto_approve_cron_now'));
+    }
+
+    /**
+     * Schedule a fast login-triggered sync (throttled).
+     *
+     * @param string  $user_login
+     * @param WP_User $user
+     */
+    public function wiwts_schedule_login_sync($user_login, $user)
+    {
+        if (! $user instanceof WP_User) {
+            return;
+        }
+
+        $min_interval = 30; // seconds
+        $last_sync    = (int) get_option('wiwts_last_login_sync', 0);
+        if ($last_sync && (time() - $last_sync) < $min_interval) {
+            return;
+        }
+
+        if (! wp_next_scheduled('wiwts_login_sync', array($user->ID))) {
+            wp_schedule_single_event(time() + 1, 'wiwts_login_sync', array($user->ID));
+        }
+    }
+
+    /**
+     * Run the login-triggered sync job.
+     *
+     * @param int $user_id
+     */
+    public function wiwts_run_login_sync($user_id)
+    {
+        update_option('wiwts_last_login_sync', time(), false);
+
+        $timesheets_data = $this->fetch_timesheets_data();
+        if (is_wp_error($timesheets_data)) {
+            return;
+        }
+
+        $times          = isset($timesheets_data->times) ? $timesheets_data->times : array();
+        $included_users = isset($timesheets_data->users) ? $timesheets_data->users : array();
+        $included_shifts= isset($timesheets_data->shifts) ? $timesheets_data->shifts : array();
+
+        if (empty($times) || empty($included_users)) {
+            return;
+        }
+
+        $user_map  = array_column($included_users, null, 'id');
+        $shift_map = array_column($included_shifts, null, 'id');
+
+        $wp_timezone_string = get_option('timezone_string');
+        if (empty($wp_timezone_string)) { $wp_timezone_string = 'UTC'; }
+        $wp_timezone = new DateTimeZone($wp_timezone_string);
+
+        if (method_exists($this, 'calculate_shift_duration_in_hours')) {
+            foreach ($times as &$time_entry) {
+                $clocked_duration = $this->calculate_timesheet_duration_in_hours($time_entry);
+                $time_entry->calculated_duration = $clocked_duration;
+
+                $shift_id            = $time_entry->shift_id ?? null;
+                $scheduled_shift_obj = $shift_map[ $shift_id ] ?? null;
+
+                if ($scheduled_shift_obj) {
+                    $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours($scheduled_shift_obj);
+                } else {
+                    $time_entry->scheduled_duration = 0.0;
+                }
+            }
+            unset($time_entry);
+        }
+
+        $this->sync_timesheets_to_local_db($times, $user_map, $wp_timezone, $shift_map);
     }
 
 
