@@ -672,7 +672,7 @@ $week_start_date
                 if ( $entry_id ) {
                     $existing_entry = $wpdb->get_row(
                         $wpdb->prepare(
-                            "SELECT clock_in, clock_out, break_minutes, clocked_hours, payable_hours, additional_hours
+                            "SELECT clock_in, clock_out, break_minutes, clocked_hours, payable_hours, additional_hours, status
                              FROM {$table_timesheet_entries}
                              WHERE id = %d",
                             $entry_id
@@ -690,7 +690,11 @@ $week_start_date
                         )
                     );
 
-                    if ( $has_local_edit && $existing_entry ) {
+                    $is_approved = ( $existing_entry && isset( $existing_entry->status ) )
+                        ? ( strtolower( (string) $existing_entry->status ) === 'approved' )
+                        : false;
+
+                    if ( ( $has_local_edit || $is_approved ) && $existing_entry ) {
                         $has_local_edits = true;
 
                         $entry_data['clock_in']         = $existing_entry->clock_in;
@@ -699,6 +703,7 @@ $week_start_date
                         $entry_data['clocked_hours']    = (float) $existing_entry->clocked_hours;
                         $entry_data['payable_hours']    = (float) $existing_entry->payable_hours;
                         $entry_data['additional_hours'] = (float) $existing_entry->additional_hours;
+                        $entry_data['status']           = $existing_entry->status;
 
                         $clock_in_for_flags  = $existing_entry->clock_in;
                         $clock_out_for_flags = $existing_entry->clock_out;
