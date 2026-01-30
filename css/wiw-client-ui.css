@@ -239,6 +239,46 @@ background-color: #c2fce4;
     background: #f6f7f7;
 }
 
+/* === WIWTS Modal (Approve with Flags) === */
+.wiwts-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 10000;
+  padding: 24px;
+}
+
+.wiwts-modal.is-open {
+  display: flex;
+}
+
+.wiwts-modal__dialog {
+  background: #fff;
+  border-radius: 6px;
+  max-width: 520px;
+  width: 100%;
+  padding: 20px 22px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.wiwts-modal__flags-title {
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+
+.wiwts-modal__flags-list {
+  margin: 0 0 18px 18px;
+}
+
+.wiwts-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .wiw-week-print-btn{
   padding: 5px 8px 7px;
 }
@@ -246,4 +286,3 @@ background-color: #c2fce4;
 #wiwts-client-records-view.wiwts-debug-approval .wiw-edit-logs-print-only {
     display: none !important;
 }
-

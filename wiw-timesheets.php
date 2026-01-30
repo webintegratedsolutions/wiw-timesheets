@@ -1517,6 +1517,15 @@ if ($is_approved) {
 
                 $out .= '</tbody></table>';
 
+                if (! empty($wiwts_debug_approval_enabled)) {
+                    $out .= '<div class="notice notice-warning" style="margin:12px 0;">'
+                        . '<p style="margin:8px 0;"><strong>WIWTS Debug:</strong> approve flags JSON snapshot (records view)</p>'
+                        . '<pre style="white-space:pre-wrap;margin:8px 0;">'
+                        . esc_html(wp_json_encode($wiwts_debug_flags_rows, JSON_PRETTY_PRINT))
+                        . '</pre>'
+                        . '</div>';
+                }
+
                 // Expandable edit logs (per-timesheet, shown under each daily table when that timesheet is open).
                 if (isset($timesheet_id_for_period) && $timesheet_id_for_period !== '') {
                     $edit_logs = $this->get_scoped_edit_logs_for_timesheet($client_id, absint($timesheet_id_for_period));
@@ -1889,6 +1898,19 @@ $out .= '</tr>';
         $out .= '</tbody></table>';
         $out .= '</div>';
         $out .= '</details>';
+
+        $out .= '<div id="wiwts-approve-modal" class="wiwts-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="wiwts-approve-modal-title">';
+        $out .= '<div class="wiwts-modal__dialog" role="document">';
+        $out .= '<h3 id="wiwts-approve-modal-title">Confirm approval</h3>';
+        $out .= '<p>Are you sure you want to approve this timesheet record?</p>';
+        $out .= '<p class="wiwts-modal__flags-title">Unresolved flags:</p>';
+        $out .= '<ul id="wiwts-approve-modal-flags" class="wiwts-modal__flags-list"></ul>';
+        $out .= '<div class="wiwts-modal__actions">';
+        $out .= '<button type="button" class="wiw-btn secondary" id="wiwts-approve-modal-cancel">Cancel</button>';
+        $out .= '<button type="button" class="wiw-btn primary" id="wiwts-approve-modal-confirm">Approve</button>';
+        $out .= '</div>';
+        $out .= '</div>';
+        $out .= '</div>';
 
         /**
          * Client UI inline edit behavior (UI only — no persistence yet)
@@ -2290,30 +2312,86 @@ function timeTo12h(v){
 
       e.preventDefault();
 
-      var msg = "Are you sure you want to approve this timesheet record?";
+      var rowA = closestRow(t);
+      if (!rowA) return;
 
-      // If unresolved flags exist for this record, show them in the confirmation text
+      // If unresolved flags exist for this record, show them in a modal confirmation.
       var flagsJson = t.getAttribute("data-unresolved-flags-json") || "";
+      var flagsArr = [];
       if (flagsJson) {
         try {
-          var arr = JSON.parse(flagsJson);
-          if (Array.isArray(arr) && arr.length) {
-            msg += "\n\nUnresolved flags:\n";
-            for (var i = 0; i < arr.length; i++) {
-              msg += "- " + String(arr[i]) + "\n";
-            }
+          var parsed = JSON.parse(flagsJson);
+          if (Array.isArray(parsed)) {
+            flagsArr = parsed.filter(function(item){ return String(item || "").trim() !== ""; });
           }
         } catch(e) {
-          // ignore parse errors, fallback to basic confirm
+          flagsArr = [];
         }
       }
 
-      if (!window.confirm(msg)) {
+      if (flagsArr.length) {
+        var modal = document.getElementById("wiwts-approve-modal");
+        var list = document.getElementById("wiwts-approve-modal-flags");
+        var approveBtn = document.getElementById("wiwts-approve-modal-confirm");
+        var cancelBtn = document.getElementById("wiwts-approve-modal-cancel");
+
+        if (!modal || !list || !approveBtn || !cancelBtn) {
+          // Fallback: if modal not found, do not block approval.
+          doApprove(rowA, t);
+          return;
+        }
+
+        list.innerHTML = "";
+        flagsArr.forEach(function(flagText){
+          var li = document.createElement("li");
+          li.textContent = String(flagText);
+          list.appendChild(li);
+        });
+
+        modal.classList.add("is-open");
+        modal.setAttribute("aria-hidden", "false");
+
+        var closeModal = function(){
+          modal.classList.remove("is-open");
+          modal.setAttribute("aria-hidden", "true");
+          approveBtn.removeEventListener("click", onConfirm);
+          cancelBtn.removeEventListener("click", onCancel);
+          modal.removeEventListener("click", onOverlayClick);
+          document.removeEventListener("keydown", onKeydown);
+        };
+
+        var onConfirm = function(e){
+          e.preventDefault();
+          closeModal();
+          doApprove(rowA, t);
+        };
+
+        var onCancel = function(e){
+          e.preventDefault();
+          closeModal();
+        };
+
+        var onOverlayClick = function(e){
+          if (e.target === modal) {
+            closeModal();
+          }
+        };
+
+        var onKeydown = function(e){
+          if (e.key === "Escape") {
+            closeModal();
+          }
+        };
+
+        approveBtn.addEventListener("click", onConfirm);
+        cancelBtn.addEventListener("click", onCancel);
+        modal.addEventListener("click", onOverlayClick);
+        document.addEventListener("keydown", onKeydown);
+
         return;
       }
 
-      var rowA = closestRow(t);
-      if (!rowA) return;
+      // No unresolved flags: approve immediately with no confirmation.
       doApprove(rowA, t);
       return;
     }
@@ -2363,6 +2441,19 @@ function timeTo12h(v){
 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
       <button type="button" id="wiwts-reset-preview-apply" class="wiw-btn primary">Apply Reset</button>
+    </div>
+  </div>
+</div>
+
+<div id="wiwts-approve-modal" class="wiwts-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="wiwts-approve-modal-title">
+  <div class="wiwts-modal__dialog" role="document">
+    <h3 id="wiwts-approve-modal-title">Confirm approval</h3>
+    <p>Are you sure you want to approve this timesheet record?</p>
+    <p class="wiwts-modal__flags-title">Unresolved flags:</p>
+    <ul id="wiwts-approve-modal-flags" class="wiwts-modal__flags-list"></ul>
+    <div class="wiwts-modal__actions">
+      <button type="button" class="wiw-btn secondary" id="wiwts-approve-modal-cancel">Cancel</button>
+      <button type="button" class="wiw-btn primary" id="wiwts-approve-modal-confirm">Approve</button>
     </div>
   </div>
 </div>
@@ -3161,6 +3252,16 @@ function timeTo12h(v){
     };
   }
 
+  function wiwtsDebugApproval(message, data){
+    if (window && window.console && typeof window.console.log === "function") {
+      if (data !== undefined) {
+        console.log("[WIWTS][Records Approve]", message, data);
+      } else {
+        console.log("[WIWTS][Records Approve]", message);
+      }
+    }
+  }
+
   // === WIWTS setEditing BEGIN (records view) ===
 function setEditing(row, isEditing){
     var inputs = row.querySelectorAll("input.wiw-client-edit");
@@ -3682,30 +3783,98 @@ function timeTo12h(v){
 
       e.preventDefault();
 
-      var msg = "Are you sure you want to approve this timesheet record?";
+      var rowA = closestRow(t);
+      if (!rowA) return;
 
-      // If unresolved flags exist for this record, show them in the confirmation text
+      // If unresolved flags exist for this record, show them in a modal confirmation.
       var flagsJson = t.getAttribute("data-unresolved-flags-json") || "";
+      var flagsArr = [];
       if (flagsJson) {
         try {
-          var arr = JSON.parse(flagsJson);
-          if (Array.isArray(arr) && arr.length) {
-            msg += "\n\nUnresolved flags:\n";
-            for (var i = 0; i < arr.length; i++) {
-              msg += "- " + String(arr[i]) + "\n";
-            }
+          var parsed = JSON.parse(flagsJson);
+          if (Array.isArray(parsed)) {
+            flagsArr = parsed.filter(function(item){ return String(item || "").trim() !== ""; });
           }
         } catch(e) {
-          // ignore parse errors, fallback to basic confirm
+          flagsArr = [];
         }
       }
 
-      if (!window.confirm(msg)) {
+      wiwtsDebugApproval("Approve clicked", {
+        entryId: t.getAttribute("data-entry-id") || "",
+        flagsJson: flagsJson,
+        flagsCount: flagsArr.length
+      });
+
+      if (flagsArr.length) {
+        var modal = document.getElementById("wiwts-approve-modal");
+        var list = document.getElementById("wiwts-approve-modal-flags");
+        var approveBtn = document.getElementById("wiwts-approve-modal-confirm");
+        var cancelBtn = document.getElementById("wiwts-approve-modal-cancel");
+
+        if (!modal || !list || !approveBtn || !cancelBtn) {
+          // Fallback: if modal not found, do not block approval.
+          wiwtsDebugApproval("Modal elements missing; approving without modal.", {
+            hasModal: !!modal,
+            hasList: !!list,
+            hasApproveBtn: !!approveBtn,
+            hasCancelBtn: !!cancelBtn
+          });
+          doApprove(rowA, t);
+          return;
+        }
+
+        list.innerHTML = "";
+        flagsArr.forEach(function(flagText){
+          var li = document.createElement("li");
+          li.textContent = String(flagText);
+          list.appendChild(li);
+        });
+
+        modal.classList.add("is-open");
+        modal.setAttribute("aria-hidden", "false");
+
+        var closeModal = function(){
+          modal.classList.remove("is-open");
+          modal.setAttribute("aria-hidden", "true");
+          approveBtn.removeEventListener("click", onConfirm);
+          cancelBtn.removeEventListener("click", onCancel);
+          modal.removeEventListener("click", onOverlayClick);
+          document.removeEventListener("keydown", onKeydown);
+        };
+
+        var onConfirm = function(e){
+          e.preventDefault();
+          closeModal();
+          doApprove(rowA, t);
+        };
+
+        var onCancel = function(e){
+          e.preventDefault();
+          closeModal();
+        };
+
+        var onOverlayClick = function(e){
+          if (e.target === modal) {
+            closeModal();
+          }
+        };
+
+        var onKeydown = function(e){
+          if (e.key === "Escape") {
+            closeModal();
+          }
+        };
+
+        approveBtn.addEventListener("click", onConfirm);
+        cancelBtn.addEventListener("click", onCancel);
+        modal.addEventListener("click", onOverlayClick);
+        document.addEventListener("keydown", onKeydown);
+
         return;
       }
 
-      var rowA = closestRow(t);
-      if (!rowA) return;
+      // No unresolved flags: approve immediately with no confirmation.
       doApprove(rowA, t);
       return;
     }
@@ -4044,6 +4213,7 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
 
         // Cache flags by timesheet_id to avoid repeated queries across weeks.
         $wiwts_flags_cache_by_timesheet = array();
+        $wiwts_debug_flags_rows = array();
 
 // Week View only: tighten spacing + prevent wrap on time columns
 $out .= '<style>
@@ -4715,6 +4885,15 @@ $out .= '<td>' . esc_html($sched_hrs) . '</td>';
                         if (! empty($wiwts_unresolved_list_for_row) && is_array($wiwts_unresolved_list_for_row)) {
                             $wiwts_unresolved_list_for_row = array_values(array_unique(array_map('strval', $wiwts_unresolved_list_for_row)));
                             $wiwts_flags_json_attr = ' data-unresolved-flags-json="' . esc_attr(wp_json_encode($wiwts_unresolved_list_for_row)) . '"';
+                        }
+
+                        if (! empty($wiwts_debug_approval_enabled)) {
+                            $wiwts_debug_flags_rows[] = array(
+                                'wiw_time_id'   => $wiwts_row_wiw_time_id,
+                                'timesheet_id'  => $wiwts_row_timesheet_id,
+                                'entry_id'      => isset($dr->id) ? absint($dr->id) : 0,
+                                'flags_json'    => $wiwts_flags_json_attr !== '' ? wp_json_encode($wiwts_unresolved_list_for_row) : '',
+                            );
                         }
 
 // Approved rows: show approval note text instead of an "Approved" button.
