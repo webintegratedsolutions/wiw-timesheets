@@ -243,4 +243,7 @@ background-color: #c2fce4;
   padding: 5px 8px 7px;
 }
 
+#wiwts-client-records-view.wiwts-debug-approval .wiw-edit-logs-print-only {
+    display: none !important;
+}
 
