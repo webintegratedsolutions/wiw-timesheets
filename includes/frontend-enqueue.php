@@ -42,5 +42,28 @@ if (
 		array(),
 		$css_ver
 	);
+
+	$js_rel  = 'js/wiw-client-sync.js';
+	$js_path = WIW_PLUGIN_PATH . $js_rel;
+	$js_url  = WIW_PLUGIN_URL . $js_rel;
+	$js_ver  = file_exists( $js_path ) ? filemtime( $js_path ) : '1.0.0';
+
+	wp_enqueue_script(
+		'wiwts-client-sync',
+		$js_url,
+		array(),
+		$js_ver,
+		true
+	);
+
+	wp_localize_script(
+		'wiwts-client-sync',
+		'wiwtsClientSync',
+		array(
+			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+			'nonce'   => wp_create_nonce( 'wiwts_frontend_sync' ),
+			'paths'   => array( '/timesheets/', '/timesheet-pay-periods/' ),
+		)
+	);
 }
 add_action( 'wp_enqueue_scripts', 'wiwts_enqueue_client_ui_assets' );

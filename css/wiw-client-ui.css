@@ -319,3 +319,32 @@ font-size: 1.27rem;
 .wiwts-modal__flags-list {
     margin: 0 0 27px 18px;
 }
+
+/* Front-end sync modal */
+.wiwts-sync-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  z-index: 9999;
+}
+
+.wiwts-sync-modal.is-active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.wiwts-sync-modal__content {
+  background: #fff;
+  padding: 18px 24px;
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d2327;
+}
