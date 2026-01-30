@@ -4185,6 +4185,18 @@ $out .= '<style>
     display: table-cell !important;
   }
 
+  /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table thead th:nth-child(6),
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table tbody td:nth-child(6) {
+    display: none !important;
+  }
+
+  /* CLIENT PRINT ONLY: hide Clocked Hrs column (column #8) */
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table thead th:nth-child(8),
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table tbody td:nth-child(8) {
+    display: none !important;
+  }
+
   /* Print: only show buttons that are already visible on screen.
      Do NOT override inline display:none used for Save/Reset/Cancel states. */
   #wiwts-client-records-view.wiwts-view-client .wiw-print-target .wiw-client-actions button:not([style*="display:none"]):not([style*="display: none"]) {
@@ -4203,8 +4215,6 @@ $out .= '<style>
   }
 }
 </style>';
-
-
 
         $render_weeks = function (array $weeks, $is_done_section = false) use (&$out, $client_id, $tz, $wiwts_debug_approval_enabled) {
 
