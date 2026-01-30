@@ -1198,9 +1198,9 @@ if (!empty($edit_logs_for_ts)) {
 
                             $date_cell_html  = '<div>' . esc_html($date_display) . '</div>';
 
-                            if ($wiw_time_id_display !== '') {
-                                $date_cell_html .= '<div><small style="opacity:0.75;">(' . esc_html($wiw_time_id_display) . ')</small></div>';
-                            }
+if ($wiw_time_id_display !== '' && current_user_can('manage_options')) {
+    $date_cell_html .= '<div><small style="opacity:0.75;">(' . esc_html($wiw_time_id_display) . ')</small></div>';
+}
 
                             $out .= '<td>' . $date_cell_html . '</td>';
                             // === WIWTS STEP 3 END ===
@@ -4579,9 +4579,11 @@ if (!empty($week_edit_logs)) {
                     // Shift date cell + WIW Time ID (same as main client view)
                     $wiw_time_id_display = isset($dr->wiw_time_id) ? (string) $dr->wiw_time_id : '';
                     $date_cell_html  = '<div>' . esc_html($date_display) . '</div>';
-                    if ($wiw_time_id_display !== '') {
-                        $date_cell_html .= '<div><small style="opacity:0.75;">(' . esc_html($wiw_time_id_display) . ')</small></div>';
-                    }
+
+if ($wiw_time_id_display !== '' && current_user_can('manage_options')) {
+    $date_cell_html .= '<div><small style="opacity:0.75;">(' . esc_html($wiw_time_id_display) . ')</small></div>';
+}
+
                     $out .= '<td>' . $date_cell_html . '</td>';
 
                     // Employee column (name is attached in the Week bucketing step as _wiw_employee_name)
