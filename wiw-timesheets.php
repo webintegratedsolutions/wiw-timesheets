@@ -4181,6 +4181,18 @@ $out .= '<style>
     display: none !important;
   }
 
+    /* CLIENT PRINT ONLY: remove left/right margins for full-width alignment */
+  .meta-page-left,
+  .meta-page-right {
+    margin-left: 0 !important;
+  }
+
+  #meta-page {
+    padding: 1.5rem 0 0 !important;
+    position: relative !important;
+    left: -30px;
+  }
+
   #wiwts-client-records-view.wiwts-view-client table th,
   #wiwts-client-records-view.wiwts-view-client table td {
     font-size: 12px;
