@@ -4383,6 +4383,13 @@ if (! empty($approval_logs_source)) {
             $log_wiw_time_id = (string) $lg->www_time_id;
         }
 
+        if ($log_wiw_time_id === '' && isset($lg->entry_id)) {
+            $log_entry_id = absint($lg->entry_id);
+            if ($log_entry_id > 0 && isset($week_entry_id_to_wiw_time_id[$log_entry_id])) {
+                $log_wiw_time_id = (string) $week_entry_id_to_wiw_time_id[$log_entry_id];
+            }
+        }
+
         if ($log_wiw_time_id === '') {
             continue;
         }
