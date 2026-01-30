@@ -3751,30 +3751,86 @@ function timeTo12h(v){
 
       e.preventDefault();
 
-      var msg = "Are you sure you want to approve this timesheet record?";
+      var rowA = closestRow(t);
+      if (!rowA) return;
 
-      // If unresolved flags exist for this record, show them in the confirmation text
+      // If unresolved flags exist for this record, show them in a modal confirmation.
       var flagsJson = t.getAttribute("data-unresolved-flags-json") || "";
+      var flagsArr = [];
       if (flagsJson) {
         try {
-          var arr = JSON.parse(flagsJson);
-          if (Array.isArray(arr) && arr.length) {
-            msg += "\n\nUnresolved flags:\n";
-            for (var i = 0; i < arr.length; i++) {
-              msg += "- " + String(arr[i]) + "\n";
-            }
+          var parsed = JSON.parse(flagsJson);
+          if (Array.isArray(parsed)) {
+            flagsArr = parsed.filter(function(item){ return String(item || "").trim() !== ""; });
           }
         } catch(e) {
-          // ignore parse errors, fallback to basic confirm
+          flagsArr = [];
         }
       }
 
-      if (!window.confirm(msg)) {
+      if (flagsArr.length) {
+        var modal = document.getElementById("wiwts-approve-modal");
+        var list = document.getElementById("wiwts-approve-modal-flags");
+        var approveBtn = document.getElementById("wiwts-approve-modal-confirm");
+        var cancelBtn = document.getElementById("wiwts-approve-modal-cancel");
+
+        if (!modal || !list || !approveBtn || !cancelBtn) {
+          // Fallback: if modal not found, do not block approval.
+          doApprove(rowA, t);
+          return;
+        }
+
+        list.innerHTML = "";
+        flagsArr.forEach(function(flagText){
+          var li = document.createElement("li");
+          li.textContent = String(flagText);
+          list.appendChild(li);
+        });
+
+        modal.classList.add("is-open");
+        modal.setAttribute("aria-hidden", "false");
+
+        var closeModal = function(){
+          modal.classList.remove("is-open");
+          modal.setAttribute("aria-hidden", "true");
+          approveBtn.removeEventListener("click", onConfirm);
+          cancelBtn.removeEventListener("click", onCancel);
+          modal.removeEventListener("click", onOverlayClick);
+          document.removeEventListener("keydown", onKeydown);
+        };
+
+        var onConfirm = function(e){
+          e.preventDefault();
+          closeModal();
+          doApprove(rowA, t);
+        };
+
+        var onCancel = function(e){
+          e.preventDefault();
+          closeModal();
+        };
+
+        var onOverlayClick = function(e){
+          if (e.target === modal) {
+            closeModal();
+          }
+        };
+
+        var onKeydown = function(e){
+          if (e.key === "Escape") {
+            closeModal();
+          }
+        };
+
+        approveBtn.addEventListener("click", onConfirm);
+        cancelBtn.addEventListener("click", onCancel);
+        modal.addEventListener("click", onOverlayClick);
+        document.addEventListener("keydown", onKeydown);
+
         return;
       }
 
-      var rowA = closestRow(t);
-      if (!rowA) return;
+      // No unresolved flags: approve immediately with no confirmation.
       doApprove(rowA, t);
       return;
     }
