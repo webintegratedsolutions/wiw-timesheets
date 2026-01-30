@@ -124,6 +124,9 @@ class WIW_Timesheet_Manager
         // 7. Finalize local timesheet (admin-post)
         add_action('admin_post_wiw_finalize_local_timesheet', array($this, 'handle_finalize_local_timesheet'));
 
+        // 7b. Front-end scoped sync (AJAX)
+        add_action('wp_ajax_wiwts_frontend_sync', array($this, 'handle_frontend_sync'));
+
         // ✅ Register additional AJAX hooks (THIS was missing)
         // ✅ Register additional AJAX hooks (THIS was missing)
         $this->register_ajax_hooks();
@@ -191,6 +194,10 @@ $out  = '<div id="wiwts-client-records-view" class="wiw-client-timesheets ' . es
             $out .= '</div>';
             return $out;
         }
+
+        $out .= '<div id="wiwts-sync-modal" class="wiwts-sync-modal" aria-hidden="true" role="status" aria-live="polite">';
+        $out .= '<div class="wiwts-sync-modal__content">Syncing timesheet records...</div>';
+        $out .= '</div>';
 
         // Filter-aware summary (count reflects filtered results)
         $is_frontend_admin = current_user_can('manage_options');
@@ -7652,6 +7659,124 @@ public function wiw_format_edit_log_value_for_display(string $value): string
 
         $params = array_merge($default_filters, $filters);
         return WIW_API_Client::request($endpoint, $params, WIW_API_Client::METHOD_GET);
+    }
+
+    /**
+     * Front-end sync handler (scoped, rate-limited, nonce-protected).
+     */
+    public function handle_frontend_sync()
+    {
+        if (! is_user_logged_in()) {
+            wp_send_json_error(array('status' => 'not_logged_in'), 403);
+        }
+
+        check_ajax_referer('wiwts_frontend_sync');
+
+        $current_user_id = get_current_user_id();
+        $client_id_raw   = get_user_meta($current_user_id, 'client_account_number', true);
+        $client_id       = is_scalar($client_id_raw) ? absint($client_id_raw) : 0;
+
+        if (! $client_id) {
+            wp_send_json_error(array('status' => 'missing_client'), 400);
+        }
+
+        $rate_limit = (int) apply_filters('wiwts_frontend_sync_rate_limit_seconds', 900, $client_id, $current_user_id);
+        $rate_limit = max(30, $rate_limit);
+        $lock_key   = 'wiwts_frontend_sync_' . $client_id;
+
+        if ($rate_limit > 0 && get_transient($lock_key)) {
+            wp_send_json_success(array('status' => 'rate_limited'));
+        }
+
+        $result = $this->sync_timesheets_for_location($client_id);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(array('status' => 'error', 'message' => $result->get_error_message()), 500);
+        }
+
+        if ($rate_limit > 0) {
+            set_transient($lock_key, time(), $rate_limit);
+        }
+
+        wp_send_json_success(array('status' => 'success'));
+    }
+
+    /**
+     * Scoped timesheet sync for a specific location (client account number).
+     *
+     * @param int $location_id
+     * @return true|WP_Error
+     */
+    private function sync_timesheets_for_location($location_id)
+    {
+        $location_id = absint($location_id);
+        if (! $location_id) {
+            return new WP_Error('wiwts_invalid_location', 'Invalid location id.');
+        }
+
+        $timesheets_data = $this->fetch_timesheets_data();
+        if (is_wp_error($timesheets_data)) {
+            return $timesheets_data;
+        }
+
+        $times          = isset($timesheets_data->times) ? $timesheets_data->times : array();
+        $included_users = isset($timesheets_data->users) ? $timesheets_data->users : array();
+        $included_shifts= isset($timesheets_data->shifts) ? $timesheets_data->shifts : array();
+        $included_sites = isset($timesheets_data->sites) ? $timesheets_data->sites : array();
+
+        $user_map  = array_column($included_users, null, 'id');
+        $shift_map = array_column($included_shifts, null, 'id');
+        $site_map  = array_column($included_sites, null, 'id');
+
+        $wp_timezone_string = get_option('timezone_string');
+        if (empty($wp_timezone_string)) {
+            $wp_timezone_string = 'UTC';
+        }
+        $wp_timezone = new DateTimeZone($wp_timezone_string);
+
+        $filtered_times = array();
+
+        foreach ($times as $time_entry) {
+            $shift_id = (int) ($time_entry->shift_id ?? 0);
+            $shift    = $shift_id && isset($shift_map[$shift_id]) ? $shift_map[$shift_id] : null;
+
+            $site_id = 0;
+            if ($shift && isset($shift->site_id)) {
+                $site_id = (int) $shift->site_id;
+            } elseif (isset($time_entry->location_id)) {
+                $site_id = (int) $time_entry->location_id;
+            }
+
+            if ($site_id !== $location_id) {
+                continue;
+            }
+
+            $site_obj = $site_map[$site_id] ?? null;
+            $location_name = ($site_obj && isset($site_obj->name)) ? (string) $site_obj->name : '';
+
+            $time_entry->location_id   = $site_id;
+            $time_entry->location_name = $location_name;
+
+            if (method_exists($this, 'calculate_timesheet_duration_in_hours')) {
+                $time_entry->calculated_duration = $this->calculate_timesheet_duration_in_hours($time_entry);
+            }
+
+            if (method_exists($this, 'calculate_shift_duration_in_hours') && $shift) {
+                $time_entry->scheduled_duration = $this->calculate_shift_duration_in_hours($shift);
+            } else {
+                $time_entry->scheduled_duration = $time_entry->scheduled_duration ?? 0.0;
+            }
+
+            $filtered_times[] = $time_entry;
+        }
+
+        if (empty($filtered_times)) {
+            return new WP_Error('wiwts_no_times', 'No timesheet entries found for this location.');
+        }
+
+        $this->sync_timesheets_to_local_db($filtered_times, $user_map, $wp_timezone, $shift_map);
+
+        return true;
     }
 
     private function fetch_shifts_data($filters = array())
