@@ -4175,9 +4175,15 @@ $out .= '<style>
     font-size: 11px;
   }
 
+    /* CLIENT PRINT ONLY: hide site footer elements */
+  #meta-footer,
+  .site-footer {
+    display: none !important;
+  }
+
   #wiwts-client-records-view.wiwts-view-client table th,
   #wiwts-client-records-view.wiwts-view-client table td {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   /* Show Actions column/buttons in client print output */
