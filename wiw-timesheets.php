@@ -6518,10 +6518,10 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
         ? $week_start_dt->modify('-7 days')
         : $week_start_dt;
 
-    $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
+    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
 
     // Fetch the exact rows that would be auto-approved (read-only listing).
-    $rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_week_start_ymd, 200);
+    $rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_cutoff_ymd, 200);
 
     // Pre-fetch flags for these rows (grouped by wiw_time_id) so we can render a row under each entry.
     $flags_map = $this->wiwts_get_flags_by_wiw_time_id_for_dry_run($rows);
@@ -6981,7 +6981,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
         ? $week_start_dt->modify('-7 days')
         : $week_start_dt;
 
-    $approval_week_start_ymd = $approval_week_start_dt->format('Y-m-d');
+    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
 
     $table_entries   = $wpdb->prefix . 'wiw_timesheet_entries';
     $table_timesheet = $wpdb->prefix . 'wiw_timesheets';
@@ -7002,7 +7002,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
                AND e.date < %s
                AND (t.status IS NULL OR LOWER(t.status) NOT IN ('approved', 'finalized'))
              ORDER BY e.date ASC, e.id ASC",
-            $approval_week_start_ymd
+            $approval_cutoff_ymd
         )
     );
 
