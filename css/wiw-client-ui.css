@@ -292,6 +292,22 @@ background-color: #c2fce4;
   padding: 5px 20px 7px;
 }
 
+.wiwts-modal__actions #wiwts-approve-modal-confirm{
+  background: #2271b1;
+  border-color: #2271b1;
+  color: #fff;
+}
+
+.wiwts-modal__actions #wiwts-approve-modal-confirm:hover{
+  background: #135e96;
+  border-color: #135e96;
+  color: #fff;
+}
+
+.wiwts-modal__actions #wiwts-approve-modal-cancel:hover{
+  background: #d7d6d6;
+}
+
 #wiwts-approve-modal-title{
 font-size: 1.27rem;
 }

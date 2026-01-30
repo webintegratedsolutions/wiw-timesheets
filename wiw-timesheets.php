@@ -1907,7 +1907,7 @@ $out .= '</tr>';
         $out .= '<ul id="wiwts-approve-modal-flags" class="wiwts-modal__flags-list"></ul>';
         $out .= '<div class="wiwts-modal__actions">';
         $out .= '<button type="button" class="wiw-btn secondary" id="wiwts-approve-modal-cancel">Cancel</button>';
-        $out .= '<button type="button" class="wiw-btn primary" id="wiwts-approve-modal-confirm">Approve</button>';
+        $out .= '<button type="button" class="wiw-btn primary" id="wiwts-approve-modal-confirm">Confirm</button>';
         $out .= '</div>';
         $out .= '</div>';
         $out .= '</div>';
@@ -2453,7 +2453,7 @@ function timeTo12h(v){
     <ul id="wiwts-approve-modal-flags" class="wiwts-modal__flags-list"></ul>
     <div class="wiwts-modal__actions">
       <button type="button" class="wiw-btn secondary" id="wiwts-approve-modal-cancel">Cancel</button>
-      <button type="button" class="wiw-btn primary" id="wiwts-approve-modal-confirm">Approve</button>
+      <button type="button" class="wiw-btn primary" id="wiwts-approve-modal-confirm">Confirm</button>
     </div>
   </div>
 </div>
@@ -3312,7 +3312,7 @@ function timeTo12h(v){
     approveBtn.type = "button";
     approveBtn.className = "wiw-btn primary";
     approveBtn.id = "wiwts-approve-modal-confirm";
-    approveBtn.textContent = "Approve";
+    approveBtn.textContent = "Confirm";
 
     actions.appendChild(cancelBtn);
     actions.appendChild(approveBtn);
