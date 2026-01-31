@@ -199,6 +199,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
         $table_timesheet_entries = $wpdb->prefix . 'wiw_timesheet_entries';
 
         $grouped = [];
+        $invalid_time_ids = [];
 
         /**
          * Normalize API break into MINUTES.
@@ -409,6 +410,13 @@ $grouped[ $key ] = [
             // ---------------- LOCAL-ONLY BREAK RULE ----------------
             $shift_id = (int) ( $time_entry->shift_id ?? 0 );
             $shift    = ( $shift_id && isset( $shift_map[ $shift_id ] ) ) ? $shift_map[ $shift_id ] : null;
+
+            if ( ! $shift || empty( $shift->site_id ) || empty( $shift->start_time ) || empty( $shift->end_time ) ) {
+                if ( ! empty( $time_entry->id ) ) {
+                    $invalid_time_ids[] = (int) $time_entry->id;
+                }
+                continue;
+            }
 
             $scheduled_hours = (float) ( $time_entry->scheduled_duration ?? 0.0 );
             if ( $scheduled_hours <= 0 && $shift ) {
@@ -944,6 +952,10 @@ $week_start_date
             unset( $has_local_edits );
         }
 
+        $this->wiwts_purge_invalid_entries( $invalid_time_ids );
+    }
+
+    private function wiwts_purge_invalid_entries( array $invalid_time_ids = [] ) {
         $this->wiwts_purge_invalid_entries();
     }
 
@@ -955,6 +967,28 @@ $week_start_date
         $table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
         $table_headers = $wpdb->prefix . 'wiw_timesheets';
 
+        $invalid_time_ids = array_values( array_filter( array_unique( array_map( 'absint', $invalid_time_ids ) ) ) );
+
+        $where_clauses = [
+            'location_id = 0',
+            "scheduled_start IS NULL",
+            "scheduled_end IS NULL",
+            "scheduled_start = ''",
+            "scheduled_end = ''",
+        ];
+
+        if ( ! empty( $invalid_time_ids ) ) {
+            $placeholders = implode( ',', array_fill( 0, count( $invalid_time_ids ), '%d' ) );
+            $where_clauses[] = "wiw_time_id IN ({$placeholders})";
+        }
+
+        $query = "SELECT id, wiw_time_id, timesheet_id
+            FROM {$table_entries}
+            WHERE " . implode( ' OR ', $where_clauses );
+
+        $rows = ! empty( $invalid_time_ids )
+            ? $wpdb->get_results( $wpdb->prepare( $query, $invalid_time_ids ) )
+            : $wpdb->get_results( $query );
         $rows = $wpdb->get_results(
             "SELECT id, wiw_time_id, timesheet_id
              FROM {$table_entries}
