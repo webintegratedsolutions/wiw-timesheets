@@ -943,5 +943,104 @@ $week_start_date
 
             unset( $has_local_edits );
         }
+
+        $this->wiwts_purge_invalid_entries();
+    }
+
+    private function wiwts_purge_invalid_entries() {
+        global $wpdb;
+
+        $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
+        $table_logs    = $wpdb->prefix . 'wiw_timesheet_edit_logs';
+        $table_flags   = $wpdb->prefix . 'wiw_timesheet_flags';
+        $table_headers = $wpdb->prefix . 'wiw_timesheets';
+
+        $rows = $wpdb->get_results(
+            "SELECT id, wiw_time_id, timesheet_id
+             FROM {$table_entries}
+             WHERE location_id = 0
+                OR scheduled_start IS NULL
+                OR scheduled_end IS NULL
+                OR scheduled_start = ''
+                OR scheduled_end = ''"
+        );
+
+        if ( empty( $rows ) ) {
+            return;
+        }
+
+        $entry_ids     = [];
+        $wiw_time_ids  = [];
+        $timesheet_ids = [];
+
+        foreach ( $rows as $row ) {
+            if ( isset( $row->id ) ) {
+                $entry_ids[] = (int) $row->id;
+            }
+            if ( isset( $row->wiw_time_id ) ) {
+                $wiw_time_ids[] = (int) $row->wiw_time_id;
+            }
+            if ( isset( $row->timesheet_id ) ) {
+                $timesheet_ids[] = (int) $row->timesheet_id;
+            }
+        }
+
+        $entry_ids     = array_values( array_filter( array_unique( $entry_ids ) ) );
+        $wiw_time_ids  = array_values( array_filter( array_unique( $wiw_time_ids ) ) );
+        $timesheet_ids = array_values( array_filter( array_unique( $timesheet_ids ) ) );
+
+        if ( ! empty( $entry_ids ) ) {
+            $placeholders = implode( ',', array_fill( 0, count( $entry_ids ), '%d' ) );
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$table_logs}
+                     WHERE entry_id IN ({$placeholders})",
+                    $entry_ids
+                )
+            );
+        }
+
+        if ( ! empty( $wiw_time_ids ) ) {
+            $placeholders = implode( ',', array_fill( 0, count( $wiw_time_ids ), '%d' ) );
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$table_logs}
+                     WHERE wiw_time_id IN ({$placeholders})",
+                    $wiw_time_ids
+                )
+            );
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$table_flags}
+                     WHERE wiw_time_id IN ({$placeholders})",
+                    $wiw_time_ids
+                )
+            );
+        }
+
+        if ( ! empty( $entry_ids ) ) {
+            $placeholders = implode( ',', array_fill( 0, count( $entry_ids ), '%d' ) );
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$table_entries}
+                     WHERE id IN ({$placeholders})",
+                    $entry_ids
+                )
+            );
+        }
+
+        if ( ! empty( $timesheet_ids ) ) {
+            $placeholders = implode( ',', array_fill( 0, count( $timesheet_ids ), '%d' ) );
+            $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM {$table_headers}
+                     WHERE id IN ({$placeholders})
+                     AND id NOT IN (
+                        SELECT DISTINCT timesheet_id FROM {$table_entries}
+                     )",
+                    $timesheet_ids
+                )
+            );
+        }
     }
 }
