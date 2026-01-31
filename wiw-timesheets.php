@@ -7805,6 +7805,12 @@ public function wiw_format_edit_log_value_for_display(string $value): string
         global $wpdb;
 
         $table_name = $wpdb->prefix . 'wiw_timesheet_sync_logs';
+        $table_exists = $wpdb->get_var(
+            $wpdb->prepare('SHOW TABLES LIKE %s', $table_name)
+        );
+        if ($table_exists !== $table_name && function_exists('wiw_timesheet_manager_install')) {
+            wiw_timesheet_manager_install();
+        }
         $user_id    = get_current_user_id();
         $user       = $user_id ? get_user_by('id', $user_id) : null;
 
