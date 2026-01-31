@@ -211,7 +211,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                 if ( $break_minutes > 0 ) {
                     return $break_minutes;
                 }
-                return (int) $time_entry->break;
+                return null;
             }
 
             if ( property_exists( $time_entry, 'break_hours' ) && is_numeric( $time_entry->break_hours ) ) {
@@ -219,7 +219,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                 if ( $break_hours > 0 ) {
                     return (int) round( $break_hours * 60 );
                 }
-                return (int) round( (float) $time_entry->break_hours * 60 );
+                return null;
             }
 
             return null;
@@ -531,6 +531,9 @@ $week_start_date
                 }
                 $api_time_ids[] = $wiw_time_id;
 
+                $shift_id = (int) ( $time_entry->shift_id ?? 0 );
+                $shift    = ( $shift_id && isset( $shift_map[ $shift_id ] ) ) ? $shift_map[ $shift_id ] : null;
+
                 $entry_id = $wpdb->get_var(
                     $wpdb->prepare(
                         "SELECT id FROM {$table_timesheet_entries} WHERE wiw_time_id = %d",
@@ -598,6 +601,28 @@ $week_start_date
                     ? (int) $time_entry->_wiw_local_break_minutes
                     : 0;
 
+                $api_break_provided = ! empty( $time_entry->_wiw_api_break_provided );
+                if ( ! empty( $scheduled_start_local ) && ! empty( $scheduled_end_local ) ) {
+                    try {
+                        $dt_sched_start = new DateTimeImmutable( (string) $scheduled_start_local, $wp_timezone );
+                        $dt_sched_end   = new DateTimeImmutable( (string) $scheduled_end_local, $wp_timezone );
+
+                        if ( $dt_sched_end > $dt_sched_start ) {
+                            $diff = $dt_sched_start->diff( $dt_sched_end );
+                            $span_seconds =
+                                ( (int) $diff->days * 86400 )
+                                + ( (int) $diff->h * 3600 )
+                                + ( (int) $diff->i * 60 )
+                                + ( (int) $diff->s );
+                            $scheduled_span_hours = (float) ( $span_seconds / 3600 );
+                            if ( $scheduled_span_hours > 5.0 ) {
+                                $break_minutes_local = max( 60, $break_minutes_local );
+                            }
+                        }
+                    } catch ( Exception $e ) {
+                    }
+                }
+
                 $clocked_hours_local = isset( $time_entry->_wiw_local_clocked_hours )
                     ? (float) $time_entry->_wiw_local_clocked_hours
                     : round( (float) ( $time_entry->calculated_duration ?? 0.0 ), 2 );
@@ -641,7 +666,7 @@ $week_start_date
                 // Prefer scheduled span derived from scheduled_start/scheduled_end timestamps.
                 if ( ! empty( $scheduled_start_local ) && ! empty( $scheduled_end_local ) ) {
                     try {
-                        $tz_sched = isset( $tz ) ? $tz : ( function_exists( 'wp_timezone' ) ? wp_timezone() : new DateTimeZone( 'America/Toronto' ) );
+                        $tz_sched = $wp_timezone;
 
                         $dt_sched_start = new DateTimeImmutable( (string) $scheduled_start_local, $tz_sched );
                         $dt_sched_end   = new DateTimeImmutable( (string) $scheduled_end_local, $tz_sched );
@@ -676,9 +701,8 @@ $week_start_date
                     $scheduled_hours_local_for_entry = max( 0.0, $scheduled_hours_local_for_entry - 1.0 );
                 }
 
-                $api_break_provided = ! empty( $time_entry->_wiw_api_break_provided );
-                if ( ! $api_break_provided && $break_minutes_local === 0 && $scheduled_hours_local_for_entry > 5.0 ) {
-                    $break_minutes_local = 60;
+                if ( $scheduled_hours_local_for_entry > 5.0 ) {
+                    $break_minutes_local = max( 60, $break_minutes_local );
                 }
 
                 $entry_data = [
