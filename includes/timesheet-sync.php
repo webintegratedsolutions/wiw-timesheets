@@ -206,15 +206,21 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
          * - Otherwise if "break_hours" exists (hours float), convert to minutes.
          */
         $get_break_minutes_from_api = function( $time_entry ) {
-            if ( isset( $time_entry->break ) && $time_entry->break !== null && $time_entry->break !== '' ) {
-                return (int) $time_entry->break;
+            if ( property_exists( $time_entry, 'break' ) && $time_entry->break !== null && $time_entry->break !== '' ) {
+                $break_minutes = (int) $time_entry->break;
+                if ( $break_minutes > 0 ) {
+                    return $break_minutes;
+                }
             }
 
-            if ( isset( $time_entry->break_hours ) && is_numeric( $time_entry->break_hours ) ) {
-                return (int) round( (float) $time_entry->break_hours * 60 );
+            if ( property_exists( $time_entry, 'break_hours' ) && is_numeric( $time_entry->break_hours ) ) {
+                $break_hours = (float) $time_entry->break_hours;
+                if ( $break_hours > 0 ) {
+                    return (int) round( $break_hours * 60 );
+                }
             }
 
-            return 0;
+            return null;
         };
 
         /**
@@ -399,15 +405,44 @@ $grouped[ $key ] = [
             }
 
             // ---------------- LOCAL-ONLY BREAK RULE ----------------
+            $shift_id = (int) ( $time_entry->shift_id ?? 0 );
+            $shift    = ( $shift_id && isset( $shift_map[ $shift_id ] ) ) ? $shift_map[ $shift_id ] : null;
+
             $scheduled_hours = (float) ( $time_entry->scheduled_duration ?? 0.0 );
+            if ( $scheduled_hours <= 0 && $shift ) {
+                $shift_start_raw = (string) ( $shift->start_time ?? '' );
+                $shift_end_raw   = (string) ( $shift->end_time ?? '' );
+
+                if ( $shift_start_raw !== '' && $shift_end_raw !== '' ) {
+                    try {
+                        $dt_shift_start = new DateTime( $shift_start_raw );
+                        $dt_shift_end   = new DateTime( $shift_end_raw );
+
+                        $dt_shift_start->setTimezone( $wp_timezone );
+                        $dt_shift_end->setTimezone( $wp_timezone );
+
+                        if ( $dt_shift_end > $dt_shift_start ) {
+                            $interval = $dt_shift_start->diff( $dt_shift_end );
+                            $seconds  = ( $interval->days * 86400 ) + ( $interval->h * 3600 ) + ( $interval->i * 60 ) + $interval->s;
+                            $scheduled_hours = (float) ( $seconds / 3600 );
+                        }
+                    } catch ( Exception $e ) {
+                        $scheduled_hours = 0.0;
+                    }
+                }
+            }
+
             if ( $scheduled_hours <= 0 ) {
                 $scheduled_hours = (float) ( $time_entry->calculated_duration ?? 0.0 );
             }
 
             $break_api_minutes = $get_break_minutes_from_api( $time_entry );
+            $api_break_provided = $break_api_minutes !== null;
 
-            // If Sched. Hrs are 5.0 or more, break is EXACTLY 60.
-            $break_enforced = ( $scheduled_hours > 5.0 ) ? 60 : (int) $break_api_minutes;
+            // Only enforce a default break when the API provides no break data.
+            $break_enforced = $api_break_provided
+                ? (int) $break_api_minutes
+                : ( ( $scheduled_hours > 5.0 ) ? 60 : 0 );
 
             $fallback_clocked = (float) ( $time_entry->calculated_duration ?? 0.0 );
             $adjusted_clocked = $compute_local_clocked_hours(
@@ -421,6 +456,7 @@ $grouped[ $key ] = [
             $grouped[ $key ]['total_scheduled_hours'] += (float) ( $time_entry->scheduled_duration ?? 0.0 );
 
             $time_entry->_wiw_local_break_minutes = $break_enforced;
+            $time_entry->_wiw_api_break_provided  = $api_break_provided;
             $time_entry->_wiw_local_clocked_hours = $adjusted_clocked;
             // -------------------------------------------------------
 
@@ -484,12 +520,14 @@ $week_start_date
             }
 
             $has_local_edits = false;
+            $api_time_ids    = [];
 
             foreach ( $bundle['records'] as $time_entry ) {
                 $wiw_time_id = (int) ( $time_entry->id ?? 0 );
                 if ( ! $wiw_time_id ) {
                     continue;
                 }
+                $api_time_ids[] = $wiw_time_id;
 
                 $entry_id = $wpdb->get_var(
                     $wpdb->prepare(
@@ -525,9 +563,6 @@ $week_start_date
                 // ✅ Scheduled start/end from SHIFT
                 $scheduled_start_local = null;
                 $scheduled_end_local   = null;
-
-                $shift_id = (int) ( $time_entry->shift_id ?? 0 );
-                $shift    = ( $shift_id && isset( $shift_map[ $shift_id ] ) ) ? $shift_map[ $shift_id ] : null;
 
                 if ( $shift ) {
                     $shift_start_raw = (string) ( $shift->start_time ?? '' );
@@ -697,11 +732,34 @@ $week_start_date
                     if ( ( $has_local_edit || $is_approved ) && $existing_entry ) {
                         $has_local_edits = true;
 
+                        $api_break_provided = ! empty( $time_entry->_wiw_api_break_provided );
+
                         $entry_data['clock_in']         = $existing_entry->clock_in;
                         $entry_data['clock_out']        = $existing_entry->clock_out;
-                        $entry_data['break_minutes']    = (int) $existing_entry->break_minutes;
-                        $entry_data['clocked_hours']    = (float) $existing_entry->clocked_hours;
-                        $entry_data['payable_hours']    = (float) $existing_entry->payable_hours;
+                        $break_minutes_override = $api_break_provided
+                            ? (int) $break_minutes_local
+                            : max( (int) $break_minutes_local, (int) $existing_entry->break_minutes );
+
+                        $entry_data['break_minutes'] = $break_minutes_override;
+
+                        $clocked_hours_local = $compute_local_clocked_hours(
+                            (string) ( $existing_entry->clock_in ?? '' ),
+                            (string) ( $existing_entry->clock_out ?? '' ),
+                            (int) $entry_data['break_minutes'],
+                            (float) $existing_entry->clocked_hours
+                        );
+
+                        $payable_hours_local = $compute_local_payable_hours(
+                            (string) ( $existing_entry->clock_in ?? '' ),
+                            (string) ( $existing_entry->clock_out ?? '' ),
+                            (string) ( $scheduled_start_local ?? '' ),
+                            (string) ( $scheduled_end_local ?? '' ),
+                            (int) $entry_data['break_minutes'],
+                            $clocked_hours_local
+                        );
+
+                        $entry_data['clocked_hours'] = $clocked_hours_local;
+                        $entry_data['payable_hours'] = $payable_hours_local;
                         $entry_data['additional_hours'] = (float) $existing_entry->additional_hours;
                         $entry_data['status']           = $existing_entry->status;
 
@@ -739,32 +797,56 @@ $week_start_date
 
             }
 
-            if ( $has_local_edits ) {
-                $totals = $wpdb->get_row(
+            if ( ! empty( $api_time_ids ) ) {
+                $placeholders = implode( ',', array_fill( 0, count( $api_time_ids ), '%d' ) );
+                $wpdb->query(
                     $wpdb->prepare(
-                        "SELECT
-                            COALESCE(SUM(clocked_hours), 0) AS total_clocked,
-                            COALESCE(SUM(scheduled_hours), 0) AS total_scheduled
-                         FROM {$table_timesheet_entries}
-                         WHERE timesheet_id = %d",
-                        $header_id
+                        "DELETE FROM {$table_timesheet_entries}
+                         WHERE timesheet_id = %d
+                         AND wiw_time_id NOT IN ({$placeholders})",
+                        array_merge( [ $header_id ], $api_time_ids )
                     )
                 );
-
-                if ( $totals ) {
-                    $wpdb->update(
-                        $table_timesheets,
-                        array(
-                            'total_clocked_hours'   => (float) round( (float) $totals->total_clocked, 2 ),
-                            'total_scheduled_hours' => (float) round( (float) $totals->total_scheduled, 2 ),
-                            'updated_at'            => $now,
-                        ),
-                        array( 'id' => $header_id ),
-                        array( '%f', '%f', '%s' ),
-                        array( '%d' )
-                    );
-                }
             }
+
+            $remaining_entries = (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$table_timesheet_entries} WHERE timesheet_id = %d",
+                    $header_id
+                )
+            );
+
+            if ( $remaining_entries === 0 ) {
+                $wpdb->delete( $table_timesheets, [ 'id' => $header_id ], [ '%d' ] );
+                continue;
+            }
+
+            $totals = $wpdb->get_row(
+                $wpdb->prepare(
+                    "SELECT
+                        COALESCE(SUM(clocked_hours), 0) AS total_clocked,
+                        COALESCE(SUM(scheduled_hours), 0) AS total_scheduled
+                     FROM {$table_timesheet_entries}
+                     WHERE timesheet_id = %d",
+                    $header_id
+                )
+            );
+
+            if ( $totals ) {
+                $wpdb->update(
+                    $table_timesheets,
+                    array(
+                        'total_clocked_hours'   => (float) round( (float) $totals->total_clocked, 2 ),
+                        'total_scheduled_hours' => (float) round( (float) $totals->total_scheduled, 2 ),
+                        'updated_at'            => $now,
+                    ),
+                    array( 'id' => $header_id ),
+                    array( '%f', '%f', '%s' ),
+                    array( '%d' )
+                );
+            }
+
+            unset( $has_local_edits );
         }
     }
 }
