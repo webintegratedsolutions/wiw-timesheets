@@ -10,13 +10,20 @@
   }
   const allowedPaths = Array.isArray(config.paths) ? config.paths : [];
 
-  if (!allowedPaths.includes(path)) {
+  if (allowedPaths.length > 0 && !allowedPaths.includes(path)) {
     return;
   }
 
-  const modal = document.getElementById('wiwts-sync-modal');
+  let modal = document.getElementById('wiwts-sync-modal');
   if (!modal) {
-    return;
+    modal = document.createElement('div');
+    modal.id = 'wiwts-sync-modal';
+    modal.className = 'wiwts-sync-modal';
+    modal.setAttribute('aria-hidden', 'true');
+    modal.setAttribute('role', 'status');
+    modal.setAttribute('aria-live', 'polite');
+    modal.innerHTML = '<div class="wiwts-sync-modal__content">Syncing timesheet records...</div>';
+    document.body.appendChild(modal);
   }
 
   const payload = new URLSearchParams({
