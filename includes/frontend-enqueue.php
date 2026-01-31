@@ -11,6 +11,10 @@ function wiwts_enqueue_client_ui_assets() {
 		return;
 	}
 
+	if ( ! is_user_logged_in() ) {
+		return;
+	}
+
 	// Only enqueue on singular content where shortcode is likely to exist.
 	if ( ! is_singular() ) {
 		return;
@@ -21,13 +25,13 @@ function wiwts_enqueue_client_ui_assets() {
 		return;
 	}
 
-if (
-    ! has_shortcode( $post->post_content, 'wiw_timesheets_client' )
-    && ! has_shortcode( $post->post_content, 'wiw_timesheets_client_filter' )
-    && ! has_shortcode( $post->post_content, 'wiw_timesheets_client_records' )
-) {
-    return;
-}
+	if (
+		! has_shortcode( $post->post_content, 'wiw_timesheets_client' )
+		&& ! has_shortcode( $post->post_content, 'wiw_timesheets_client_filter' )
+		&& ! has_shortcode( $post->post_content, 'wiw_timesheets_client_records' )
+	) {
+		return;
+	}
 
 	// CSS
 	$css_rel  = 'css/wiw-client-ui.css';
@@ -56,13 +60,21 @@ if (
 		true
 	);
 
+	$current_user_id = get_current_user_id();
+	$client_id_raw   = get_user_meta( $current_user_id, 'client_account_number', true );
+	$client_id       = is_scalar( $client_id_raw ) ? absint( $client_id_raw ) : 0;
+
+	$rate_limit = (int) apply_filters( 'wiwts_frontend_sync_rate_limit_seconds', 900, $client_id, $current_user_id );
+	$rate_limit = max( 30, $rate_limit );
+
 	wp_localize_script(
 		'wiwts-client-sync',
 		'wiwtsClientSync',
 		array(
-			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-			'nonce'   => wp_create_nonce( 'wiwts_frontend_sync' ),
-			'paths'   => array(
+			'ajaxUrl'           => admin_url( 'admin-ajax.php' ),
+			'nonce'             => wp_create_nonce( 'wiwts_frontend_sync' ),
+			'rateLimitSeconds'  => $rate_limit,
+			'paths'             => array(
 				trailingslashit(
 					wp_parse_url( $_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH ) ?: '/'
 				),
