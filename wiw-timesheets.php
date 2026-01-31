@@ -1499,12 +1499,12 @@ if (! empty($is_admin_front)) {
     $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1">Reset</button>';
 
     // Keep the approval note visible under Reset
-    $actions_html .= '<span class="wiw-approved-note" style="display:block;margin-top:6px;font-size:12px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
+    $actions_html .= '<span class="wiw-approved-note" style="display:block;margin-top:6px;font-size:11px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
 
 } else {
 
     // Default behavior (client view): approved rows show note only
-    $actions_html .= '<span class="wiw-approved-note" style="font-size:12px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
+    $actions_html .= '<span class="wiw-approved-note" style="font-size:11px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
 }
 // === WIWTS STEP 30C END ===
 
@@ -1542,14 +1542,24 @@ if (! empty($is_admin_front)) {
 
                 $out .= '</tbody></table>';
 
-                if (! empty($wiwts_debug_approval_enabled)) {
-                    $out .= '<div class="notice notice-warning" style="margin:12px 0;">'
-                        . '<p style="margin:8px 0;"><strong>WIWTS Debug:</strong> approve flags JSON snapshot (records view)</p>'
-                        . '<pre style="white-space:pre-wrap;margin:8px 0;">'
-                        . esc_html(wp_json_encode($wiwts_debug_flags_rows, JSON_PRETTY_PRINT))
-                        . '</pre>'
-                        . '</div>';
-                }
+// === WIWTS PRINT HIDE BEGIN: Debug approval snapshot ===
+static $wiwts_print_hide_debug_css_done = false;
+if (! $wiwts_print_hide_debug_css_done) {
+    // Ensure debug blocks are hidden in print even if the print view does not load enqueued CSS.
+    $out .= '<style media="print">'
+        . '.wiwts-debug-approval-snapshot{display:none !important;}'
+        . '</style>';
+    $wiwts_print_hide_debug_css_done = true;
+}
+
+$out .= '<div class="notice notice-warning wiwts-debug-approval-snapshot" style="margin:0 0 12px;">'
+    . '<p style="margin:8px 0;"><strong>WIWTS Debug:</strong> approval note data snapshot</p>'
+    . '<pre style="white-space:pre-wrap;margin:8px 0;">'
+    . esc_html(wp_json_encode($wiwts_debug_approval_summary, JSON_PRETTY_PRINT))
+    . '</pre>'
+    . '</div>';
+// === WIWTS PRINT HIDE END: Debug approval snapshot ===
+
 
                 // Expandable edit logs (per-timesheet, shown under each daily table when that timesheet is open).
                 if (isset($timesheet_id_for_period) && $timesheet_id_for_period !== '') {
@@ -4358,7 +4368,7 @@ $out .= '<style>
   #wiwts-client-records-view tbody { display: table-row-group !important; }
   #wiwts-client-records-view tr { display: table-row !important; page-break-inside: avoid; }
   #wiwts-client-records-view th,
-  #wiwts-client-records-view td { display: table-cell !important; }
+  #wiwts-client-records-view td { display: table-cell !important; font-size:14px;}
 
   /* Expand flags for print */
   #wiwts-client-records-view .wiw-print-target details.wiw-flags > summary { display: none !important; }
@@ -5059,7 +5069,7 @@ if ($is_approved) {
         }
     }
 
-    $actions_html .= '<span class="wiw-approved-note" style="font-size:12px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
+    $actions_html .= '<span class="wiw-approved-note" style="font-size:11px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
 
 } else {
 
@@ -5113,12 +5123,24 @@ if ($is_approved) {
                     $out .= '<p class="description" style="margin:0;">No edit logs found for this timesheet.</p>';
                 } else {
                     if (! empty($wiwts_debug_approval_enabled)) {
-                        $out .= '<div class="notice notice-warning" style="margin:0 0 12px;">'
-                            . '<p style="margin:8px 0;"><strong>WIWTS Debug:</strong> approval note data snapshot</p>'
-                            . '<pre style="white-space:pre-wrap;margin:8px 0;">'
-                            . esc_html(wp_json_encode($wiwts_debug_approval_summary, JSON_PRETTY_PRINT))
-                            . '</pre>'
-                            . '</div>';
+// === WIWTS PRINT HIDE BEGIN: Debug approval snapshot ===
+static $wiwts_print_hide_debug_css_done = false;
+if (! $wiwts_print_hide_debug_css_done) {
+    // Ensure debug blocks are hidden in print even if the print view does not load enqueued CSS.
+    $out .= '<style media="print">'
+        . '.wiwts-debug-approval-snapshot{display:none !important;}'
+        . '</style>';
+    $wiwts_print_hide_debug_css_done = true;
+}
+
+$out .= '<div class="notice notice-warning wiwts-debug-approval-snapshot" style="margin:0 0 12px;">'
+    . '<p style="margin:8px 0;"><strong>WIWTS Debug:</strong> approval note data snapshot</p>'
+    . '<pre style="white-space:pre-wrap;margin:8px 0;">'
+    . esc_html(wp_json_encode($wiwts_debug_approval_summary, JSON_PRETTY_PRINT))
+    . '</pre>'
+    . '</div>';
+// === WIWTS PRINT HIDE END: Debug approval snapshot ===
+
                     }
 
                     $out .= '<table class="wp-list-table widefat fixed striped wiw-edit-logs-table">';
