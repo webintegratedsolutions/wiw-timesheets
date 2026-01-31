@@ -1066,3 +1066,5 @@ $week_start_date
         }
     }
 }
+
+}
