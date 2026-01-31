@@ -956,6 +956,10 @@ $week_start_date
     }
 
     private function wiwts_purge_invalid_entries( array $invalid_time_ids = [] ) {
+        $this->wiwts_purge_invalid_entries();
+    }
+
+    private function wiwts_purge_invalid_entries() {
         global $wpdb;
 
         $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
@@ -985,6 +989,15 @@ $week_start_date
         $rows = ! empty( $invalid_time_ids )
             ? $wpdb->get_results( $wpdb->prepare( $query, $invalid_time_ids ) )
             : $wpdb->get_results( $query );
+        $rows = $wpdb->get_results(
+            "SELECT id, wiw_time_id, timesheet_id
+             FROM {$table_entries}
+             WHERE location_id = 0
+                OR scheduled_start IS NULL
+                OR scheduled_end IS NULL
+                OR scheduled_start = ''
+                OR scheduled_end = ''"
+        );
 
         if ( empty( $rows ) ) {
             return;
