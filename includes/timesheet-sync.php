@@ -674,6 +674,11 @@ $week_start_date
                     $scheduled_hours_local_for_entry = max( 0.0, $scheduled_hours_local_for_entry - 1.0 );
                 }
 
+                $api_break_provided = ! empty( $time_entry->_wiw_api_break_provided );
+                if ( ! $api_break_provided && $break_minutes_local === 0 && $scheduled_hours_local_for_entry > 5.0 ) {
+                    $break_minutes_local = 60;
+                }
+
                 $entry_data = [
                     'timesheet_id'    => $header_id,
                     'wiw_time_id'     => $wiw_time_id,
