@@ -446,13 +446,6 @@ $grouped[ $key ] = [
                 $scheduled_hours = (float) ( $time_entry->calculated_duration ?? 0.0 );
             }
 
-            if ( $scheduled_hours <= 0 ) {
-                if ( ! empty( $time_entry->id ) ) {
-                    $invalid_time_ids[] = (int) $time_entry->id;
-                }
-                continue;
-            }
-
             $break_api_minutes = $get_break_minutes_from_api( $time_entry );
             $api_break_provided = $break_api_minutes !== null;
 
@@ -963,10 +956,6 @@ $week_start_date
     }
 
     private function wiwts_purge_invalid_entries( array $invalid_time_ids = [] ) {
-        $this->wiwts_purge_invalid_entries();
-    }
-
-    private function wiwts_purge_invalid_entries() {
         global $wpdb;
 
         $table_entries = $wpdb->prefix . 'wiw_timesheet_entries';
@@ -978,7 +967,6 @@ $week_start_date
 
         $where_clauses = [
             'location_id = 0',
-            'scheduled_hours <= 0',
             "scheduled_start IS NULL",
             "scheduled_end IS NULL",
             "scheduled_start = ''",
@@ -997,16 +985,6 @@ $week_start_date
         $rows = ! empty( $invalid_time_ids )
             ? $wpdb->get_results( $wpdb->prepare( $query, $invalid_time_ids ) )
             : $wpdb->get_results( $query );
-        $rows = $wpdb->get_results(
-            "SELECT id, wiw_time_id, timesheet_id
-             FROM {$table_entries}
-             WHERE location_id = 0
-                OR scheduled_hours <= 0
-                OR scheduled_start IS NULL
-                OR scheduled_end IS NULL
-                OR scheduled_start = ''
-                OR scheduled_end = ''"
-        );
 
         if ( empty( $rows ) ) {
             return;
