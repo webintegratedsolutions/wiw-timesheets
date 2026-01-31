@@ -78,11 +78,14 @@ if ( empty( $employee_data ) ) : ?>
                 }
 
                 // Breaks
-                $break_hours_raw = $time_entry->break_hours ?? 0;
-                $break_minutes   = 0;
+                $break_minutes = 0;
 
-                if ( is_numeric( $break_hours_raw ) && $break_hours_raw > 0 ) {
-                    $break_minutes = round( $break_hours_raw * 60 );
+                if ( isset( $time_entry->_wiw_local_break_minutes ) ) {
+                    $break_minutes = (int) $time_entry->_wiw_local_break_minutes;
+                } elseif ( isset( $time_entry->break ) && is_numeric( $time_entry->break ) && (float) $time_entry->break > 0 ) {
+                    $break_minutes = (int) $time_entry->break;
+                } elseif ( isset( $time_entry->break_hours ) && is_numeric( $time_entry->break_hours ) && (float) $time_entry->break_hours > 0 ) {
+                    $break_minutes = (int) round( (float) $time_entry->break_hours * 60 );
                 }
 
                 $clocked_duration    = number_format( $time_entry->calculated_duration ?? 0.0, 2 );
