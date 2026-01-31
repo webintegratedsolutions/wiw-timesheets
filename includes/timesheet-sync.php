@@ -215,6 +215,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                 if ( $break_hours > 0 ) {
                     return (int) round( $break_hours * 60 );
                 }
+                return (int) round( (float) $time_entry->break_hours * 60 );
             }
 
             return null;
@@ -734,6 +735,32 @@ $week_start_date
 
                         $entry_data['clocked_hours'] = $clocked_hours_local;
                         $entry_data['payable_hours'] = $payable_hours_local;
+                        $entry_data['break_minutes']    = $api_break_provided
+                            ? (int) $break_minutes_local
+                            : (int) $existing_entry->break_minutes;
+
+                        $clocked_hours_local = $api_break_provided
+                            ? $compute_local_clocked_hours(
+                                (string) ( $existing_entry->clock_in ?? '' ),
+                                (string) ( $existing_entry->clock_out ?? '' ),
+                                (int) $entry_data['break_minutes'],
+                                (float) $existing_entry->clocked_hours
+                            )
+                            : (float) $existing_entry->clocked_hours;
+
+                        $payable_hours_local = $api_break_provided
+                            ? $compute_local_payable_hours(
+                                (string) ( $existing_entry->clock_in ?? '' ),
+                                (string) ( $existing_entry->clock_out ?? '' ),
+                                (string) ( $scheduled_start_local ?? '' ),
+                                (string) ( $scheduled_end_local ?? '' ),
+                                (int) $entry_data['break_minutes'],
+                                $clocked_hours_local
+                            )
+                            : (float) $existing_entry->payable_hours;
+
+                        $entry_data['clocked_hours']    = $clocked_hours_local;
+                        $entry_data['payable_hours']    = $payable_hours_local;
                         $entry_data['additional_hours'] = (float) $existing_entry->additional_hours;
                         $entry_data['status']           = $existing_entry->status;
 
