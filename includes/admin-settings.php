@@ -59,6 +59,15 @@ trait WIW_Timesheet_Admin_Settings_Trait {
 
         add_submenu_page(
             'wiw-timesheets',
+            'Sync Logs',
+            'Sync Logs',
+            'manage_options',
+            'wiw-timesheets-sync-logs',
+            array( $this, 'admin_sync_logs_page' )
+        );
+
+        add_submenu_page(
+            'wiw-timesheets',
             'WIW Settings',
             'Settings',
             'manage_options',
