@@ -7795,9 +7795,46 @@ public function wiw_format_edit_log_value_for_display(string $value): string
         }
 
         $this->sync_timesheets_to_local_db($filtered_times, $user_map, $wp_timezone, $shift_map);
+        $api_time_ids = array_values(array_filter(array_map(static function ($time_entry) {
+            return isset($time_entry->id) ? (int) $time_entry->id : 0;
+        }, $filtered_times)));
+        if (! empty($api_time_ids)) {
+            $this->delete_missing_timesheet_entries_for_location($location_id, $api_time_ids);
+        }
         $this->log_frontend_sync($location_id, $location_name, $filtered_times);
 
         return true;
+    }
+
+    private function delete_missing_timesheet_entries_for_location($location_id, array $api_time_ids)
+    {
+        global $wpdb;
+
+        $location_id = absint($location_id);
+        $api_time_ids = array_values(array_filter(array_map('absint', $api_time_ids)));
+        if (! $location_id || empty($api_time_ids)) {
+            return;
+        }
+
+        $table_entries   = $wpdb->prefix . 'wiw_timesheet_entries';
+        $table_timesheets = $wpdb->prefix . 'wiw_timesheets';
+        $placeholders = implode(',', array_fill(0, count($api_time_ids), '%d'));
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$table_entries}
+                 WHERE location_id = %d
+                 AND wiw_time_id NOT IN ({$placeholders})",
+                array_merge([$location_id], $api_time_ids)
+            )
+        );
+
+        $wpdb->query(
+            "DELETE FROM {$table_timesheets}
+             WHERE id NOT IN (
+                SELECT DISTINCT timesheet_id FROM {$table_entries}
+             )"
+        );
     }
 
     private function log_frontend_sync($client_id, $client_name, $times)
