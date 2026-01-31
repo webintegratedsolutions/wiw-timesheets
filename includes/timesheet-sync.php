@@ -7,7 +7,6 @@ if ( ! class_exists( 'WIW_Timesheet_Manager' ) ) {
     return;
 }
 
-if ( ! trait_exists( 'WIW_Timesheet_Sync_Trait' ) ) {
 trait WIW_Timesheet_Sync_Trait {
 
     // Store time flags for a given time entry.
@@ -1065,6 +1064,4 @@ $week_start_date
             );
         }
     }
-}
-
 }
