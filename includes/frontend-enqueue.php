@@ -62,7 +62,11 @@ if (
 		array(
 			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 			'nonce'   => wp_create_nonce( 'wiwts_frontend_sync' ),
-			'paths'   => array( '/timesheets/', '/timesheet-pay-periods/' ),
+			'paths'   => array(
+				trailingslashit(
+					wp_parse_url( $_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH ) ?: '/'
+				),
+			),
 		)
 	);
 }
