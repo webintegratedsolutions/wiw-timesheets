@@ -207,6 +207,10 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
          */
         $get_break_minutes_from_api = function( $time_entry ) {
             if ( property_exists( $time_entry, 'break' ) && $time_entry->break !== null && $time_entry->break !== '' ) {
+                $break_minutes = (int) $time_entry->break;
+                if ( $break_minutes > 0 ) {
+                    return $break_minutes;
+                }
                 return (int) $time_entry->break;
             }
 
@@ -832,6 +836,17 @@ $week_start_date
                     )
                 );
             }
+
+            $remaining_entries = (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$table_timesheet_entries} WHERE timesheet_id = %d",
+                    $header_id
+                )
+            );
+
+            if ( $remaining_entries === 0 ) {
+                $wpdb->delete( $table_timesheets, [ 'id' => $header_id ], [ '%d' ] );
+                continue;
 
             $remaining_entries = (int) $wpdb->get_var(
                 $wpdb->prepare(
