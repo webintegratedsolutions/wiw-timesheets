@@ -7746,6 +7746,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
         $user_map  = array_column($included_users, null, 'id');
         $shift_map = array_column($included_shifts, null, 'id');
         $site_map  = array_column($included_sites, null, 'id');
+        $location_name = isset($site_map[$location_id]->name) ? (string) $site_map[$location_id]->name : '';
 
         $wp_timezone_string = get_option('timezone_string');
         if (empty($wp_timezone_string)) {
@@ -7794,8 +7795,53 @@ public function wiw_format_edit_log_value_for_display(string $value): string
         }
 
         $this->sync_timesheets_to_local_db($filtered_times, $user_map, $wp_timezone, $shift_map);
+        $this->log_frontend_sync($location_id, $location_name, $filtered_times);
 
         return true;
+    }
+
+    private function log_frontend_sync($client_id, $client_name, $times)
+    {
+        global $wpdb;
+
+        $table_name = $wpdb->prefix . 'wiw_timesheet_sync_logs';
+        $table_exists = $wpdb->get_var(
+            $wpdb->prepare('SHOW TABLES LIKE %s', $table_name)
+        );
+        if ($table_exists !== $table_name && function_exists('wiw_timesheet_manager_install')) {
+            wiw_timesheet_manager_install();
+        }
+        $user_id    = get_current_user_id();
+        $user       = $user_id ? get_user_by('id', $user_id) : null;
+
+        $payload = wp_json_encode($times, JSON_PARTIAL_OUTPUT_ON_ERROR);
+        if ($payload === false) {
+            $payload = null;
+        }
+
+        $wpdb->insert(
+            $table_name,
+            array(
+                'client_id'              => absint($client_id),
+                'client_name'            => sanitize_text_field($client_name),
+                'synced_by_user_id'      => absint($user_id),
+                'synced_by_user_login'   => $user ? $user->user_login : '',
+                'synced_by_display_name' => $user ? $user->display_name : '',
+                'record_count'           => is_array($times) ? count($times) : 0,
+                'payload'                => $payload,
+                'created_at'             => current_time('mysql'),
+            ),
+            array(
+                '%d',
+                '%s',
+                '%d',
+                '%s',
+                '%s',
+                '%d',
+                '%s',
+                '%s',
+            )
+        );
     }
 
     private function fetch_shifts_data($filters = array())
@@ -8266,6 +8312,14 @@ public function wiw_format_edit_log_value_for_display(string $value): string
 
 
         require_once WIW_PLUGIN_PATH . 'admin/local-timesheets-page.php';
+    }
+
+    /**
+     * Renders the front-end sync logs page (Admin Area).
+     */
+    public function admin_sync_logs_page()
+    {
+        include WIW_PLUGIN_PATH . 'admin/sync-logs-page.php';
     }
 
     /**

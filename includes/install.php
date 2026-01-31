@@ -20,6 +20,7 @@ $table_timesheets    = $wpdb->prefix . 'wiw_timesheets';
 $table_entries       = $wpdb->prefix . 'wiw_timesheet_entries';
 $table_edit_logs     = $wpdb->prefix . 'wiw_timesheet_edit_logs';
 $table_flags         = $wpdb->prefix . 'wiw_timesheet_flags';
+$table_sync_logs     = $wpdb->prefix . 'wiw_timesheet_sync_logs';
 
 	// Timesheets (header)
 	$sql_timesheets = "CREATE TABLE {$table_timesheets} (
@@ -115,10 +116,27 @@ $table_flags         = $wpdb->prefix . 'wiw_timesheet_flags';
 		KEY idx_flag_type (flag_type)
 	) {$charset_collate};";
 
+	// Front-end sync logs
+	$sql_sync_logs = "CREATE TABLE {$table_sync_logs} (
+		id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+		client_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+		client_name VARCHAR(255) NOT NULL DEFAULT '',
+		synced_by_user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+		synced_by_user_login VARCHAR(60) NOT NULL DEFAULT '',
+		synced_by_display_name VARCHAR(255) NOT NULL DEFAULT '',
+		record_count INT(11) NOT NULL DEFAULT 0,
+		payload LONGTEXT NULL,
+		created_at DATETIME NOT NULL,
+		PRIMARY KEY  (id),
+		KEY client_id (client_id),
+		KEY created_at (created_at)
+	) {$charset_collate};";
+
 // Run dbDelta for all tables.
 dbDelta( $sql_timesheets );
 dbDelta( $sql_entries );
 dbDelta( $sql_logs );
 dbDelta( $sql_flags );
+dbDelta( $sql_sync_logs );
 
 }
