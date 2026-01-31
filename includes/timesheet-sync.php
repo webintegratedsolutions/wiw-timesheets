@@ -403,7 +403,33 @@ $grouped[ $key ] = [
             }
 
             // ---------------- LOCAL-ONLY BREAK RULE ----------------
+            $shift_id = (int) ( $time_entry->shift_id ?? 0 );
+            $shift    = ( $shift_id && isset( $shift_map[ $shift_id ] ) ) ? $shift_map[ $shift_id ] : null;
+
             $scheduled_hours = (float) ( $time_entry->scheduled_duration ?? 0.0 );
+            if ( $scheduled_hours <= 0 && $shift ) {
+                $shift_start_raw = (string) ( $shift->start_time ?? '' );
+                $shift_end_raw   = (string) ( $shift->end_time ?? '' );
+
+                if ( $shift_start_raw !== '' && $shift_end_raw !== '' ) {
+                    try {
+                        $dt_shift_start = new DateTime( $shift_start_raw );
+                        $dt_shift_end   = new DateTime( $shift_end_raw );
+
+                        $dt_shift_start->setTimezone( $wp_timezone );
+                        $dt_shift_end->setTimezone( $wp_timezone );
+
+                        if ( $dt_shift_end > $dt_shift_start ) {
+                            $interval = $dt_shift_start->diff( $dt_shift_end );
+                            $seconds  = ( $interval->days * 86400 ) + ( $interval->h * 3600 ) + ( $interval->i * 60 ) + $interval->s;
+                            $scheduled_hours = (float) ( $seconds / 3600 );
+                        }
+                    } catch ( Exception $e ) {
+                        $scheduled_hours = 0.0;
+                    }
+                }
+            }
+
             if ( $scheduled_hours <= 0 ) {
                 $scheduled_hours = (float) ( $time_entry->calculated_duration ?? 0.0 );
             }
@@ -535,9 +561,6 @@ $week_start_date
                 // ✅ Scheduled start/end from SHIFT
                 $scheduled_start_local = null;
                 $scheduled_end_local   = null;
-
-                $shift_id = (int) ( $time_entry->shift_id ?? 0 );
-                $shift    = ( $shift_id && isset( $shift_map[ $shift_id ] ) ) ? $shift_map[ $shift_id ] : null;
 
                 if ( $shift ) {
                     $shift_start_raw = (string) ( $shift->start_time ?? '' );
@@ -820,6 +843,33 @@ $week_start_date
             if ( $remaining_entries === 0 ) {
                 $wpdb->delete( $table_timesheets, [ 'id' => $header_id ], [ '%d' ] );
                 continue;
+            }
+
+            $totals = $wpdb->get_row(
+                $wpdb->prepare(
+                    "SELECT
+                        COALESCE(SUM(clocked_hours), 0) AS total_clocked,
+                        COALESCE(SUM(scheduled_hours), 0) AS total_scheduled
+                     FROM {$table_timesheet_entries}
+                     WHERE timesheet_id = %d",
+                    $header_id
+                )
+            );
+
+            if ( $totals ) {
+                $wpdb->update(
+                    $table_timesheets,
+                    array(
+                        'total_clocked_hours'   => (float) round( (float) $totals->total_clocked, 2 ),
+                        'total_scheduled_hours' => (float) round( (float) $totals->total_scheduled, 2 ),
+                        'updated_at'            => $now,
+                    ),
+                    array( 'id' => $header_id ),
+                    array( '%f', '%f', '%s' ),
+                    array( '%d' )
+                );
+            }
+
             }
 
             $totals = $wpdb->get_row(
