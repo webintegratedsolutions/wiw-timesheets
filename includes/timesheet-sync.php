@@ -215,6 +215,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                 if ( $break_hours > 0 ) {
                     return (int) round( $break_hours * 60 );
                 }
+                return (int) round( (float) $time_entry->break_hours * 60 );
             }
 
             return null;
