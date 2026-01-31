@@ -180,7 +180,6 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
         );
     }
 }
-}
 
     /**
      * Sync API times into local DB.
