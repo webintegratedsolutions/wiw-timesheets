@@ -1489,7 +1489,25 @@ if ($is_approved) {
         }
     }
 
+// === WIWTS STEP 30C BEGIN: Pay Period frontend admin can see Reset on approved rows (Option A) ===
+if (! empty($is_admin_front)) {
+
+    // Add hidden Save button so the existing Reset JS can read data-entry-id from .wiw-client-save-btn
+    $actions_html .= '<button type="button" class="wiw-btn wiw-client-save-btn" style="display:none;" data-entry-id="' . esc_attr(isset($dr->id) ? absint($dr->id) : 0) . '">Save</button>';
+
+    // Show Reset (preview-only) on approved rows for Pay Period FRONT-END ADMIN view only
+    $actions_html .= '<button type="button" class="wiw-btn secondary wiw-client-reset-btn" data-reset-preview-only="1">Reset</button>';
+
+    // Keep the approval note visible under Reset
+    $actions_html .= '<span class="wiw-approved-note" style="display:block;margin-top:6px;font-size:12px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
+
+} else {
+
+    // Default behavior (client view): approved rows show note only
     $actions_html .= '<span class="wiw-approved-note" style="font-size:12px;line-height:1.2;">' . esc_html($approval_note) . '</span>';
+}
+// === WIWTS STEP 30C END ===
+
 
 } else {
 
