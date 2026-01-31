@@ -4420,6 +4420,25 @@ $out .= '<style>
     font-size: 11px;
   }
 
+ /* === WIWTS PRINT TITLE SINGULAR BEGIN ===
+     Client PRINT only: replace the meta-page header title text.
+     HTML: <div id="meta-page"> ... <div class="meta-page-left"><h2>Timesheets</h2>
+  === */
+  #meta-page .meta-page-left h2 {
+    position: relative !important;
+    color: transparent !important; /* hides "Timesheets" text without collapsing layout */
+  }
+
+  #meta-page .meta-page-left h2::after {
+    content: "Timesheet";
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    color: #000 !important;
+  }
+  /* === WIWTS PRINT TITLE SINGULAR END === */
+
+
     /* CLIENT PRINT ONLY: hide site footer elements */
   #meta-footer,
   .site-footer {
