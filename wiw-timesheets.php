@@ -4382,6 +4382,12 @@ $out .= '<style>
   /* Hide Print button (keep Actions column visible for print) */
   #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
 
+    /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table thead th:nth-child(6),
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table tbody td:nth-child(6) {
+    display: none !important;
+  }
+
 /* Print: hide the top "Timesheets / location / approval deadline" block only */
 #wiwts-client-records-view > h3[style*="font-size:18px"] { 
   display: none !important; 
@@ -4433,6 +4439,14 @@ button[aria-label*="Menu"],
     padding-top: 2px;
     padding-bottom: 6px;
   }
+
+  
+        /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
+  #wiwts-client-records-view.wiwts-view-frontend-admin table thead th:nth-child(6),
+  #wiwts-client-records-view.wiwts-view-frontend-admin table tbody td:nth-child(6) {
+    display: none !important;
+  }
+
 }
 
 }
@@ -4482,13 +4496,18 @@ $out .= '<style>
   #meta-page {
     padding: 1.5rem 0 0 !important;
     position: relative !important;
-    left: -30px;
+    left: -27px;
   }
 
   #wiwts-client-records-view.wiwts-view-client table th,
   #wiwts-client-records-view.wiwts-view-client table td {
-    font-size: 12px;
+    font-size: 16px;
   }
+
+   #wiwts-client-records-view.wiw-client-timesheets table th,
+   #wiwts-client-records-view.wiw-client-timesheets table td {
+    font-size: 17px !important;
+}
 
   /* Show Actions column/buttons in client print output */
   #wiwts-client-records-view.wiwts-view-client .wiw-print-target .wiw-col-actions {
@@ -4504,6 +4523,12 @@ $out .= '<style>
   /* CLIENT PRINT ONLY: hide Clocked Hrs column (column #8) */
   #wiwts-client-records-view.wiwts-view-client .wiw-print-target table thead th:nth-child(8),
   #wiwts-client-records-view.wiwts-view-client .wiw-print-target table tbody td:nth-child(8) {
+    display: none !important;
+  }
+
+        /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
+  #wiwts-client-records-view.wiwts-view-frontend-admin table thead th:nth-child(6),
+  #wiwts-client-records-view.wiwts-view-frontend-admin table tbody td:nth-child(6) {
     display: none !important;
   }
 
