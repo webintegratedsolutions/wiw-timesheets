@@ -4382,12 +4382,6 @@ $out .= '<style>
   /* Hide Print button (keep Actions column visible for print) */
   #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
 
-    /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
-  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table thead th:nth-child(6),
-  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table tbody td:nth-child(6) {
-    display: none !important;
-  }
-
 /* Print: hide the top "Timesheets / location / approval deadline" block only */
 #wiwts-client-records-view > h3[style*="font-size:18px"] { 
   display: none !important; 
@@ -4439,14 +4433,6 @@ button[aria-label*="Menu"],
     padding-top: 2px;
     padding-bottom: 6px;
   }
-
-  
-        /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
-  #wiwts-client-records-view.wiwts-view-frontend-admin table thead th:nth-child(6),
-  #wiwts-client-records-view.wiwts-view-frontend-admin table tbody td:nth-child(6) {
-    display: none !important;
-  }
-
 }
 
 }
@@ -4496,18 +4482,13 @@ $out .= '<style>
   #meta-page {
     padding: 1.5rem 0 0 !important;
     position: relative !important;
-    left: -27px;
+    left: -30px;
   }
 
   #wiwts-client-records-view.wiwts-view-client table th,
   #wiwts-client-records-view.wiwts-view-client table td {
-    font-size: 16px;
+    font-size: 12px;
   }
-
-   #wiwts-client-records-view.wiw-client-timesheets table th,
-   #wiwts-client-records-view.wiw-client-timesheets table td {
-    font-size: 17px !important;
-}
 
   /* Show Actions column/buttons in client print output */
   #wiwts-client-records-view.wiwts-view-client .wiw-print-target .wiw-col-actions {
@@ -4523,12 +4504,6 @@ $out .= '<style>
   /* CLIENT PRINT ONLY: hide Clocked Hrs column (column #8) */
   #wiwts-client-records-view.wiwts-view-client .wiw-print-target table thead th:nth-child(8),
   #wiwts-client-records-view.wiwts-view-client .wiw-print-target table tbody td:nth-child(8) {
-    display: none !important;
-  }
-
-        /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
-  #wiwts-client-records-view.wiwts-view-frontend-admin table thead th:nth-child(6),
-  #wiwts-client-records-view.wiwts-view-frontend-admin table tbody td:nth-child(6) {
     display: none !important;
   }
 
@@ -6558,10 +6533,11 @@ function wiwts_build_auto_approve_dry_run_report(): string
         : $week_start_dt;
 
     /**
-     * CHANGE: Only shift the "Approval cutoff" forward by +7 days.
-     * Keep the "Next approval deadline" calculation exactly as it was (based on approval_week_start_dt).
+     * Approval cutoff should be the start of the approval week (Sunday),
+     * so entries dated before that Sunday (i.e., through the prior Saturday)
+     * are considered past due for auto-approval.
      */
-    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
+    $approval_cutoff_ymd = $approval_week_start_dt->format('Y-m-d');
 
     // Next approval deadline should remain based on the selected approval week start (UNCHANGED BEHAVIOR)
     $approval_deadline_dt = $approval_week_start_dt->modify('+9 days')->setTime(8, 0, 0);
@@ -6609,7 +6585,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
         ? $week_start_dt->modify('-7 days')
         : $week_start_dt;
 
-    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
+    $approval_cutoff_ymd = $approval_week_start_dt->format('Y-m-d');
 
     // Fetch the exact rows that would be auto-approved (read-only listing).
     $rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_cutoff_ymd, 200);
@@ -7072,7 +7048,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
         ? $week_start_dt->modify('-7 days')
         : $week_start_dt;
 
-    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
+    $approval_cutoff_ymd = $approval_week_start_dt->format('Y-m-d');
 
     $table_entries   = $wpdb->prefix . 'wiw_timesheet_entries';
     $table_timesheet = $wpdb->prefix . 'wiw_timesheets';
