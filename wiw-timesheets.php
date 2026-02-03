@@ -6533,10 +6533,11 @@ function wiwts_build_auto_approve_dry_run_report(): string
         : $week_start_dt;
 
     /**
-     * CHANGE: Only shift the "Approval cutoff" forward by +7 days.
-     * Keep the "Next approval deadline" calculation exactly as it was (based on approval_week_start_dt).
+     * Approval cutoff should be the start of the approval week (Sunday),
+     * so entries dated before that Sunday (i.e., through the prior Saturday)
+     * are considered past due for auto-approval.
      */
-    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
+    $approval_cutoff_ymd = $approval_week_start_dt->format('Y-m-d');
 
     // Next approval deadline should remain based on the selected approval week start (UNCHANGED BEHAVIOR)
     $approval_deadline_dt = $approval_week_start_dt->modify('+9 days')->setTime(8, 0, 0);
@@ -6584,7 +6585,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
         ? $week_start_dt->modify('-7 days')
         : $week_start_dt;
 
-    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
+    $approval_cutoff_ymd = $approval_week_start_dt->format('Y-m-d');
 
     // Fetch the exact rows that would be auto-approved (read-only listing).
     $rows = $this->wiwts_get_past_due_pending_entries_for_dry_run($approval_cutoff_ymd, 200);
@@ -7047,7 +7048,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
         ? $week_start_dt->modify('-7 days')
         : $week_start_dt;
 
-    $approval_cutoff_ymd = $approval_week_start_dt->modify('+7 days')->format('Y-m-d');
+    $approval_cutoff_ymd = $approval_week_start_dt->format('Y-m-d');
 
     $table_entries   = $wpdb->prefix . 'wiw_timesheet_entries';
     $table_timesheet = $wpdb->prefix . 'wiw_timesheets';
