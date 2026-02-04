@@ -4382,6 +4382,12 @@ $out .= '<style>
   /* Hide Print button (keep Actions column visible for print) */
   #wiwts-client-records-view .wiw-print-target .wiw-week-print-btn { display: none !important; }
 
+      /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table thead th:nth-child(6),
+  #wiwts-client-records-view.wiwts-view-client .wiw-print-target table tbody td:nth-child(6) {
+    display: none !important;
+  }
+
 /* Print: hide the top "Timesheets / location / approval deadline" block only */
 #wiwts-client-records-view > h3[style*="font-size:18px"] { 
   display: none !important; 
@@ -4415,6 +4421,22 @@ button[aria-label*="Menu"],
 .nav-toggle,
 .mobile-menu-toggle {
   display: none !important;
+}
+
+/* Print: ensure site logo remains visible (Safari can omit it when header/nav is hidden by theme print CSS) */
+#masthead,
+#site-navigation,
+#nav-menu-logo,
+#nav-menu-logo a,
+#nav-menu-logo img {
+  display: block !important;
+  visibility: visible !important;
+}
+
+#nav-menu-logo img {
+  max-height: 48px;
+  height: auto;
+  width: auto;
 }
 
 /* Client view only: approval line (print-only) */
@@ -4482,17 +4504,28 @@ $out .= '<style>
   #meta-page {
     padding: 1.5rem 0 0 !important;
     position: relative !important;
-    left: -30px;
+    left: -27px;
   }
 
   #wiwts-client-records-view.wiwts-view-client table th,
   #wiwts-client-records-view.wiwts-view-client table td {
-    font-size: 12px;
+    font-size: 16px;
   }
+
+     #wiwts-client-records-view.wiw-client-timesheets table th,
+   #wiwts-client-records-view.wiw-client-timesheets table td {
+    font-size: 17px !important;
+}
 
   /* Show Actions column/buttons in client print output */
   #wiwts-client-records-view.wiwts-view-client .wiw-print-target .wiw-col-actions {
     display: table-cell !important;
+  }
+
+          /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
+  #wiwts-client-records-view.wiwts-view-frontend-admin table thead th:nth-child(6),
+  #wiwts-client-records-view.wiwts-view-frontend-admin table tbody td:nth-child(6) {
+    display: none !important;
   }
 
   /* CLIENT PRINT ONLY: hide Break (Min) column (column #6) */
