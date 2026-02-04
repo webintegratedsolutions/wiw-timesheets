@@ -11,6 +11,52 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 trait WIW_Timesheet_Helpers_Trait {
 
+    private function round_up_minutes_to_quarter_hours( $minutes ) {
+        $minutes = (int) ceil( (float) $minutes );
+        if ( $minutes < 0 ) {
+            $minutes = 0;
+        }
+
+        $rounded_minutes = (int) ( ceil( $minutes / 15 ) * 15 );
+
+        return $rounded_minutes / 60;
+    }
+
+    private function round_down_minutes_to_quarter_hours( $minutes ) {
+        $minutes = (int) floor( (float) $minutes );
+        if ( $minutes < 0 ) {
+            $minutes = 0;
+        }
+
+        $rounded_minutes = (int) ( floor( $minutes / 15 ) * 15 );
+
+        return $rounded_minutes / 60;
+    }
+
+    private function round_up_seconds_to_quarter_hours( $seconds ) {
+        $minutes = (int) ceil( (float) $seconds / 60 );
+
+        return $this->round_up_minutes_to_quarter_hours( $minutes );
+    }
+
+    private function round_down_seconds_to_quarter_hours( $seconds ) {
+        $minutes = (int) floor( (float) $seconds / 60 );
+
+        return $this->round_down_minutes_to_quarter_hours( $minutes );
+    }
+
+    private function round_up_hours_to_quarter( $hours ) {
+        $minutes = (int) ceil( (float) $hours * 60 );
+
+        return $this->round_up_minutes_to_quarter_hours( $minutes );
+    }
+
+    private function round_down_hours_to_quarter( $hours ) {
+        $minutes = (int) floor( (float) $hours * 60 );
+
+        return $this->round_down_minutes_to_quarter_hours( $minutes );
+    }
+
     private function calculate_shift_duration_in_hours( $shift_entry ) {
         $start_time_utc = $shift_entry->start_time ?? '';
         $end_time_utc   = $shift_entry->end_time ?? '';
@@ -32,7 +78,7 @@ trait WIW_Timesheet_Helpers_Trait {
 
                 $seconds -= ( (int) $break_minutes * 60 );
 
-                $duration = round( max( 0, $seconds ) / 3600, 2 );
+                $duration = $this->round_up_seconds_to_quarter_hours( max( 0, $seconds ) );
             }
         } catch ( Exception $e ) {
             // Leave duration at 0.0
@@ -42,10 +88,10 @@ trait WIW_Timesheet_Helpers_Trait {
     }
 
     private function calculate_timesheet_duration_in_hours( $time_entry ) {
-        $duration = round( ( $time_entry->length ?? 0 ), 2 );
+        $duration = $this->round_up_hours_to_quarter( ( $time_entry->length ?? 0 ) );
 
         if ( $duration == 0 && isset( $time_entry->duration ) ) {
-            $duration = round( ( $time_entry->duration / 3600 ), 2 );
+            $duration = $this->round_up_seconds_to_quarter_hours( $time_entry->duration );
         }
 
         return max( 0.0, $duration );

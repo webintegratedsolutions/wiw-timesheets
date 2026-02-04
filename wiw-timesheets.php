@@ -1776,7 +1776,7 @@ $out .= '</tr>';
                                             $diff_minutes = (int) floor($diff_seconds / 60);
 
                                             if ($diff_minutes > 15) {
-                                                $diff_hours        = round($diff_seconds / 3600, 2);
+                                                $diff_hours        = $this->round_up_seconds_to_quarter_hours($diff_seconds);
                                                 $extra_hours_text  = number_format($diff_hours, 2);
                                                 $show_flag104_followup = true;
                                             }
@@ -2844,7 +2844,7 @@ function timeTo12h(v){
         }
 
         // Normalize to 2 decimals.
-        $new_payable = round((float) $new_payable, 2);
+        $new_payable = $this->round_down_hours_to_quarter((float) $new_payable);
 
         $wpdb->update(
             $table_entries,
@@ -5400,7 +5400,7 @@ $out .= '<div class="notice notice-warning wiwts-debug-approval-snapshot" style=
                                     if ($diff_seconds > 0) {
                                         $diff_minutes = floor($diff_seconds / 60);
                                         if ($diff_minutes > 15) {
-                                            $diff_hours = $diff_seconds / 3600;
+                                            $diff_hours = $this->round_up_seconds_to_quarter_hours($diff_seconds);
                                             $extra_hours_text = number_format($diff_hours, 2);
                                             $show_flag104_followup = true;
                                         }
@@ -6756,7 +6756,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
                             $diff_minutes_104 = (int) floor($diff_seconds_104 / 60);
 
                             if ($diff_minutes_104 > 15) {
-                                $extra_hours_104      = round($diff_seconds_104 / 3600, 2);
+                                $extra_hours_104      = $this->round_up_seconds_to_quarter_hours($diff_seconds_104);
                                 $show_flag104_preview = true;
                             }
                         }
@@ -6769,7 +6769,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
                     $current_payable_104 = isset($payable_hrs) ? (float) $payable_hrs : 0.0;
 
                     // Assumption: auto-confirm additional time => payable_hours increases by additional hours
-                    $new_payable_104 = round($current_payable_104 + (float) $extra_hours_104, 2);
+                    $new_payable_104 = $this->round_down_hours_to_quarter($current_payable_104 + (float) $extra_hours_104);
 
                     $auto_fix_104_lines   = array();
                     $auto_fix_104_lines[] = '<div style="font-weight:600; margin-bottom:6px;">Flag 104 Auto-fix Preview</div>';
@@ -6829,7 +6829,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
                                 $sec_fix = 0;
                             }
 
-                            $new_clocked_val = round($sec_fix / 3600, 2);
+                            $new_clocked_val = $this->round_up_seconds_to_quarter_hours($sec_fix);
                             $new_clocked     = number_format($new_clocked_val, 2, '.', '');
 
                             // Payable hours: clamp to scheduled window (when present) then - break
@@ -6867,7 +6867,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
                                         $psec_fix = 0;
                                     }
 
-                                    $new_payable_val = round($psec_fix / 3600, 2);
+                                    $new_payable_val = $this->round_down_seconds_to_quarter_hours($psec_fix);
                                 }
                             }
 
@@ -7202,7 +7202,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
                         $sec_fix = 0;
                     }
 
-                    $new_clocked_val = round($sec_fix / 3600, 2);
+                    $new_clocked_val = $this->round_up_seconds_to_quarter_hours($sec_fix);
 
                     $pay_in_fix  = $dt_in_fix;
                     $pay_out_fix = $dt_out_fix;
@@ -7232,7 +7232,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
                             $psec_fix = 0;
                         }
 
-                        $new_payable_val = round($psec_fix / 3600, 2);
+                        $new_payable_val = $this->round_down_seconds_to_quarter_hours($psec_fix);
                     }
                 }
             } catch (Exception $e) {
@@ -7282,7 +7282,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
                     if ($diff_seconds_104 > 0) {
                         $diff_minutes_104 = (int) floor($diff_seconds_104 / 60);
                         if ($diff_minutes_104 > 15) {
-                            $extra_hours_104 = round($diff_seconds_104 / 3600, 2);
+                            $extra_hours_104 = $this->round_up_seconds_to_quarter_hours($diff_seconds_104);
                         }
                     }
                 } catch (Exception $e) {
@@ -7291,7 +7291,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
             }
 
             if ($extra_hours_104 > 0.0) {
-                $new_payable_104 = round($payable_for_104 + $extra_hours_104, 2);
+                $new_payable_104 = $this->round_down_hours_to_quarter($payable_for_104 + $extra_hours_104);
 
                 $update_data['extra_time_status'] = 'confirmed';
                 $update_data['payable_hours'] = (float) $new_payable_104;
@@ -8864,7 +8864,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
             $seconds = 0;
         }
 
-        $clocked_hours = round($seconds / 3600, 2);
+        $clocked_hours = $this->round_up_seconds_to_quarter_hours($seconds);
 
         // ✅ NEW: Payable hours clamp to scheduled window (when present)
         $payable_hours = $clocked_hours;
@@ -8903,7 +8903,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                         $psec = 0;
                     }
 
-                    $payable_hours = round($psec / 3600, 2);
+                    $payable_hours = $this->round_down_seconds_to_quarter_hours($psec);
                 }
             }
         } catch (Exception $e) {
@@ -9162,7 +9162,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
             $dt_in  = new DateTime($new_clock_in, $tz);
             $dt_out = new DateTime($new_clock_out, $tz);
 
-            $total_minutes = (int) round(($dt_out->getTimestamp() - $dt_in->getTimestamp()) / 60);
+            $total_minutes = (int) ceil(($dt_out->getTimestamp() - $dt_in->getTimestamp()) / 60);
 
             if ($break_minutes < 0) {
                 $break_minutes = 0;
@@ -9172,7 +9172,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
             }
 
             $clocked_minutes = max(0, $total_minutes - $break_minutes);
-            $clocked_hours   = round($clocked_minutes / 60, 2);
+            $clocked_hours   = $this->round_up_minutes_to_quarter_hours($clocked_minutes);
 
             // Payable hours: clamp to scheduled window if present.
             $payable_hours = $clocked_hours;
@@ -9199,9 +9199,9 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                     }
 
                     if ($pay_out > $pay_in) {
-                        $pay_total_minutes = (int) round(($pay_out->getTimestamp() - $pay_in->getTimestamp()) / 60);
+                        $pay_total_minutes = (int) ceil(($pay_out->getTimestamp() - $pay_in->getTimestamp()) / 60);
                         $pay_minutes       = max(0, $pay_total_minutes - $break_minutes);
-                        $payable_hours     = round($pay_minutes / 60, 2);
+                        $payable_hours     = $this->round_down_minutes_to_quarter_hours($pay_minutes);
                     } else {
                         $payable_hours = 0.00;
                     }
@@ -9224,10 +9224,8 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                 $dt_out       = new DateTime($final_clock_out_str, $tz);
 
                 if ($dt_out > $dt_sched_end) {
-                    $additional_hours = round(
-                        ($dt_out->getTimestamp() - $dt_sched_end->getTimestamp()) / 3600,
-                        2
-                    );
+                    $additional_seconds = $dt_out->getTimestamp() - $dt_sched_end->getTimestamp();
+                    $additional_hours = $this->round_up_seconds_to_quarter_hours($additional_seconds);
                 }
             } catch (Exception $e) {
                 $additional_hours = 0.00;
@@ -9248,8 +9246,10 @@ public function wiw_format_edit_log_value_for_display(string $value): string
         );
 
         // If additional hours changed after being confirmed/denied, reset status back to unset.
-        $old_additional = isset($entry->additional_hours) ? round((float) $entry->additional_hours, 2) : 0.00;
-        $new_additional = round((float) $additional_hours, 2);
+        $old_additional = isset($entry->additional_hours)
+            ? $this->round_up_hours_to_quarter((float) $entry->additional_hours)
+            : 0.00;
+        $new_additional = $this->round_up_hours_to_quarter((float) $additional_hours);
         $extra_status   = isset($entry->extra_time_status) ? strtolower((string) $entry->extra_time_status) : 'unset';
 
         if ($extra_status !== 'unset' && $old_additional !== $new_additional) {
@@ -9395,7 +9395,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
         $wpdb->update(
             $table_headers,
             array(
-                'total_clocked_hours' => (float) round($total_clocked, 2),
+                'total_clocked_hours' => (float) $this->round_up_hours_to_quarter($total_clocked),
                 'updated_at'          => current_time('mysql'),
             ),
             array('id' => $timesheet_id),
@@ -9403,9 +9403,9 @@ public function wiw_format_edit_log_value_for_display(string $value): string
             array('%d')
         );
 
-        $clocked_hours_2  = (float) round($clocked_hours, 2);
-        $payable_hours_2  = (float) round($payable_hours, 2);
-        $total_clocked_2  = (float) round($total_clocked, 2);
+        $clocked_hours_2  = (float) $this->round_up_hours_to_quarter($clocked_hours);
+        $payable_hours_2  = (float) $this->round_down_hours_to_quarter($payable_hours);
+        $total_clocked_2  = (float) $this->round_up_hours_to_quarter($total_clocked);
 
         // ✅ After recalculating flags, return the current unresolved flag descriptions for this record
         $unresolved_flags = array();
@@ -9867,7 +9867,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                     $dt_out = new DateTime($new_clock_out_db, $tz);
 
                     if ($dt_out > $dt_in) {
-                        $total_minutes = (int) round(($dt_out->getTimestamp() - $dt_in->getTimestamp()) / 60);
+                        $total_minutes = (int) ceil(($dt_out->getTimestamp() - $dt_in->getTimestamp()) / 60);
 
                         if ($break_minutes < 0) {
                             $break_minutes = 0;
@@ -9879,7 +9879,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                             $adjusted_minutes = 0;
                         }
 
-                        $clocked_hours = round((float) ($adjusted_minutes / 60), 2);
+                        $clocked_hours = $this->round_up_minutes_to_quarter_hours($adjusted_minutes);
 
                         // Payable hours should match Sync behavior: actual worked window clamped to scheduled bounds, minus break.
                         // - If clock_out is before scheduled_end => payable is deducted.
@@ -9903,21 +9903,21 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                             }
 
                             if ($pay_end > $pay_start) {
-                                $payable_minutes_raw = (int) round(($pay_end->getTimestamp() - $pay_start->getTimestamp()) / 60);
+                                $payable_minutes_raw = (int) ceil(($pay_end->getTimestamp() - $pay_start->getTimestamp()) / 60);
                                 $payable_minutes     = max(0, $payable_minutes_raw - (int) $break_minutes);
-                                $payable_hours       = round((float) ($payable_minutes / 60), 2);
+                                $payable_hours       = $this->round_down_minutes_to_quarter_hours($payable_minutes);
 
                                 $did_recompute_hours = true;
                             } else {
                                 // If clamping results in invalid window, fall back to clocked logic.
                                 $payable_minutes = max(0, (int) $total_minutes - (int) $break_minutes);
-                                $payable_hours   = round((float) ($payable_minutes / 60), 2);
+                                $payable_hours   = $this->round_down_minutes_to_quarter_hours($payable_minutes);
                                 $did_recompute_hours = true;
                             }
                         } catch (Exception $e) {
                             // If schedule parse fails, fall back to clocked logic.
                             $payable_minutes = max(0, (int) $total_minutes - (int) $break_minutes);
-                            $payable_hours   = round((float) ($payable_minutes / 60), 2);
+                            $payable_hours   = $this->round_down_minutes_to_quarter_hours($payable_minutes);
                             $did_recompute_hours = true;
                         }
 
@@ -9927,7 +9927,8 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                             try {
                                 $dt_sched_end = new DateTime((string) $entry->scheduled_end, $tz);
                                 if ($dt_out > $dt_sched_end) {
-                                    $additional_hours = (float) (($dt_out->getTimestamp() - $dt_sched_end->getTimestamp()) / 3600);
+                                    $additional_seconds = $dt_out->getTimestamp() - $dt_sched_end->getTimestamp();
+                                    $additional_hours = $this->round_up_seconds_to_quarter_hours($additional_seconds);
                                 }
                             } catch (Exception $e) {
                                 // Keep additional_hours as 0.00
@@ -10052,10 +10053,14 @@ if (isset($scheduled_hours) && (float) $scheduled_hours > 0.0) {
     $scheduled_hours_for_write = (float) $scheduled_hours;
 
     if ($scheduled_hours_for_write > 5.0) {
-        $scheduled_hours_for_write = max(0.0, $scheduled_hours_for_write - 1.0);
+        $scheduled_minutes = (int) ceil($scheduled_hours_for_write * 60);
+        $scheduled_minutes = max(0, $scheduled_minutes - 60);
+        $scheduled_hours_for_write = $this->round_up_minutes_to_quarter_hours($scheduled_minutes);
+    } else {
+        $scheduled_hours_for_write = $this->round_up_hours_to_quarter($scheduled_hours_for_write);
     }
 
-    $update_data['scheduled_hours'] = (float) round($scheduled_hours_for_write, 2);
+    $update_data['scheduled_hours'] = (float) $scheduled_hours_for_write;
 }
 
                 $update_formats[] = '%f';
@@ -10490,7 +10495,7 @@ if (isset($scheduled_hours) && (float) $scheduled_hours > 0.0) {
 
             if ($sh_109 !== null && $ph_109 !== null) {
                 // Compare at 2dp to avoid float noise.
-                $new_109_status = (round($sh_109, 2) !== round($ph_109, 2)) ? 'active' : 'resolved';
+                $new_109_status = ($this->round_up_hours_to_quarter($sh_109) !== $this->round_down_hours_to_quarter($ph_109)) ? 'active' : 'resolved';
             }
 
             $rows_109 = $wpdb->update(
@@ -10546,7 +10551,7 @@ if (isset($scheduled_hours) && (float) $scheduled_hours > 0.0) {
                 $wpdb->update(
                     $table_headers,
                     array(
-                        'total_clocked_hours' => (float) round($total_clocked, 2),
+                        'total_clocked_hours' => (float) $this->round_up_hours_to_quarter($total_clocked),
 
                         // Reset should return approved timesheets to pending.
                         'status'              => 'pending',
@@ -10574,7 +10579,7 @@ if (isset($scheduled_hours) && (float) $scheduled_hours > 0.0) {
                             'break_minutes' => (int) $api_break,
                         ),
                     ),
-                    'total_clocked_hours' => (float) round($total_clocked, 2),
+                    'total_clocked_hours' => (float) $this->round_up_hours_to_quarter($total_clocked),
                 )
             );
         }

@@ -43,8 +43,8 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
 
     // Scheduled vs Payable mismatch (rounded to 2 decimals)
     if ( $scheduled_hours_local !== null && $payable_hours_local !== null ) {
-        $s = round( (float) $scheduled_hours_local, 2 );
-        $p = round( (float) $payable_hours_local, 2 );
+        $s = $this->round_up_hours_to_quarter( (float) $scheduled_hours_local );
+        $p = $this->round_down_hours_to_quarter( (float) $payable_hours_local );
         if ( $s !== $p ) {
             $active_flags['109'] = 'Scheduled Hours do not match Payable Hours';
         }
@@ -218,7 +218,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
             if ( property_exists( $time_entry, 'break_hours' ) && is_numeric( $time_entry->break_hours ) ) {
                 $break_hours = (float) $time_entry->break_hours;
                 if ( $break_hours > 0 ) {
-                    return (int) round( $break_hours * 60 );
+                    return (int) ceil( $break_hours * 60 );
                 }
                 return null;
             }
@@ -238,7 +238,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
             $end_raw   = (string) $end_raw;
 
             if ( $start_raw === '' || $end_raw === '' ) {
-                return round( max( 0.0, $fallback_hours ), 2 );
+                return $this->round_up_hours_to_quarter( max( 0.0, $fallback_hours ) );
             }
 
             try {
@@ -249,7 +249,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                 $dt_out->setTimezone( $wp_timezone );
 
                 if ( $dt_out <= $dt_in ) {
-                    return round( max( 0.0, $fallback_hours ), 2 );
+                    return $this->round_up_hours_to_quarter( max( 0.0, $fallback_hours ) );
                 }
 
                 $interval = $dt_in->diff( $dt_out );
@@ -260,9 +260,9 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                     $seconds = 0;
                 }
 
-                return round( $seconds / 3600, 2 );
+                return $this->round_down_seconds_to_quarter_hours( $seconds );
             } catch ( Exception $e ) {
-                return round( max( 0.0, $fallback_hours ), 2 );
+                return $this->round_up_hours_to_quarter( max( 0.0, $fallback_hours ) );
             }
         };
 
@@ -282,7 +282,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
 
             // If no actual clock range, fallback.
             if ( empty( $clock_in_local ) || empty( $clock_out_local ) ) {
-                return round( max( 0.0, $fallback_hours ), 2 );
+                return $this->round_up_hours_to_quarter( max( 0.0, $fallback_hours ) );
             }
 
             try {
@@ -293,7 +293,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                 $dt_out->setTimezone( $wp_timezone );
 
                 if ( $dt_out <= $dt_in ) {
-                    return round( max( 0.0, $fallback_hours ), 2 );
+                    return $this->round_up_hours_to_quarter( max( 0.0, $fallback_hours ) );
                 }
 
                 // Clamp payable start to scheduled_start if clock-in is earlier.
@@ -334,9 +334,9 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                     $seconds = 0;
                 }
 
-                return round( $seconds / 3600, 2 );
+                return $this->round_down_seconds_to_quarter_hours( $seconds );
             } catch ( Exception $e ) {
-                return round( max( 0.0, $fallback_hours ), 2 );
+                return $this->round_up_hours_to_quarter( max( 0.0, $fallback_hours ) );
             }
         };
 
@@ -487,8 +487,8 @@ $grouped[ $key ] = [
             $week_start_date = $bundle['week_start_date'];
             $week_end_date = date( 'Y-m-d', strtotime( $week_start_date . ' +13 days' ) );
 
-            $total_clocked_hours   = round( (float) $bundle['total_clocked_hours'], 2 );
-            $total_scheduled_hours = round( (float) $bundle['total_scheduled_hours'], 2 );
+            $total_clocked_hours   = $this->round_up_hours_to_quarter( (float) $bundle['total_clocked_hours'] );
+            $total_scheduled_hours = $this->round_up_hours_to_quarter( (float) $bundle['total_scheduled_hours'] );
 
             $header_id = $wpdb->get_var(
                 $wpdb->prepare(
@@ -633,7 +633,8 @@ $week_start_date
 
                 $clocked_hours_local = isset( $time_entry->_wiw_local_clocked_hours )
                     ? (float) $time_entry->_wiw_local_clocked_hours
-                    : round( (float) ( $time_entry->calculated_duration ?? 0.0 ), 2 );
+                    : (float) ( $time_entry->calculated_duration ?? 0.0 );
+                $clocked_hours_local = $this->round_up_hours_to_quarter( $clocked_hours_local );
 
                 $payable_hours_local = $compute_local_payable_hours(
                     $clock_in_local,
@@ -655,10 +656,8 @@ $week_start_date
                         $dt_clock_out->setTimezone( $wp_timezone );
 
                         if ( $dt_clock_out > $dt_sched_end ) {
-                            $additional_hours_local = round(
-                                ( $dt_clock_out->getTimestamp() - $dt_sched_end->getTimestamp() ) / 3600,
-                                2
-                            );
+                            $additional_seconds = $dt_clock_out->getTimestamp() - $dt_sched_end->getTimestamp();
+                            $additional_hours_local = $this->round_up_seconds_to_quarter_hours( $additional_seconds );
                         }
                     } catch ( Exception $e ) {
                         $additional_hours_local = 0.00;
@@ -670,6 +669,8 @@ $week_start_date
                 // Rule: Scheduled Hrs = (Scheduled End - Scheduled Start) span in hours,
                 // and if span exceeds 5.0 hours, automatically deduct 60 minutes (1.0 hour).
                 $scheduled_hours_local_for_entry = null;
+
+                $did_deduct_scheduled_break = false;
 
                 // Prefer scheduled span derived from scheduled_start/scheduled_end timestamps.
                 if ( ! empty( $scheduled_start_local ) && ! empty( $scheduled_end_local ) ) {
@@ -687,7 +688,16 @@ $week_start_date
                                 + ( (int) $diff->i * 60 )
                                 + ( (int) $diff->s );
 
-                            $scheduled_hours_local_for_entry = (float) ( $span_seconds / 3600 );
+                            $span_minutes = (int) ceil( $span_seconds / 60 );
+                            if ( $span_minutes < 0 ) {
+                                $span_minutes = 0;
+                            }
+                            if ( $span_minutes > 300 ) {
+                                $span_minutes = max( 0, $span_minutes - 60 );
+                                $did_deduct_scheduled_break = true;
+                            }
+
+                            $scheduled_hours_local_for_entry = $this->round_up_minutes_to_quarter_hours( $span_minutes );
                         } else {
                             $scheduled_hours_local_for_entry = 0.0;
                         }
@@ -698,18 +708,20 @@ $week_start_date
 
                 // Fallback to API durations if scheduled span is unavailable.
                 if ( $scheduled_hours_local_for_entry === null ) {
-                    $scheduled_hours_local_for_entry = (float) ( $time_entry->scheduled_duration ?? 0.0 );
+                    $scheduled_hours_local_for_entry = $this->round_up_hours_to_quarter( (float) ( $time_entry->scheduled_duration ?? 0.0 ) );
                     if ( $scheduled_hours_local_for_entry <= 0 ) {
-                        $scheduled_hours_local_for_entry = (float) ( $time_entry->calculated_duration ?? 0.0 );
+                        $scheduled_hours_local_for_entry = $this->round_up_hours_to_quarter( (float) ( $time_entry->calculated_duration ?? 0.0 ) );
                     }
                 }
 
                 // Apply auto-break deduction rule to Scheduled Hrs only (independent of break_minutes_local).
                 if ( $scheduled_hours_local_for_entry > 5.0 ) {
-                    $scheduled_hours_local_for_entry = max( 0.0, $scheduled_hours_local_for_entry - 1.0 );
-                }
+                    if ( ! $did_deduct_scheduled_break ) {
+                        $scheduled_minutes = (int) ceil( $scheduled_hours_local_for_entry * 60 );
+                        $scheduled_minutes = max( 0, $scheduled_minutes - 60 );
+                        $scheduled_hours_local_for_entry = $this->round_up_minutes_to_quarter_hours( $scheduled_minutes );
+                    }
 
-                if ( $scheduled_hours_local_for_entry > 5.0 ) {
                     $break_minutes_local = max( 60, $break_minutes_local );
                 }
 
@@ -727,12 +739,12 @@ $week_start_date
                     'scheduled_end'   => $scheduled_end_local,
 
                     'break_minutes'   => (int) $break_minutes_local,
-                     'scheduled_hours' => round( $scheduled_hours_local_for_entry, 2 ),
+                     'scheduled_hours' => $scheduled_hours_local_for_entry,
 
-                    'clocked_hours'   => round( $clocked_hours_local, 2 ),
-                    'payable_hours'   => round( $payable_hours_local, 2 ),
+                    'clocked_hours'   => $clocked_hours_local,
+                    'payable_hours'   => $payable_hours_local,
 
-                    'additional_hours'  => round( (float) $additional_hours_local, 2 ),
+                    'additional_hours'  => (float) $additional_hours_local,
                     'extra_time_status' => 'unset',
 
                     'status'          => 'pending',
@@ -912,8 +924,8 @@ $week_start_date
                 $wpdb->update(
                     $table_timesheets,
                     array(
-                        'total_clocked_hours'   => (float) round( (float) $totals->total_clocked, 2 ),
-                        'total_scheduled_hours' => (float) round( (float) $totals->total_scheduled, 2 ),
+                        'total_clocked_hours'   => (float) $this->round_up_hours_to_quarter( (float) $totals->total_clocked ),
+                        'total_scheduled_hours' => (float) $this->round_up_hours_to_quarter( (float) $totals->total_scheduled ),
                         'updated_at'            => $now,
                     ),
                     array( 'id' => $header_id ),
@@ -939,8 +951,8 @@ $week_start_date
                 $wpdb->update(
                     $table_timesheets,
                     array(
-                        'total_clocked_hours'   => (float) round( (float) $totals->total_clocked, 2 ),
-                        'total_scheduled_hours' => (float) round( (float) $totals->total_scheduled, 2 ),
+                        'total_clocked_hours'   => (float) $this->round_up_hours_to_quarter( (float) $totals->total_clocked ),
+                        'total_scheduled_hours' => (float) $this->round_up_hours_to_quarter( (float) $totals->total_scheduled ),
                         'updated_at'            => $now,
                     ),
                     array( 'id' => $header_id ),
