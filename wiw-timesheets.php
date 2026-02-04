@@ -2844,7 +2844,7 @@ function timeTo12h(v){
         }
 
         // Normalize to 2 decimals.
-        $new_payable = $this->round_down_hours_to_quarter((float) $new_payable);
+        $new_payable = $this->round_down_hours_to_hundredths((float) $new_payable);
 
         $wpdb->update(
             $table_entries,
@@ -6769,7 +6769,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
                     $current_payable_104 = isset($payable_hrs) ? (float) $payable_hrs : 0.0;
 
                     // Assumption: auto-confirm additional time => payable_hours increases by additional hours
-                    $new_payable_104 = $this->round_down_hours_to_quarter($current_payable_104 + (float) $extra_hours_104);
+                    $new_payable_104 = $this->round_down_hours_to_hundredths($current_payable_104 + (float) $extra_hours_104);
 
                     $auto_fix_104_lines   = array();
                     $auto_fix_104_lines[] = '<div style="font-weight:600; margin-bottom:6px;">Flag 104 Auto-fix Preview</div>';
@@ -6867,7 +6867,7 @@ private function wiwts_build_auto_approve_dry_run_payload(): array
                                         $psec_fix = 0;
                                     }
 
-                                    $new_payable_val = $this->round_down_seconds_to_quarter_hours($psec_fix);
+                                    $new_payable_val = $this->round_down_seconds_to_hundredths($psec_fix);
                                 }
                             }
 
@@ -7232,7 +7232,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
                             $psec_fix = 0;
                         }
 
-                        $new_payable_val = $this->round_down_seconds_to_quarter_hours($psec_fix);
+                        $new_payable_val = $this->round_down_seconds_to_hundredths($psec_fix);
                     }
                 }
             } catch (Exception $e) {
@@ -7291,7 +7291,7 @@ public function wiwts_run_auto_approve_past_due_with_autofix(): array
             }
 
             if ($extra_hours_104 > 0.0) {
-                $new_payable_104 = $this->round_down_hours_to_quarter($payable_for_104 + $extra_hours_104);
+                $new_payable_104 = $this->round_down_hours_to_hundredths($payable_for_104 + $extra_hours_104);
 
                 $update_data['extra_time_status'] = 'confirmed';
                 $update_data['payable_hours'] = (float) $new_payable_104;
@@ -8903,7 +8903,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                         $psec = 0;
                     }
 
-                    $payable_hours = $this->round_down_seconds_to_quarter_hours($psec);
+                    $payable_hours = $this->round_down_seconds_to_hundredths($psec);
                 }
             }
         } catch (Exception $e) {
@@ -9201,7 +9201,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                     if ($pay_out > $pay_in) {
                         $pay_total_minutes = (int) ceil(($pay_out->getTimestamp() - $pay_in->getTimestamp()) / 60);
                         $pay_minutes       = max(0, $pay_total_minutes - $break_minutes);
-                        $payable_hours     = $this->round_down_minutes_to_quarter_hours($pay_minutes);
+                        $payable_hours     = $this->round_down_minutes_to_hundredths($pay_minutes);
                     } else {
                         $payable_hours = 0.00;
                     }
@@ -9404,7 +9404,7 @@ public function wiw_format_edit_log_value_for_display(string $value): string
         );
 
         $clocked_hours_2  = (float) $this->round_up_hours_to_quarter($clocked_hours);
-        $payable_hours_2  = (float) $this->round_down_hours_to_quarter($payable_hours);
+        $payable_hours_2  = (float) $this->round_down_hours_to_hundredths($payable_hours);
         $total_clocked_2  = (float) $this->round_up_hours_to_quarter($total_clocked);
 
         // ✅ After recalculating flags, return the current unresolved flag descriptions for this record
@@ -9905,19 +9905,19 @@ public function wiw_format_edit_log_value_for_display(string $value): string
                             if ($pay_end > $pay_start) {
                                 $payable_minutes_raw = (int) ceil(($pay_end->getTimestamp() - $pay_start->getTimestamp()) / 60);
                                 $payable_minutes     = max(0, $payable_minutes_raw - (int) $break_minutes);
-                                $payable_hours       = $this->round_down_minutes_to_quarter_hours($payable_minutes);
+                                $payable_hours       = $this->round_down_minutes_to_hundredths($payable_minutes);
 
                                 $did_recompute_hours = true;
                             } else {
                                 // If clamping results in invalid window, fall back to clocked logic.
                                 $payable_minutes = max(0, (int) $total_minutes - (int) $break_minutes);
-                                $payable_hours   = $this->round_down_minutes_to_quarter_hours($payable_minutes);
+                                $payable_hours   = $this->round_down_minutes_to_hundredths($payable_minutes);
                                 $did_recompute_hours = true;
                             }
                         } catch (Exception $e) {
                             // If schedule parse fails, fall back to clocked logic.
                             $payable_minutes = max(0, (int) $total_minutes - (int) $break_minutes);
-                            $payable_hours   = $this->round_down_minutes_to_quarter_hours($payable_minutes);
+                            $payable_hours   = $this->round_down_minutes_to_hundredths($payable_minutes);
                             $did_recompute_hours = true;
                         }
 
@@ -10495,7 +10495,7 @@ if (isset($scheduled_hours) && (float) $scheduled_hours > 0.0) {
 
             if ($sh_109 !== null && $ph_109 !== null) {
                 // Compare at 2dp to avoid float noise.
-                $new_109_status = ($this->round_up_hours_to_quarter($sh_109) !== $this->round_down_hours_to_quarter($ph_109)) ? 'active' : 'resolved';
+                $new_109_status = ($this->round_up_hours_to_quarter($sh_109) !== $this->round_down_hours_to_hundredths($ph_109)) ? 'active' : 'resolved';
             }
 
             $rows_109 = $wpdb->update(

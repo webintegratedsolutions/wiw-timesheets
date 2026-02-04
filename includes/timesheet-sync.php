@@ -44,7 +44,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
     // Scheduled vs Payable mismatch (rounded to 2 decimals)
     if ( $scheduled_hours_local !== null && $payable_hours_local !== null ) {
         $s = $this->round_up_hours_to_quarter( (float) $scheduled_hours_local );
-        $p = $this->round_down_hours_to_quarter( (float) $payable_hours_local );
+        $p = $this->round_down_hours_to_hundredths( (float) $payable_hours_local );
         if ( $s !== $p ) {
             $active_flags['109'] = 'Scheduled Hours do not match Payable Hours';
         }
@@ -260,7 +260,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                     $seconds = 0;
                 }
 
-                return $this->round_down_seconds_to_quarter_hours( $seconds );
+                return $this->round_down_seconds_to_hundredths( $seconds );
             } catch ( Exception $e ) {
                 return $this->round_up_hours_to_quarter( max( 0.0, $fallback_hours ) );
             }
@@ -334,7 +334,7 @@ private function wiwts_sync_store_time_flags( $wiw_time_id, $clock_in_local, $cl
                     $seconds = 0;
                 }
 
-                return $this->round_down_seconds_to_quarter_hours( $seconds );
+                return $this->round_down_seconds_to_hundredths( $seconds );
             } catch ( Exception $e ) {
                 return $this->round_up_hours_to_quarter( max( 0.0, $fallback_hours ) );
             }

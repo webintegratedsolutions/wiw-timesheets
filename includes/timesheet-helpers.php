@@ -33,6 +33,17 @@ trait WIW_Timesheet_Helpers_Trait {
         return $rounded_minutes / 60;
     }
 
+    private function round_down_minutes_to_hundredths( $minutes ) {
+        $minutes = (int) floor( (float) $minutes );
+        if ( $minutes < 0 ) {
+            $minutes = 0;
+        }
+
+        $hours = $minutes / 60;
+
+        return floor( $hours * 100 ) / 100;
+    }
+
     private function round_up_seconds_to_quarter_hours( $seconds ) {
         $minutes = (int) ceil( (float) $seconds / 60 );
 
@@ -45,6 +56,12 @@ trait WIW_Timesheet_Helpers_Trait {
         return $this->round_down_minutes_to_quarter_hours( $minutes );
     }
 
+    private function round_down_seconds_to_hundredths( $seconds ) {
+        $minutes = (int) floor( (float) $seconds / 60 );
+
+        return $this->round_down_minutes_to_hundredths( $minutes );
+    }
+
     private function round_up_hours_to_quarter( $hours ) {
         $minutes = (int) ceil( (float) $hours * 60 );
 
@@ -55,6 +72,15 @@ trait WIW_Timesheet_Helpers_Trait {
         $minutes = (int) floor( (float) $hours * 60 );
 
         return $this->round_down_minutes_to_quarter_hours( $minutes );
+    }
+
+    private function round_down_hours_to_hundredths( $hours ) {
+        $hours = (float) $hours;
+        if ( $hours < 0 ) {
+            $hours = 0.0;
+        }
+
+        return floor( $hours * 100 ) / 100;
     }
 
     private function calculate_shift_duration_in_hours( $shift_entry ) {
